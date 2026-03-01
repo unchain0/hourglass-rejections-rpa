@@ -10,8 +10,10 @@ import (
 	"syscall"
 
 	"hourglass-rejeicoes-rpa/internal/config"
+	"hourglass-rejeicoes-rpa/internal/logger"
 	"hourglass-rejeicoes-rpa/internal/rpa"
 	"hourglass-rejeicoes-rpa/internal/scheduler"
+	"hourglass-rejeicoes-rpa/internal/sentry"
 	"hourglass-rejeicoes-rpa/internal/storage"
 )
 
@@ -22,8 +24,13 @@ func main() {
 	)
 	flag.Parse()
 
-	// Initialize logger
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// Initialize logger with charmbracelet/log
+	logCfg := logger.ForTerminal()
+	logCfg.Level = os.Getenv("LOG_LEVEL")
+	if logCfg.Level == "" {
+		logCfg.Level = "info"
+	}
+	logger := logger.New(logCfg)
 	slog.SetDefault(logger)
 
 	// Load configuration
@@ -31,6 +38,19 @@ func main() {
 	if err != nil {
 		logger.Error("failed to load configuration", "error", err)
 		os.Exit(1)
+	}
+
+	// Initialize Sentry
+	sentryClient, err := sentry.New(sentry.Config{
+		DSN:         cfg.SentryDSN,
+		Environment: cfg.SentryEnvironment,
+		Release:     "1.0.0",
+	})
+	if err != nil {
+		logger.Error("failed to initialize sentry", "error", err)
+	} else if sentryClient.IsEnabled() {
+		logger.Info("sentry initialized successfully")
+		defer sentryClient.Close()
 	}
 
 	logger.Info("starting hourglass-rejeicoes-rpa",
@@ -89,9 +109,9 @@ func runSetupMode(ctx context.Context, browser *rpa.Browser, loginManager *rpa.L
 	}
 
 	// Wait for user to complete login manually
-	fmt.Println("Please complete the login in the browser window...")
-	fmt.Println("Press Enter when done to save cookies...")
-	fmt.Scanln()
+	if err := loginManager.WaitForManualLogin(ctx); err != nil {
+		return fmt.Errorf("failed to wait for manual login: %w", err)
+	}
 
 	if err := loginManager.SaveCookies(ctx); err != nil {
 		return fmt.Errorf("failed to save cookies: %w", err)

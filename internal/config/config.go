@@ -14,6 +14,10 @@ type Config struct {
 	ScheduleMorning string        `env:"SCHEDULE_MORNING" envDefault:"0 9 * * *"`
 	ScheduleEvening string        `env:"SCHEDULE_EVENING" envDefault:"0 17 * * *"`
 	Timeout         time.Duration `env:"TIMEOUT" envDefault:"60s"`
+	
+	// Sentry configuration
+	SentryDSN         string `env:"SENTRY_DSN"`
+	SentryEnvironment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`
 }
 
 func Load() (*Config, error) {
