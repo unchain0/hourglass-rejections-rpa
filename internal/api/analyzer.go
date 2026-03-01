@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"hourglass-rejeicoes-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/domain"
 )
 
 // APIAnalyzer uses the Hourglass REST API to detect rejections.
