@@ -7,7 +7,7 @@ import (
 )
 
 type Config struct {
-	HourglassURL    string        `env:"HOURGLASS_URL" envDefault:"https://hourglass.petrobras.com"`
+	HourglassURL    string        `env:"HOURGLASS_URL" envDefault:"https://app.hourglass-app.com/v2/page/app"`
 	CookieFile      string        `env:"COOKIE_FILE" envDefault:"cookies.json"`
 	OutputDir       string        `env:"OUTPUT_DIR" envDefault:"./outputs"`
 	Debug           bool          `env:"DEBUG" envDefault:"false"`

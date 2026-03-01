@@ -35,7 +35,7 @@ func (lm *LoginManager) SetupMode(ctx context.Context) error {
 // PerformLogin navigates to Hourglass and waits for manual authentication.
 // In debug mode, it opens a visible browser for manual login.
 func (lm *LoginManager) PerformLogin(ctx context.Context) error {
-	url := "https://hourglass.petrobras.com"
+	url := "https://app.hourglass-app.com/v2/page/app"
 
 	err := chromedp.Run(lm.browser.Context(),
 		chromedp.Navigate(url),
@@ -97,7 +97,7 @@ func (lm *LoginManager) LoadCookies(ctx context.Context) error {
 
 	// Navigate to domain first (required before setting cookies)
 	err = chromedp.Run(lm.browser.Context(),
-		chromedp.Navigate("https://hourglass.petrobras.com"),
+		chromedp.Navigate("https://app.hourglass-app.com/v2/page/app"),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to navigate before setting cookies: %w", err)
@@ -137,7 +137,7 @@ func (lm *LoginManager) IsAuthenticated(ctx context.Context) (bool, error) {
 	// Try to find an element that only appears when logged in
 	// This could be the AG-Grid or a user menu
 	err := chromedp.Run(lm.browser.Context(),
-		chromedp.Navigate("https://hourglass.petrobras.com"),
+		chromedp.Navigate("https://app.hourglass-app.com/v2/page/app"),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Check for login indicator (e.g., specific element)
 			// This is a placeholder - adjust selector based on actual site

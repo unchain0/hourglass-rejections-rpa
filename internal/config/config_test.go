@@ -16,7 +16,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
 
-	assert.Equal(t, "https://hourglass.petrobras.com", cfg.HourglassURL)
+	assert.Equal(t, "https://app.hourglass-app.com/v2/page/app", cfg.HourglassURL)
 	assert.Equal(t, "cookies.json", cfg.CookieFile)
 	assert.Equal(t, "./outputs", cfg.OutputDir)
 	assert.Equal(t, false, cfg.Debug)

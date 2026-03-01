@@ -78,7 +78,7 @@ func (a *Analyzer) AnalyzeSection(ctx context.Context, section string) (*domain.
 // navigateToSection navigates to the specific section in Hourglass.
 func (a *Analyzer) navigateToSection(ctx context.Context, section string) error {
 	// Navigate to base URL first
-	url := "https://hourglass.petrobras.com"
+	url := "https://app.hourglass-app.com/v2/page/app"
 
 	err := chromedp.Run(a.browser.Context(),
 		chromedp.Navigate(url),

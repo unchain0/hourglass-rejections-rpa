@@ -6,23 +6,28 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/log"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Config holds logger configuration.
 type Config struct {
 	Level      string
-	Format     string // "json" or "text"
+	Format     string // "json", "text", "pretty", or "charm"
 	Output     string // "stdout", "stderr", or file path
 	MaxSize    int    // megabytes
 	MaxBackups int
 	MaxAge     int // days
 	Compress   bool
+	NoColor    bool // Disable colors
 }
 
-// New creates a new slog.Logger with the given configuration.
+// New creates a new logger with the given configuration.
+// Supports multiple formats:
+//   - "charm" or "pretty": Beautiful colored output using charmbracelet/log
+//   - "text": Standard text format
+//   - "json": JSON format for structured logging
 func New(cfg Config) *slog.Logger {
-	var handler slog.Handler
 	var output io.Writer
 
 	// Determine output
@@ -51,18 +56,37 @@ func New(cfg Config) *slog.Logger {
 	// Parse level
 	level := parseLevel(cfg.Level)
 
-	// Create handler
-	opts := &slog.HandlerOptions{
-		Level: level,
+	// Create logger based on format
+	switch cfg.Format {
+	case "charm", "pretty":
+		// Use charmbracelet/log for beautiful terminal output
+		logger := log.New(output)
+		logger.SetLevel(charmLevel(level))
+		if cfg.NoColor || os.Getenv("NO_COLOR") != "" {
+			logger.SetStyles(log.DefaultStylesWithoutColor())
+		}
+		return slog.New(logger)
+	case "text":
+		return slog.New(slog.NewTextHandler(output, &slog.HandlerOptions{Level: level}))
+	default:
+		return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: level}))
 	}
+}
 
-	if cfg.Format == "text" {
-		handler = slog.NewTextHandler(output, opts)
-	} else {
-		handler = slog.NewJSONHandler(output, opts)
+// charmLevel converts slog.Level to charmbracelet/log Level.
+func charmLevel(level slog.Level) log.Level {
+	switch level {
+	case slog.LevelDebug:
+		return log.DebugLevel
+	case slog.LevelInfo:
+		return log.InfoLevel
+	case slog.LevelWarn:
+		return log.WarnLevel
+	case slog.LevelError:
+		return log.ErrorLevel
+	default:
+		return log.InfoLevel
 	}
-
-	return slog.New(handler)
 }
 
 // parseLevel parses a level string into slog.Level.
@@ -85,11 +109,36 @@ func parseLevel(level string) slog.Level {
 func DefaultConfig() Config {
 	return Config{
 		Level:      "info",
-		Format:     "json",
+		Format:     "charm", // Use charmbracelet/log by default
 		Output:     "stdout",
 		MaxSize:    10,
 		MaxBackups: 3,
 		MaxAge:     7,
 		Compress:   true,
+		NoColor:    false,
+	}
+}
+
+// ForTerminal returns a config optimized for terminal output.
+func ForTerminal() Config {
+	return Config{
+		Level:   "info",
+		Format:  "charm",
+		Output:  "stdout",
+		NoColor: false,
+	}
+}
+
+// ForFile returns a config optimized for file output.
+func ForFile(path string) Config {
+	return Config{
+		Level:      "info",
+		Format:     "json",
+		Output:     path,
+		MaxSize:    10,
+		MaxBackups: 5,
+		MaxAge:     30,
+		Compress:   true,
+		NoColor:    true,
 	}
 }
