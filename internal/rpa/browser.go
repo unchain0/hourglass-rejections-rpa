@@ -30,7 +30,7 @@ func (b *Browser) Setup() error {
 
 	// Support debug mode (headless=false when DEBUG=true)
 	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
-		opts = append(opts, chromedp.NoHeadless)
+		opts = append(opts, chromedp.Flag("headless", false))
 	}
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
