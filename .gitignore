@@ -1,0 +1,6 @@
+cookies.json
+*.json
+outputs/
+*.log
+.env
+.env.local
