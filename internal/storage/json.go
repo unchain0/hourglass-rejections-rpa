@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,7 +14,12 @@ import (
 	"hourglass-rejeicoes-rpa/internal/domain"
 )
 
+var (
+	jsonMarshalIndent = json.MarshalIndent
+)
+
 type FileStorage struct {
+
 	outputDir  string
 	cookieFile string
 }
@@ -46,10 +52,11 @@ func (fs *FileStorage) Save(ctx context.Context, rejeicoes []domain.Rejeicao) er
 }
 
 func (fs *FileStorage) saveJSON(filename string, rejeicoes []domain.Rejeicao) error {
-	data, err := json.MarshalIndent(rejeicoes, "", "  ")
+	data, err := jsonMarshalIndent(rejeicoes, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
+
 
 	if err := os.WriteFile(filename, data, 0644); err != nil {
 		return fmt.Errorf("failed to write JSON file: %w", err)
@@ -65,8 +72,11 @@ func (fs *FileStorage) saveCSV(filename string, rejeicoes []domain.Rejeicao) err
 	}
 	defer file.Close()
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
+	return fs.writeCSV(file, rejeicoes)
+}
+
+func (fs *FileStorage) writeCSV(w io.Writer, rejeicoes []domain.Rejeicao) error {
+	writer := csv.NewWriter(w)
 
 	// Header
 	header := []string{"secao", "quem", "oque", "pra_quando", "timestamp"}
@@ -86,6 +96,11 @@ func (fs *FileStorage) saveCSV(filename string, rejeicoes []domain.Rejeicao) err
 		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("failed to flush CSV writer: %w", err)
 	}
 
 	return nil
@@ -109,10 +124,11 @@ func (fs *FileStorage) LoadCookies() ([]domain.Cookie, error) {
 }
 
 func (fs *FileStorage) SaveCookies(cookies []domain.Cookie) error {
-	data, err := json.MarshalIndent(cookies, "", "  ")
+	data, err := jsonMarshalIndent(cookies, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal cookies: %w", err)
 	}
+
 
 	if err := os.WriteFile(fs.cookieFile, data, 0644); err != nil {
 		return fmt.Errorf("failed to write cookie file: %w", err)

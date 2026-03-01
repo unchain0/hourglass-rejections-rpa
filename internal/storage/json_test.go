@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -108,12 +109,68 @@ func TestFileStorage_Save_Error(t *testing.T) {
 	readOnlyDir := filepath.Join(tempDir, "readonly")
 	err = os.Mkdir(readOnlyDir, 0555)
 	require.NoError(t, err)
-
 	fs = &FileStorage{
 		outputDir: readOnlyDir,
 	}
 	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write JSON file")
+
+	// Test Save error from saveCSV
+	tempDir3, err := os.MkdirTemp("", "storage_test_csv_error_save")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir3)
+
+	// We need to know the timestamp to pre-create the CSV directory
+	timestamp := time.Now().Format("20060102_1504")
+	csvDir := filepath.Join(tempDir3, fmt.Sprintf("rejeicoes_%s.csv", timestamp))
+	err = os.MkdirAll(csvDir, 0755)
+	require.NoError(t, err)
+
+	fs = &FileStorage{
+		outputDir: tempDir3,
+	}
+	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create CSV file")
+}
+
+
+
+func TestFileStorage_Save_CSVError(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "storage_test_save_csv_error")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fs := &FileStorage{
+		outputDir: tempDir,
+	}
+
+	// Pre-create a directory with the name that Save will try to use for the CSV file
+	timestamp := time.Now().Format("20060102_1504")
+	csvDir := filepath.Join(tempDir, fmt.Sprintf("rejeicoes_%s.csv", timestamp))
+	err = os.MkdirAll(csvDir, 0755)
+	require.NoError(t, err)
+
+	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create CSV file")
+}
+
+
+func TestFileStorage_SaveCSV_Error(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "storage_csv_error")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fs := &FileStorage{
+		outputDir: tempDir,
+	}
+
+	// Test os.Create error
+	err = fs.saveCSV(tempDir, []domain.Rejeicao{{}}) // tempDir is a directory, os.Create(tempDir) should fail
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create CSV file")
 }
 
 func TestFileStorage_Cookies(t *testing.T) {
@@ -157,5 +214,86 @@ func TestFileStorage_Cookies(t *testing.T) {
 	err = os.WriteFile(cookieFile, []byte("invalid json"), 0644)
 	require.NoError(t, err)
 	_, err = fs.LoadCookies()
+	assert.Error(t, err)
+	// Test Load Error (not exist is handled, but other errors)
+	dirAsFile := filepath.Join(tempDir, "dir_as_file")
+	err = os.Mkdir(dirAsFile, 0755)
+	require.NoError(t, err)
+	fsErrRead := &FileStorage{
+		cookieFile: dirAsFile,
+	}
+	_, err = fsErrRead.LoadCookies()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read cookie file")
+
+}
+
+type errorWriter struct{}
+
+func (e *errorWriter) Write(p []byte) (n int, err error) {
+	return 0, fmt.Errorf("write error")
+}
+
+func TestFileStorage_WriteCSV_Error(t *testing.T) {
+	fs := &FileStorage{}
+	err := fs.writeCSV(&errorWriter{}, []domain.Rejeicao{{}})
+	assert.Error(t, err)
+}
+
+
+func TestFileStorage_MarshalError(t *testing.T) {
+	old := jsonMarshalIndent
+	jsonMarshalIndent = func(v interface{}, prefix, indent string) ([]byte, error) {
+		return nil, fmt.Errorf("marshal error")
+	}
+	defer func() { jsonMarshalIndent = old }()
+
+	fs := &FileStorage{}
+	
+	// Test saveJSON marshal error
+	err := fs.saveJSON("test.json", []domain.Rejeicao{{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal JSON")
+
+	// Test SaveCookies marshal error
+	err = fs.SaveCookies([]domain.Cookie{{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal cookies")
+}
+
+
+
+type limitedErrorWriter struct {
+	limit int
+	count int
+}
+
+func (w *limitedErrorWriter) Write(p []byte) (n int, err error) {
+	w.count += len(p)
+	if w.count > w.limit {
+		return 0, fmt.Errorf("write error")
+	}
+	return len(p), nil
+}
+
+func TestFileStorage_WriteCSV_LimitedError(t *testing.T) {
+	fs := &FileStorage{}
+	rejeicoes := []domain.Rejeicao{{Secao: "test"}}
+	
+	// Fail during header write (if it exceeds buffer, but it won't)
+	// Fail during row write
+	err := fs.writeCSV(&limitedErrorWriter{limit: 10}, rejeicoes)
+	assert.Error(t, err)
+}
+
+func TestFileStorage_WriteCSV_WriteError(t *testing.T) {
+	fs := &FileStorage{}
+	rejeicoes := make([]domain.Rejeicao, 1000)
+	for i := range rejeicoes {
+		rejeicoes[i] = domain.Rejeicao{
+			Secao: "Very long section name to fill the buffer quickly and trigger a write to the underlying writer",
+		}
+	}
+	err := fs.writeCSV(&errorWriter{}, rejeicoes)
 	assert.Error(t, err)
 }
