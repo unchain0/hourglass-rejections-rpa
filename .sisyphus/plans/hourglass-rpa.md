@@ -758,7 +758,7 @@ internal/
 > Cada task inclui: implementação + testes (quando aplicável)
 > Cada task tem cenários de QA obrigatórios
 
-- [ ] 1. Setup Inicial do Projeto
+- [x] 1. Setup Inicial do Projeto
 
   **O que fazer**:
   - Inicializar módulo Go: `go mod init hourglass-rejeicoes-rpa`
@@ -843,7 +843,7 @@ internal/
 
 ---
 
-- [ ] 2. Domain Models e Interfaces
+- [x] 2. Domain Models e Interfaces
 
   **O que fazer**:
   - Criar `internal/domain/types.go` com structs:
