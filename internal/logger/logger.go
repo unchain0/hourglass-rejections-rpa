@@ -23,10 +23,6 @@ type Config struct {
 }
 
 // New creates a new logger with the given configuration.
-// Supports multiple formats:
-//   - "charm" or "pretty": Beautiful colored output using charmbracelet/log
-//   - "text": Standard text format
-//   - "json": JSON format for structured logging
 func New(cfg Config) *slog.Logger {
 	var output io.Writer
 
@@ -39,7 +35,6 @@ func New(cfg Config) *slog.Logger {
 	case "":
 		output = os.Stdout
 	default:
-		// File output with rotation
 		dir := filepath.Dir(cfg.Output)
 		if dir != "" && dir != "." {
 			os.MkdirAll(dir, 0755)
@@ -59,12 +54,8 @@ func New(cfg Config) *slog.Logger {
 	// Create logger based on format
 	switch cfg.Format {
 	case "charm", "pretty":
-		// Use charmbracelet/log for beautiful terminal output
 		logger := log.New(output)
 		logger.SetLevel(charmLevel(level))
-		if cfg.NoColor || os.Getenv("NO_COLOR") != "" {
-			logger.SetStyles(log.DefaultStylesWithoutColor())
-		}
 		return slog.New(logger)
 	case "text":
 		return slog.New(slog.NewTextHandler(output, &slog.HandlerOptions{Level: level}))
@@ -73,7 +64,6 @@ func New(cfg Config) *slog.Logger {
 	}
 }
 
-// charmLevel converts slog.Level to charmbracelet/log Level.
 func charmLevel(level slog.Level) log.Level {
 	switch level {
 	case slog.LevelDebug:
@@ -89,7 +79,6 @@ func charmLevel(level slog.Level) log.Level {
 	}
 }
 
-// parseLevel parses a level string into slog.Level.
 func parseLevel(level string) slog.Level {
 	switch level {
 	case "debug":
@@ -109,7 +98,7 @@ func parseLevel(level string) slog.Level {
 func DefaultConfig() Config {
 	return Config{
 		Level:      "info",
-		Format:     "charm", // Use charmbracelet/log by default
+		Format:     "charm",
 		Output:     "stdout",
 		MaxSize:    10,
 		MaxBackups: 3,

@@ -3,6 +3,7 @@ package rpa
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -12,39 +13,88 @@ import (
 	"hourglass-rejeicoes-rpa/internal/domain"
 )
 
+// HourglassBaseURL is the base URL for the Hourglass application
+const HourglassBaseURL = "https://app.hourglass-app.com/v2/page/app"
+
 // LoginManager handles authentication and cookie persistence for Hourglass.
 type LoginManager struct {
-	browser *Browser
-	storage domain.Storage
+	browser  *Browser
+	storage  domain.Storage
+	email    string
+	password string
 }
 
 // NewLoginManager creates a new LoginManager instance.
 func NewLoginManager(browser *Browser, storage domain.Storage) *LoginManager {
 	return &LoginManager{
-		browser: browser,
-		storage: storage,
+		browser:  browser,
+		storage:  storage,
+		email:    os.Getenv("HOURGLASS_EMAIL"),
+		password: os.Getenv("HOURGLASS_PASSWORD"),
 	}
 }
 
 // SetupMode runs the browser in non-headless mode for manual login.
-// This should be used locally to authenticate and save cookies.
 func (lm *LoginManager) SetupMode(ctx context.Context) error {
 	return lm.browser.Setup()
 }
 
-// PerformLogin navigates to Hourglass and waits for manual authentication.
-// In debug mode, it opens a visible browser for manual login.
+// PerformLogin performs automatic login with email/password or Google OAuth.
 func (lm *LoginManager) PerformLogin(ctx context.Context) error {
-	url := "https://app.hourglass-app.com/v2/page/app"
+	// Check if we should use Google OAuth
+	if os.Getenv("HOURGLASS_USE_GOOGLE") == "true" {
+		return lm.performGoogleLogin(ctx)
+	}
+	
+	// Use email/password login
+	return lm.performEmailLogin(ctx)
+}
 
-	err := chromedp.Run(lm.browser.Context(),
-		chromedp.Navigate(url),
-		chromedp.WaitVisible("body", chromedp.ByQuery),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to navigate to Hourglass: %w", err)
+// performEmailLogin logs in using email and password fields.
+func (lm *LoginManager) performEmailLogin(ctx context.Context) error {
+	if lm.email == "" || lm.password == "" {
+		return fmt.Errorf("HOURGLASS_EMAIL and HOURGLASS_PASSWORD must be set for automatic login")
 	}
 
+	err := chromedp.Run(lm.browser.Context(),
+		chromedp.Navigate(HourglassBaseURL),
+		chromedp.WaitVisible("#email", chromedp.ByID),
+		chromedp.SendKeys("#email", lm.email, chromedp.ByID),
+		chromedp.SendKeys("#password", lm.password, chromedp.ByID),
+		chromedp.Click("button[type='submit']", chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second), // Wait for login to complete
+	)
+	if err != nil {
+		return fmt.Errorf("failed to perform email login: %w", err)
+	}
+
+	return nil
+}
+
+// performGoogleLogin initiates Google OAuth login.
+func (lm *LoginManager) performGoogleLogin(ctx context.Context) error {
+	// Click on Google Sign-In button
+	err := chromedp.Run(lm.browser.Context(),
+		chromedp.Navigate(HourglassBaseURL),
+		chromedp.WaitVisible(".gsi-material-button", chromedp.ByQuery),
+		chromedp.Click(".gsi-material-button", chromedp.ByQuery),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initiate Google login: %w", err)
+	}
+
+	return nil
+}
+
+// WaitForManualLogin waits for user to complete login manually (for setup mode).
+func (lm *LoginManager) WaitForManualLogin(ctx context.Context) error {
+	fmt.Println("\n📝 Complete o login manualmente no navegador...")
+	fmt.Println("   - Use email/senha, Google ou Apple")
+	fmt.Println("   - Após fazer login, pressione ENTER aqui para salvar os cookies")
+	fmt.Print("\n➤ Pressione ENTER quando o login estiver completo...")
+	
+	fmt.Scanln()
+	
 	return nil
 }
 
@@ -81,6 +131,7 @@ func (lm *LoginManager) SaveCookies(ctx context.Context) error {
 		return fmt.Errorf("failed to save cookies: %w", err)
 	}
 
+	fmt.Printf("✅ %d cookies salvos com sucesso!\n", len(domainCookies))
 	return nil
 }
 
@@ -97,7 +148,7 @@ func (lm *LoginManager) LoadCookies(ctx context.Context) error {
 
 	// Navigate to domain first (required before setting cookies)
 	err = chromedp.Run(lm.browser.Context(),
-		chromedp.Navigate("https://app.hourglass-app.com/v2/page/app"),
+		chromedp.Navigate(HourglassBaseURL),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to navigate before setting cookies: %w", err)
@@ -129,25 +180,23 @@ func (lm *LoginManager) LoadCookies(ctx context.Context) error {
 	return nil
 }
 
-// IsAuthenticated checks if the current session is valid.
-// It looks for specific elements that indicate successful login.
+// IsAuthenticated checks if the current session is valid by looking for dashboard elements.
 func (lm *LoginManager) IsAuthenticated(ctx context.Context) (bool, error) {
-	var authenticated bool
+	var isLoggedIn bool
 
-	// Try to find an element that only appears when logged in
-	// This could be the AG-Grid or a user menu
 	err := chromedp.Run(lm.browser.Context(),
-		chromedp.Navigate("https://app.hourglass-app.com/v2/page/app"),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			// Check for login indicator (e.g., specific element)
-			// This is a placeholder - adjust selector based on actual site
-			authenticated = true
-			return nil
-		}),
+		chromedp.Navigate(HourglassBaseURL),
+		chromedp.Sleep(2*time.Second),
+		chromedp.Evaluate(`
+			// Check if we're on the login page or already logged in
+			const loginForm = document.querySelector('#email');
+			const dashboard = document.querySelector('.dashboard, .app-container, nav, [data-testid="dashboard"]');
+			!loginForm && !!dashboard
+		`, &isLoggedIn),
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to check authentication: %w", err)
 	}
 
-	return authenticated, nil
+	return isLoggedIn, nil
 }
