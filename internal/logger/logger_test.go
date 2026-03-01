@@ -83,7 +83,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected Level 'info', got %q", cfg.Level)
 	}
 
-	if cfg.Format != "json" {
+	if cfg.Format != "charm" {
+		t.Errorf("expected Format 'charm', got %q", cfg.Format)
 		t.Errorf("expected Format 'json', got %q", cfg.Format)
 	}
 

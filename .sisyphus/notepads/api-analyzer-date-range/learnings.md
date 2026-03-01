@@ -1,0 +1,3 @@
+- Added configurable date range to APIAnalyzer to allow searching for rejections beyond 7 days.
+- Used a.daysToLookAhead field in analyzePartesMecanicas, analyzeCampo, and analyzeTestemunhoPublico.
+- Maintained backward compatibility with a default of 7 days.

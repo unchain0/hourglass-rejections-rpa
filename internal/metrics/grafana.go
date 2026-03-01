@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"hourglass-rejeicoes-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/domain"
 )
 
 // Client handles metrics shipping to Grafana Cloud.

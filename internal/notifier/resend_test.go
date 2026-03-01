@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"hourglass-rejeicoes-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/domain"
 )
 
 func TestNewResendNotifier(t *testing.T) {

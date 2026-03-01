@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"hourglass-rejeicoes-rpa/internal/config"
-	"hourglass-rejeicoes-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/config"
+	"hourglass-rejections-rpa/internal/domain"
 )
 
 var (

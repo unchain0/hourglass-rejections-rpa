@@ -7,14 +7,16 @@ import (
 )
 
 type Config struct {
-	HourglassURL    string        `env:"HOURGLASS_URL" envDefault:"https://app.hourglass-app.com/v2/page/app"`
+	HourglassURL    string        `env:"HOURGLASS_URL" envDefault:"https://app.hourglass-app.com"`
 	CookieFile      string        `env:"COOKIE_FILE" envDefault:"cookies.json"`
 	OutputDir       string        `env:"OUTPUT_DIR" envDefault:"./outputs"`
 	Debug           bool          `env:"DEBUG" envDefault:"false"`
 	ScheduleMorning string        `env:"SCHEDULE_MORNING" envDefault:"0 9 * * *"`
 	ScheduleEvening string        `env:"SCHEDULE_EVENING" envDefault:"0 17 * * *"`
 	Timeout         time.Duration `env:"TIMEOUT" envDefault:"60s"`
-	
+	// Hourglass API Authentication
+	HourglassXSRFToken string `env:"HOURGLASS_XSRF_TOKEN"`
+	HourglassHGLogin     string `env:"HOURGLASS_HGLOGIN_COOKIE"`
 	// Sentry configuration
 	SentryDSN         string `env:"SENTRY_DSN"`
 	SentryEnvironment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`

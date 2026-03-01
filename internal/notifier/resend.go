@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"hourglass-rejeicoes-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/domain"
 )
 
 const resendAPIURL = "https://api.resend.com/emails"

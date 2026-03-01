@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"hourglass-rejeicoes-rpa/internal/config"
-	"hourglass-rejeicoes-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/config"
+	"hourglass-rejections-rpa/internal/domain"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
