@@ -974,7 +974,7 @@ internal/
 
 ---
 
-- [ ] 5. Browser Automation Setup (chromedp)
+- [x] 5. Browser Automation Setup (chromedp)
 
   **O que fazer**:
   - Criar `internal/rpa/browser.go` com struct `Browser`
