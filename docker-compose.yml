@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  rpa:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hourglass-rpa
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=America/Sao_Paulo
+    volumes:
+      - ./outputs:/app/outputs
+      - ./data:/app/data
+      - ./cookies.json:/app/cookies.json:ro
+    networks:
+      - rpa-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "rpa"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Grafana Agent for metrics shipping
+  grafana-agent:
+    image: grafana/agent:latest
+    container_name: grafana-agent
+    restart: unless-stopped
+    volumes:
+      - ./config/grafana-agent.yaml:/etc/agent/agent.yaml:ro
+    command: -config.file=/etc/agent/agent.yaml
+    networks:
+      - rpa-network
+    profiles:
+      - monitoring
+
+networks:
+  rpa-network:
+    driver: bridge
+
+volumes:
+  outputs:
+    driver: local
+  data:
+    driver: local
