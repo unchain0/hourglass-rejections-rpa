@@ -1,16 +1,8 @@
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
-# Install dependencies for Chrome
-RUN apk add --no-cache \
-    chromium \
-    chromium-chromedriver \
-    nss \
-    freetype \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont \
-    bash
+# Install ca-certificates for HTTPS requests
+RUN apk add --no-cache ca-certificates
 
 # Set working directory
 WORKDIR /app
@@ -30,15 +22,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o rpa ./cmd/rpa
 # Final stage
 FROM alpine:latest
 
-# Install Chrome and dependencies
+# Install ca-certificates and timezone data
 RUN apk add --no-cache \
-    chromium \
-    chromium-chromedriver \
-    nss \
-    freetype \
-    harfbuzz \
     ca-certificates \
-    ttf-freefont \
     tzdata \
     && rm -rf /var/cache/apk/*
 
@@ -60,9 +46,7 @@ RUN mkdir -p /app/outputs /app/data && \
 USER rpa
 
 # Set environment variables
-ENV CHROME_BIN=/usr/bin/chromium-browser \
-    CHROME_PATH=/usr/lib/chromium/ \
-    DISPLAY=:99
+ENV TZ=America/Sao_Paulo
 
 # Expose volume for outputs
 VOLUME ["/app/outputs"]

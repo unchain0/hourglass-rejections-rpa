@@ -7,20 +7,23 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
-	"hourglass-rejeicoes-rpa/internal/config"
-	"hourglass-rejeicoes-rpa/internal/logger"
-	"hourglass-rejeicoes-rpa/internal/rpa"
-	"hourglass-rejeicoes-rpa/internal/scheduler"
-	"hourglass-rejeicoes-rpa/internal/sentry"
-	"hourglass-rejeicoes-rpa/internal/storage"
+	"hourglass-rejections-rpa/internal/api"
+	"hourglass-rejections-rpa/internal/config"
+	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/logger"
+	"hourglass-rejections-rpa/internal/notifier"
+	"hourglass-rejections-rpa/internal/scheduler"
+	"hourglass-rejections-rpa/internal/sentry"
+	"hourglass-rejections-rpa/internal/storage"
 )
 
 func main() {
 	var (
-		setupMode = flag.Bool("setup", false, "Run in setup mode for manual login")
-		onceMode  = flag.Bool("once", false, "Run once and exit (don't start scheduler)")
+		onceMode = flag.Bool("once", false, "Run once and exit (don't start scheduler)")
 	)
 	flag.Parse()
 
@@ -53,36 +56,36 @@ func main() {
 		defer sentryClient.Close()
 	}
 
-	logger.Info("starting hourglass-rejeicoes-rpa",
+	logger.Info("starting hourglass-rejections-rpa",
 		"version", "1.0.0",
-		"setup_mode", *setupMode,
 		"once_mode", *onceMode,
 	)
 
-	// Initialize components
-	browser := rpa.NewBrowser()
+	// Initialize API client
+	apiClient := api.NewClient()
+
+	// Set XSRF token from environment if available
+	if xsrfToken := os.Getenv("HOURGLASS_XSRF_TOKEN"); xsrfToken != "" {
+		apiClient.SetXSRFToken(xsrfToken)
+		logger.Info("XSRF token configured")
+	}
+
+	// Set HGLogin cookie from environment if available
+	if hglogin := os.Getenv("HOURGLASS_HGLOGIN_COOKIE"); hglogin != "" {
+		apiClient.SetHGLogin(hglogin)
+		logger.Info("HGLogin cookie configured")
+	}
+
+	analyzer := api.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
-	loginManager := rpa.NewLoginManager(browser, store)
-	analyzer := rpa.NewAnalyzer(browser, loginManager)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Setup mode: run browser in non-headless mode for manual login
-	if *setupMode {
-		logger.Info("running in setup mode - please login manually")
-		if err := runSetupMode(ctx, browser, loginManager); err != nil {
-			logger.Error("setup mode failed", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("setup complete - cookies saved")
-		return
-	}
-
 	// Once mode: run analysis once and exit
 	if *onceMode {
 		logger.Info("running in once mode")
-		if err := runOnce(ctx, browser, loginManager, analyzer, store); err != nil {
+		if err := runOnce(ctx, analyzer, store); err != nil {
 			logger.Error("run failed", "error", err)
 			os.Exit(1)
 		}
@@ -92,52 +95,21 @@ func main() {
 
 	// Scheduler mode: run jobs at scheduled times
 	logger.Info("starting scheduler mode")
-	if err := runScheduler(ctx, browser, loginManager, analyzer, store); err != nil {
+	if err := runScheduler(ctx, analyzer, store); err != nil {
 		logger.Error("scheduler failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func runSetupMode(ctx context.Context, browser *rpa.Browser, loginManager *rpa.LoginManager) error {
-	if err := browser.Setup(); err != nil {
-		return fmt.Errorf("failed to setup browser: %w", err)
-	}
-	defer browser.Close()
-
-	if err := loginManager.PerformLogin(ctx); err != nil {
-		return fmt.Errorf("failed to perform login: %w", err)
-	}
-
-	// Wait for user to complete login manually
-	if err := loginManager.WaitForManualLogin(ctx); err != nil {
-		return fmt.Errorf("failed to wait for manual login: %w", err)
-	}
-
-	if err := loginManager.SaveCookies(ctx); err != nil {
-		return fmt.Errorf("failed to save cookies: %w", err)
-	}
-
-	return nil
-}
-
-func runOnce(ctx context.Context, browser *rpa.Browser, loginManager *rpa.LoginManager, analyzer *rpa.Analyzer, store *storage.FileStorage) error {
-	if err := browser.Setup(); err != nil {
-		return fmt.Errorf("failed to setup browser: %w", err)
-	}
-	defer browser.Close()
-
-	// Load cookies if available
-	if err := loginManager.LoadCookies(ctx); err != nil {
-		slog.Warn("failed to load cookies", "error", err)
-	}
-
+func runOnce(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	// Analyze all sections
 	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público"}
+	var allRejections []domain.Rejeicao
 
 	for _, section := range sections {
 		slog.Info("analyzing section", "section", section)
 
-		result, err := analyzer.AnalyzeSection(ctx, section)
+		result, err := analyzer.AnalyzeSection(section)
 		if err != nil {
 			slog.Error("failed to analyze section", "section", section, "error", err)
 			continue
@@ -156,16 +128,72 @@ func runOnce(ctx context.Context, browser *rpa.Browser, loginManager *rpa.LoginM
 
 		// Save results
 		if len(result.Rejeicoes) > 0 {
+			allRejections = append(allRejections, result.Rejeicoes...)
 			if err := store.Save(ctx, result.Rejeicoes); err != nil {
 				slog.Error("failed to save results", "section", section, "error", err)
 			}
 		}
 	}
 
+	// Send Telegram notification if there are rejections
+	if len(allRejections) > 0 {
+		if err := sendTelegramNotification(allRejections); err != nil {
+			slog.Error("failed to send telegram notification", "error", err)
+		}
+	}
+
 	return nil
 }
 
-func runScheduler(ctx context.Context, browser *rpa.Browser, loginManager *rpa.LoginManager, analyzer *rpa.Analyzer, store *storage.FileStorage) error {
+func sendTelegramNotification(rejections []domain.Rejeicao) error {
+	token := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
+	whitelistStr := os.Getenv("TELEGRAM_WHITELIST")
+
+	if token == "" || chatIDStr == "" {
+		slog.Warn("Telegram configuration missing, skipping notification",
+			"has_token", token != "",
+			"has_chat_id", chatIDStr != "",
+		)
+		return nil
+	}
+
+	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid telegram chat ID: %w", err)
+	}
+
+	var whitelist []int64
+	if whitelistStr != "" {
+		for _, idStr := range strings.Split(whitelistStr, ",") {
+			id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+			if err != nil {
+				slog.Warn("invalid chat ID in whitelist, skipping", "id", idStr, "error", err)
+				continue
+			}
+			whitelist = append(whitelist, id)
+		}
+	}
+
+	tgBot, err := notifier.NewTelegramNotifier(token, chatID, whitelist)
+	if err != nil {
+		return fmt.Errorf("failed to create telegram notifier: %w", err)
+	}
+
+	if !tgBot.IsAuthorized(chatID) {
+		slog.Warn("unauthorized chat ID, skipping notification", "chat_id", chatID)
+		return nil
+	}
+
+	if err := tgBot.SendRejectionsNotification(rejections); err != nil {
+		return fmt.Errorf("failed to send telegram notification: %w", err)
+	}
+
+	slog.Info("telegram notification sent successfully", "count", len(rejections))
+	return nil
+}
+
+func runScheduler(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	logger := slog.Default()
 
 	// Create scheduler
@@ -174,7 +202,7 @@ func runScheduler(ctx context.Context, browser *rpa.Browser, loginManager *rpa.L
 	// Create job function
 	jobFunc := func(ctx context.Context) error {
 		logger.Info("running scheduled analysis")
-		return runOnce(ctx, browser, loginManager, analyzer, store)
+		return runOnce(ctx, analyzer, store)
 	}
 
 	// Schedule jobs for 9:00 AM and 5:00 PM

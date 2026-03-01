@@ -5,16 +5,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: hourglass-rpa
+    container_name: hourglass-rejections-rpa
     restart: unless-stopped
     env_file:
       - .env
     environment:
       - TZ=America/Sao_Paulo
+      # HOURGLASS_XSRF_TOKEN must be set in .env file
+      # Get it from: Hourglass → DevTools → Network → X-Hourglass-XSRF-Token header
     volumes:
       - ./outputs:/app/outputs
       - ./data:/app/data
-      - ./cookies.json:/app/cookies.json:ro
     networks:
       - rpa-network
     logging:
