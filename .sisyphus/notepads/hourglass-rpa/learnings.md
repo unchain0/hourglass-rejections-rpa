@@ -3,3 +3,7 @@
 - Established contracts for Scraper, Storage, and Notifier in `interfaces.go`.
 - Created custom domain errors in `errors.go`.
 - Ensured all interfaces use `context.Context` for cancellation and timeouts.
+### Task 3: Configuração via Environment Variables
+- Usado github.com/caarlos0/env/v11 para parsing de variáveis de ambiente.
+- Configurações com valores default conforme especificado.
+- Testes unitários cobrindo valores default e overrides.
