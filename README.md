@@ -244,10 +244,3 @@ Coolify will automatically detect the `docker-compose.yml` and build.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 👤 Author
-
-**unchain0** - [@unchain0](https://github.com/unchain0)
-
----
-
-⚠️ **Warning**: This project is for authorized internal use only. Respect the Hourglass system terms of use.
