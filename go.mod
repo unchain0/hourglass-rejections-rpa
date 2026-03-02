@@ -7,6 +7,8 @@ require (
 	github.com/charmbracelet/log v0.4.2
 	github.com/getsentry/sentry-go v0.43.0
 	github.com/go-telegram/bot v1.19.0
+	github.com/joho/godotenv v1.5.1
+	github.com/playwright-community/playwright-go v0.5700.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -20,8 +22,10 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
+	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

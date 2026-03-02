@@ -20,6 +20,7 @@ import (
 	"hourglass-rejections-rpa/internal/domain"
 	"hourglass-rejections-rpa/internal/logger"
 	"hourglass-rejections-rpa/internal/notifier"
+	"hourglass-rejections-rpa/internal/preferences"
 	"hourglass-rejections-rpa/internal/scheduler"
 	"hourglass-rejections-rpa/internal/sentry"
 	"hourglass-rejections-rpa/internal/storage"
@@ -58,6 +59,7 @@ func loadEnvFiles() {
 func main() {
 	var (
 		onceMode = flag.Bool("once", false, "Run once and exit (don't start scheduler)")
+		botMode  = flag.Bool("bot", false, "Start Telegram bot for interactive configuration")
 	)
 	flag.Parse()
 
@@ -89,12 +91,25 @@ func main() {
 		logger.Info("sentry initialized successfully")
 		defer sentryClient.Close()
 	}
-
 	logger.Info("starting hourglass-rejections-rpa",
 		"version", "1.0.0",
 		"once_mode", *onceMode,
+		"bot_mode", *botMode,
 	)
 
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Bot mode: start Telegram bot for interactive configuration
+	if *botMode {
+		logger.Info("starting bot mode")
+		if err := runBot(ctx, cfg); err != nil {
+			logger.Error("bot failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	// Initialize API client
 	apiClient := api.NewClient()
 
@@ -113,13 +128,10 @@ func main() {
 	analyzer := api.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// Once mode: run analysis once and exit
 	if *onceMode {
 		logger.Info("running in once mode")
-		if err := runOnce(ctx, sentryClient, analyzer, store); err != nil {
+		if err := runOnce(ctx, cfg, sentryClient, analyzer, store); err != nil {
 			logger.Error("run failed", "error", err)
 			if sentryClient.IsEnabled() {
 				sentryClient.Flush(2 * time.Second)
@@ -132,7 +144,7 @@ func main() {
 
 	// Scheduler mode: run jobs at scheduled times
 	logger.Info("starting scheduler mode")
-	if err := runScheduler(ctx, sentryClient, analyzer, store); err != nil {
+	if err := runScheduler(ctx, cfg, sentryClient, analyzer, store); err != nil {
 		logger.Error("scheduler failed", "error", err)
 		if sentryClient.IsEnabled() {
 			sentryClient.Flush(2 * time.Second)
@@ -141,7 +153,7 @@ func main() {
 	}
 }
 
-func runOnce(ctx context.Context, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+func runOnce(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	// Analyze all sections
 	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
 	var allRejections []domain.Rejeicao
@@ -193,10 +205,27 @@ func runOnce(ctx context.Context, sentryClient *sentry.Client, analyzer *api.API
 		}
 	}
 
-	// Send Telegram notification if there are rejections
+	// Send Telegram notifications (filtered per user if preferences configured)
 	if len(allRejections) > 0 {
-		if err := sendTelegramNotification(sentryClient, allRejections); err != nil {
-			slog.Error("failed to send telegram notification", "error", err)
+		prefStore := preferences.NewFilePreferenceStore(cfg.UserPrefsFile)
+		prefManager := preferences.NewPreferenceManager(prefStore)
+
+		// Try filtered notifications first; fallback to broadcast if no users configured
+		users, listErr := prefManager.List()
+		if listErr != nil {
+			slog.Warn("failed to list user preferences, falling back to broadcast", "error", listErr)
+			if err := sendTelegramNotification(sentryClient, allRejections); err != nil {
+				slog.Error("failed to send telegram notification", "error", err)
+			}
+		} else if len(users) == 0 {
+			slog.Info("no user preferences configured, using broadcast notification")
+			if err := sendTelegramNotification(sentryClient, allRejections); err != nil {
+				slog.Error("failed to send telegram notification", "error", err)
+			}
+		} else {
+			if err := sendFilteredNotifications(sentryClient, allRejections, prefManager); err != nil {
+				slog.Error("failed to send filtered notifications", "error", err)
+			}
 		}
 	}
 
@@ -281,7 +310,95 @@ return fmt.Errorf("failed to send telegram notification to any chat")
 return nil
 }
 
-func runScheduler(ctx context.Context, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+// sendFilteredNotifications sends per-user filtered notifications based on section preferences.
+func sendFilteredNotifications(
+	sentryClient *sentry.Client,
+	rejections []domain.Rejeicao,
+	prefManager *preferences.PreferenceManager,
+) error {
+	if len(rejections) == 0 {
+		return nil
+	}
+
+	// Group rejections by section for efficient filtering
+	bySection := make(map[string][]domain.Rejeicao)
+	for _, r := range rejections {
+		bySection[r.Secao] = append(bySection[r.Secao], r)
+	}
+
+	// Get all users with preferences
+	users, err := prefManager.List()
+	if err != nil {
+		return fmt.Errorf("failed to list user preferences: %w", err)
+	}
+
+	// Create Telegram notifier
+	token := os.Getenv("TELEGRAM_BOT_TOKEN")
+	if token == "" {
+		slog.Warn("Telegram bot token not configured, skipping filtered notifications")
+		return nil
+	}
+
+	// Use a dummy chat ID for notifier creation (actual sending uses per-user chat IDs)
+	tgBot, err := notifier.NewTelegramNotifier(token, users[0].ChatID, nil)
+	if err != nil {
+		if sentryClient != nil && sentryClient.IsEnabled() {
+			sentryClient.CaptureError(err, map[string]interface{}{
+				"operation": "create_telegram_notifier_filtered",
+			})
+		}
+		return fmt.Errorf("failed to create telegram notifier: %w", err)
+	}
+
+	var sentCount int
+	for _, user := range users {
+		if !user.Enabled {
+			slog.Debug("user notifications disabled, skipping", "chat_id", user.ChatID, "username", user.Username)
+			continue
+		}
+
+		// Collect rejections from user's selected sections
+		var userRejections []domain.Rejeicao
+		for _, section := range user.Sections {
+			userRejections = append(userRejections, bySection[section]...)
+		}
+
+		if len(userRejections) == 0 {
+			slog.Debug("no rejections for user's sections, skipping", "chat_id", user.ChatID, "username", user.Username)
+			continue
+		}
+
+		// Send to this specific user
+		if err := tgBot.SendRejectionsNotification(user.ChatID, userRejections); err != nil {
+			slog.Error("failed to send filtered notification",
+				"chat_id", user.ChatID,
+				"username", user.Username,
+				"rejection_count", len(userRejections),
+				"error", err,
+			)
+			if sentryClient != nil && sentryClient.IsEnabled() {
+				sentryClient.CaptureError(err, map[string]interface{}{
+					"operation": "send_filtered_notification",
+					"chat_id":   user.ChatID,
+					"username":  user.Username,
+				})
+			}
+			continue
+		}
+
+		sentCount++
+		slog.Info("filtered notification sent successfully",
+			"chat_id", user.ChatID,
+			"username", user.Username,
+			"rejection_count", len(userRejections),
+		)
+	}
+
+	slog.Info("filtered notifications complete", "sent", sentCount, "total_users", len(users))
+	return nil
+}
+
+func runScheduler(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	logger := slog.Default()
 
 	// Create scheduler
@@ -290,7 +407,7 @@ func runScheduler(ctx context.Context, sentryClient *sentry.Client, analyzer *ap
 	// Create job function
 	jobFunc := func(ctx context.Context) error {
 		logger.Info("running scheduled analysis")
-		return runOnce(ctx, sentryClient, analyzer, store)
+		return runOnce(ctx, cfg, sentryClient, analyzer, store)
 	}
 
 	// Schedule jobs for 9:00 AM and 5:00 PM
@@ -323,5 +440,72 @@ func runScheduler(ctx context.Context, sentryClient *sentry.Client, analyzer *ap
 		logger.Info("context cancelled")
 	}
 
+	return nil
+}
+
+func runBot(ctx context.Context, cfg *config.Config) error {
+	logger := slog.Default()
+
+	// Validate Telegram configuration
+	token := os.Getenv("TELEGRAM_BOT_TOKEN")
+	if token == "" {
+		return fmt.Errorf("TELEGRAM_BOT_TOKEN not configured")
+	}
+
+	// Initialize preference manager
+	prefStore := preferences.NewFilePreferenceStore(cfg.UserPrefsFile)
+	prefManager := preferences.NewPreferenceManager(prefStore)
+
+	// Parse chat IDs from env (for whitelist)
+	var whitelist []int64
+	if chatIDs := os.Getenv("TELEGRAM_CHAT_ID"); chatIDs != "" {
+		for _, idStr := range strings.Split(chatIDs, ",") {
+			id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+			if err != nil {
+				logger.Warn("invalid chat ID in env, skipping", "id", idStr, "error", err)
+				continue
+			}
+			whitelist = append(whitelist, id)
+		}
+	}
+	
+	// Create Telegram notifier (for bot mode, we just need the bot instance)
+	// Use first chat ID as default, or 0 if none
+	var chatID int64
+	if len(whitelist) > 0 {
+		chatID = whitelist[0]
+	}
+	
+	tgBot, err := notifier.NewTelegramNotifier(token, chatID, whitelist)
+	if err != nil {
+		return fmt.Errorf("failed to create telegram notifier: %w", err)
+	}
+	
+	logger.Info("starting telegram bot", "whitelist_count", len(whitelist))
+	
+	// Start bot in listener mode
+	if err := tgBot.StartBot(ctx, prefManager); err != nil {
+		return fmt.Errorf("failed to start bot: %w", err)
+	}
+	
+	logger.Info("bot started successfully - send /start to your bot")
+	
+	// Wait for interrupt signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	
+	select {
+	case <-sigChan:
+		logger.Info("received shutdown signal")
+	case <-ctx.Done():
+		logger.Info("context cancelled")
+	}
+	
+	// Stop bot gracefully
+	if err := tgBot.StopBot(); err != nil {
+		logger.Error("error stopping bot", "error", err)
+	}
+	
+	logger.Info("bot stopped")
 	return nil
 }

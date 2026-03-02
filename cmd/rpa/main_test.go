@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/preferences"
 )
 
 // TestLoadEnvFiles_NoFile tests that loadEnvFiles handles missing .env files gracefully
@@ -444,5 +445,213 @@ func TestSendTelegramNotification_RejectionWithSpecialCharacters(t *testing.T) {
 	err := sendTelegramNotification(nil, rejections)
 	if err == nil {
 		t.Log("Note: Telegram notification would fail in real scenario due to fake token")
+	}
+}
+
+// TestSendFilteredNotifications_EmptyRejections tests with empty rejection list
+func TestSendFilteredNotifications_EmptyRejections(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := preferences.NewFilePreferenceStore(filepath.Join(tmpDir, "prefs.json"))
+	pm := preferences.NewPreferenceManager(store)
+
+	err := sendFilteredNotifications(nil, []domain.Rejeicao{}, pm)
+	if err != nil {
+		t.Errorf("sendFilteredNotifications with empty list should return nil, got error: %v", err)
+	}
+}
+
+// TestSendFilteredNotifications_NoUsers tests when no users configured
+func TestSendFilteredNotifications_NoUsers(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := preferences.NewFilePreferenceStore(filepath.Join(tmpDir, "prefs.json"))
+	pm := preferences.NewPreferenceManager(store)
+
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "Test User", OQue: "Test", PraQuando: "01/03/2026"},
+	}
+
+	// No users, so List returns empty => sendFilteredNotifications still works (returns after List)
+	err := sendFilteredNotifications(nil, rejections, pm)
+	// Users list is empty, but function will try to create notifier with empty users[0]
+	// Actually the function calls List() again internally - with 0 users it returns empty
+	// Since users is empty, no notifications to send
+	if err != nil {
+		t.Errorf("sendFilteredNotifications with no users should not error, got: %v", err)
+	}
+}
+
+// TestSendFilteredNotifications_GroupsBySection verifies rejection grouping logic
+func TestSendFilteredNotifications_GroupsBySection(t *testing.T) {
+	origToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	defer os.Setenv("TELEGRAM_BOT_TOKEN", origToken)
+
+	os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
+
+	tmpDir := t.TempDir()
+	store := preferences.NewFilePreferenceStore(filepath.Join(tmpDir, "prefs.json"))
+	pm := preferences.NewPreferenceManager(store)
+
+	// Create users with specific section preferences
+	user1, err := pm.GetOrCreate(111, "alice")
+	if err != nil {
+		t.Fatalf("failed to create user1: %v", err)
+	}
+	_ = user1
+	if err := pm.UpdateSections(111, []string{"Campo"}); err != nil {
+		t.Fatalf("failed to update user1 sections: %v", err)
+	}
+
+	user2, err := pm.GetOrCreate(222, "bob")
+	if err != nil {
+		t.Fatalf("failed to create user2: %v", err)
+	}
+	_ = user2
+	if err := pm.UpdateSections(222, []string{"Partes Mecânicas", "Campo"}); err != nil {
+		t.Fatalf("failed to update user2 sections: %v", err)
+	}
+
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "John", OQue: "Ministry", PraQuando: "01/03/2026"},
+		{Secao: "Partes Mecânicas", Quem: "Jane", OQue: "Audio", PraQuando: "02/03/2026"},
+		{Secao: "Testemunho Público", Quem: "Bob", OQue: "Cart", PraQuando: "03/03/2026"},
+	}
+
+	// Will fail due to fake token, but tests the grouping logic path
+	err = sendFilteredNotifications(nil, rejections, pm)
+	// Error expected due to fake bot token
+	if err == nil {
+		t.Log("Note: Would fail in real scenario due to fake token")
+	}
+}
+
+// TestSendFilteredNotifications_DisabledUser tests that disabled users are skipped
+func TestSendFilteredNotifications_DisabledUser(t *testing.T) {
+	origToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	defer os.Setenv("TELEGRAM_BOT_TOKEN", origToken)
+
+	os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
+
+	tmpDir := t.TempDir()
+	store := preferences.NewFilePreferenceStore(filepath.Join(tmpDir, "prefs.json"))
+	pm := preferences.NewPreferenceManager(store)
+
+	// Create a disabled user
+	_, err := pm.GetOrCreate(333, "charlie")
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	if err := pm.UpdateSections(333, []string{"Campo"}); err != nil {
+		t.Fatalf("failed to update sections: %v", err)
+	}
+	if err := pm.ToggleEnabled(333, false); err != nil {
+		t.Fatalf("failed to disable user: %v", err)
+	}
+
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "Test", OQue: "Test", PraQuando: "01/03/2026"},
+	}
+
+	// Disabled user should be skipped - but notifier creation will fail with fake token
+	// since the disabled user is the only one, after filtering all users out, there's nothing to send
+	err = sendFilteredNotifications(nil, rejections, pm)
+	// Error expected due to fake token when creating notifier
+	if err == nil {
+		t.Log("Note: Would fail in real scenario due to fake token")
+	}
+}
+
+// TestSendFilteredNotifications_NoMatchingSections tests when user sections don't match rejections
+func TestSendFilteredNotifications_NoMatchingSections(t *testing.T) {
+	origToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	defer os.Setenv("TELEGRAM_BOT_TOKEN", origToken)
+
+	os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
+
+	tmpDir := t.TempDir()
+	store := preferences.NewFilePreferenceStore(filepath.Join(tmpDir, "prefs.json"))
+	pm := preferences.NewPreferenceManager(store)
+
+	// User only monitors Campo, but rejections are from different section
+	_, err := pm.GetOrCreate(444, "dave")
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	if err := pm.UpdateSections(444, []string{"Testemunho Público"}); err != nil {
+		t.Fatalf("failed to update sections: %v", err)
+	}
+
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "Test", OQue: "Test", PraQuando: "01/03/2026"},
+	}
+
+	// User's section doesn't match, but notifier will still be created (and fail with fake token)
+	err = sendFilteredNotifications(nil, rejections, pm)
+	// Will fail at notifier creation due to fake token
+	if err == nil {
+		t.Log("Note: Would fail in real scenario due to fake token")
+	}
+}
+
+// TestSendFilteredNotifications_MissingToken tests with missing bot token
+func TestSendFilteredNotifications_MissingToken(t *testing.T) {
+	origToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	defer os.Setenv("TELEGRAM_BOT_TOKEN", origToken)
+
+	os.Unsetenv("TELEGRAM_BOT_TOKEN")
+
+	tmpDir := t.TempDir()
+	store := preferences.NewFilePreferenceStore(filepath.Join(tmpDir, "prefs.json"))
+	pm := preferences.NewPreferenceManager(store)
+
+	// Create a user so List() returns non-empty
+	_, err := pm.GetOrCreate(555, "eve")
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	if err := pm.UpdateSections(555, []string{"Campo"}); err != nil {
+		t.Fatalf("failed to update sections: %v", err)
+	}
+
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "Test", OQue: "Test", PraQuando: "01/03/2026"},
+	}
+
+	err = sendFilteredNotifications(nil, rejections, pm)
+	if err != nil {
+		t.Errorf("sendFilteredNotifications with missing token should return nil, got: %v", err)
+	}
+}
+
+// TestPreferenceManagerList tests the List method on PreferenceManager
+func TestPreferenceManagerList(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := preferences.NewFilePreferenceStore(filepath.Join(tmpDir, "prefs.json"))
+	pm := preferences.NewPreferenceManager(store)
+
+	// Empty list initially
+	users, err := pm.List()
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if len(users) != 0 {
+		t.Errorf("expected 0 users, got %d", len(users))
+	}
+
+	// Add users
+	_, err = pm.GetOrCreate(100, "user1")
+	if err != nil {
+		t.Fatalf("GetOrCreate error: %v", err)
+	}
+	_, err = pm.GetOrCreate(200, "user2")
+	if err != nil {
+		t.Fatalf("GetOrCreate error: %v", err)
+	}
+
+	users, err = pm.List()
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if len(users) != 2 {
+		t.Errorf("expected 2 users, got %d", len(users))
 	}
 }

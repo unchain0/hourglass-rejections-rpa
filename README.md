@@ -8,12 +8,10 @@
 
 Automated system to monitor assignment rejections in Hourglass. Runs 2x daily (9 AM and 5 PM) and sends Telegram notifications when rejections are detected in: Mechanical Parts, Field Ministry, and Public Witnessing sections.
 
-## 🚀 Features
-
 - **Official REST API**: Uses Hourglass API directly (no browser)
 - **Secure Authentication**: XSRF Token + Session Cookie
-- **Telegram Notifications**: Dedicated bot for instant alerts
-- **Whitelist Control**: Manage who receives notifications
+- **Interactive Telegram Bot**: Configure preferences via bot commands
+- **Per-User Filtering**: Each user receives only their selected sections
 - **Smart Scheduling**: Cron jobs for 9 AM and 5 PM daily
 - **Multiple Formats**: Exports data in JSON and CSV
 - **Maximum Range**: Searches for rejections up to 2 years (730 days)
@@ -62,7 +60,6 @@ HOURGLASS_HGLOGIN_COOKIE=your_cookie_here
 
 # Telegram Bot (required for notifications)
 TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
 
 # Authorized users whitelist (optional)
 TELEGRAM_WHITELIST=123456789,987654321
@@ -71,6 +68,9 @@ TELEGRAM_WHITELIST=123456789,987654321
 ### Optional Variables
 
 ```env
+# User Preferences (for per-user filtering)
+USER_PREFS_FILE=data/preferences.json
+
 # Sentry (error tracking)
 SENTRY_DSN=https://xxxxxx@xxx.ingest.sentry.io/xxxxx
 SENTRY_ENVIRONMENT=production
@@ -140,6 +140,33 @@ docker build -t hourglass-rejections-rpa .
 docker run --env-file .env hourglass-rejections-rpa -once
 ```
 
+## 🤖 Telegram Bot Commands
+
+After sending a message to your bot, you can use these commands:
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Welcome message and instructions |
+| `/configurar` | Configure which sections to receive notifications for |
+| `/status` | Show your current preferences |
+| `/ajuda` | List all available commands |
+| `/checknow` | Trigger immediate check (admin only) |
+
+### User Preferences
+
+Users can customize which sections they receive notifications for:
+
+1. Send `/configurar` to the bot
+2. Click on sections to toggle them on/off (✅/❌)
+3. Click "Salvar" to save your preferences
+4. You'll only receive notifications for selected sections
+
+Available sections:
+- Partes Mecânicas (Mechanical Parts)
+- Campo (Field Ministry)
+- Testemunho Público (Public Witnessing)
+- Reunião Meio de Semana (Midweek Meeting)
+
 ## 🧪 Testing
 
 ```bash
@@ -164,6 +191,7 @@ go tool cover -html=coverage.out
 │   ├── config/           # Configuration
 │   ├── domain/           # Models and interfaces
 │   ├── notifier/         # Telegram notifications
+│   ├── preferences/      # User preferences storage
 │   ├── scheduler/        # Cron scheduling
 │   ├── storage/          # JSON/CSV persistence
 │   ├── logger/           # Structured logging

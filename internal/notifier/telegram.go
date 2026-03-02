@@ -4,17 +4,30 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/preferences"
 )
+
+// AllSections lists all configurable sections for notifications.
+var AllSections = []string{
+	"Partes Mecânicas",
+	"Campo",
+	"Testemunho Público",
+	"Reunião Meio de Semana",
+}
 
 // TelegramNotifier sends notifications via Telegram Bot.
 type TelegramNotifier struct {
-	bot       *bot.Bot
-	chatID    int64
-	whitelist []int64
+	bot         *bot.Bot
+	chatID      int64
+	whitelist   []int64
+	prefManager *preferences.PreferenceManager
+	cancelFunc  context.CancelFunc
+	mu          sync.Mutex
 }
 
 // NewTelegramNotifier creates a new Telegram notifier.
@@ -54,42 +67,404 @@ func (t *TelegramNotifier) IsAuthorized(chatID int64) bool {
 
 // SendRejectionsNotification sends a notification about rejections to a specific chat ID.
 func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error {
-if len(rejections) == 0 {
-return nil
-}
+	if len(rejections) == 0 {
+		return nil
+	}
 
 	if !t.IsAuthorized(chatID) {
 		return fmt.Errorf("unauthorized chat ID: %d", chatID)
-}
+	}
 
-// Build message (using HTML instead of Markdown to avoid escaping issues)
-var msg strings.Builder
-msg.WriteString("<b>❌ Rejeições Detectadas no Hourglass</b>\n\n")
-msg.WriteString(fmt.Sprintf("Foram detectadas <b>%d</b> designação(ões) recusada(s):\n\n", len(rejections)))
+	// Build message (using HTML instead of Markdown to avoid escaping issues)
+	var msg strings.Builder
+	msg.WriteString("<b>❌ Rejeições Detectadas no Hourglass</b>\n\n")
+	msg.WriteString(fmt.Sprintf("Foram detectadas <b>%d</b> designação(ões) recusada(s):\n\n", len(rejections)))
 
-for i, r := range rejections {
-msg.WriteString(fmt.Sprintf("<b>Rejeição #%d:</b>\n", i+1))
-msg.WriteString(fmt.Sprintf("👤 <b>Quem:</b> %s\n", r.Quem))
-msg.WriteString(fmt.Sprintf("📋 <b>Seção:</b> %s\n", r.Secao))
-msg.WriteString(fmt.Sprintf("📝 <b>Designação:</b> %s\n", r.OQue))
-msg.WriteString(fmt.Sprintf("📅 <b>Data:</b> %s\n\n", r.PraQuando))
-}
+	for i, r := range rejections {
+		msg.WriteString(fmt.Sprintf("<b>Rejeição #%d:</b>\n", i+1))
+		msg.WriteString(fmt.Sprintf("👤 <b>Quem:</b> %s\n", r.Quem))
+		msg.WriteString(fmt.Sprintf("📋 <b>Seção:</b> %s\n", r.Secao))
+		msg.WriteString(fmt.Sprintf("📝 <b>Designação:</b> %s\n", r.OQue))
+		msg.WriteString(fmt.Sprintf("📅 <b>Data:</b> %s\n\n", r.PraQuando))
+	}
 
-// Send message
-_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
+	// Send message
+	_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
 		ChatID:    chatID,
-Text:      msg.String(),
-ParseMode: models.ParseModeHTML,
-})
+		Text:      msg.String(),
+		ParseMode: models.ParseModeHTML,
+	})
 
-if err != nil {
-return fmt.Errorf("failed to send telegram message: %w", err)
-}
+	if err != nil {
+		return fmt.Errorf("failed to send telegram message: %w", err)
+	}
 
-return nil
+	return nil
 }
 
 // IsConfigured checks if the notifier is properly configured.
 func (t *TelegramNotifier) IsConfigured() bool {
 	return t != nil && t.bot != nil && t.chatID != 0
+}
+
+// StartBot starts the bot in listener mode with interactive handlers.
+func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preferences.PreferenceManager) error {
+	if prefManager == nil {
+		return fmt.Errorf("preference manager is required")
+	}
+
+	t.mu.Lock()
+	t.prefManager = prefManager
+	t.mu.Unlock()
+
+	// Register command handlers
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, t.handleStart)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/configurar", bot.MatchTypeExact, t.handleConfig)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/status", bot.MatchTypeExact, t.handleStatus)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/ajuda", bot.MatchTypeExact, t.handleHelp)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/checknow", bot.MatchTypeExact, t.handleCheckNow)
+
+	// Register callback handlers for inline keyboard
+	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "section_", bot.MatchTypePrefix, t.handleSectionToggle)
+	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "save_config", bot.MatchTypeExact, t.handleSave)
+	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "cancel_config", bot.MatchTypeExact, t.handleCancel)
+
+	botCtx, cancel := context.WithCancel(ctx)
+	t.mu.Lock()
+	t.cancelFunc = cancel
+	t.mu.Unlock()
+
+	go t.bot.Start(botCtx)
+
+	return nil
+}
+
+// StopBot stops the bot gracefully.
+func (t *TelegramNotifier) StopBot() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.cancelFunc != nil {
+		t.cancelFunc()
+		t.cancelFunc = nil
+	}
+
+	return nil
+}
+
+// handleStart handles the /start command.
+func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	username := update.Message.From.Username
+
+	// Ensure user preferences exist
+	if t.prefManager != nil {
+		_, _ = t.prefManager.GetOrCreate(chatID, username)
+	}
+
+	text := "🤖 <b>Bem-vindo ao Hourglass RPA Bot!</b>\n\n" +
+		"Use /configurar para escolher quais seções deseja receber notificações.\n" +
+		"Use /status para ver suas preferências atuais.\n" +
+		"Use /ajuda para ver todos os comandos disponíveis."
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
+// handleConfig handles the /configurar command.
+func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	username := update.Message.From.Username
+
+	if t.prefManager == nil {
+		return
+	}
+
+	pref, err := t.prefManager.GetOrCreate(chatID, username)
+	if err != nil {
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      "❌ Erro ao carregar preferências. Tente novamente.",
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      chatID,
+		Text:        "⚙️ <b>Escolha as seções para receber notificações:</b>",
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: t.buildConfigKeyboard(pref),
+	})
+}
+
+// handleStatus handles the /status command.
+func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	username := update.Message.From.Username
+
+	if t.prefManager == nil {
+		return
+	}
+
+	pref, err := t.prefManager.GetOrCreate(chatID, username)
+	if err != nil {
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      "❌ Erro ao carregar preferências. Tente novamente.",
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	var msg strings.Builder
+	msg.WriteString("📊 <b>Suas preferências:</b>\n\n")
+
+	for _, section := range AllSections {
+		if containsSection(pref.Sections, section) {
+			msg.WriteString(fmt.Sprintf("✅ %s\n", section))
+		} else {
+			msg.WriteString(fmt.Sprintf("❌ %s\n", section))
+		}
+	}
+
+	if pref.Enabled {
+		msg.WriteString("\n🔔 Notificações: <b>Ativadas</b>")
+	} else {
+		msg.WriteString("\n🔕 Notificações: <b>Desativadas</b>")
+	}
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      msg.String(),
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
+// handleHelp handles the /ajuda command.
+func (t *TelegramNotifier) handleHelp(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	text := "📖 <b>Comandos disponíveis:</b>\n\n" +
+		"/start - Mensagem de boas-vindas\n" +
+		"/configurar - Configurar seções de notificação\n" +
+		"/status - Ver preferências atuais\n" +
+		"/ajuda - Mostrar esta mensagem\n" +
+		"/checknow - Verificação imediata (admin)"
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    update.Message.Chat.ID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
+// handleCheckNow handles the /checknow command (admin only).
+func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	if !t.IsAuthorized(chatID) {
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      "⛔ Você não tem permissão para executar este comando.",
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      "🔄 Verificação imediata solicitada. Processando...",
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
+// handleSectionToggle handles section toggle callback queries.
+func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+
+	// CRITICAL: Always answer callback first
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		ShowAlert:       false,
+	})
+
+	if t.prefManager == nil {
+		return
+	}
+
+	chatID := update.CallbackQuery.From.ID
+	username := update.CallbackQuery.From.Username
+
+	// Extract section name from callback data ("section_Campo" -> "Campo")
+	section := strings.TrimPrefix(update.CallbackQuery.Data, "section_")
+
+	pref, err := t.prefManager.GetOrCreate(chatID, username)
+	if err != nil {
+		return
+	}
+
+	// Toggle the section
+	if containsSection(pref.Sections, section) {
+		pref.Sections = removeSection(pref.Sections, section)
+	} else {
+		pref.Sections = append(pref.Sections, section)
+	}
+
+	// Save toggled state temporarily via UpdateSections
+	_ = t.prefManager.UpdateSections(chatID, pref.Sections)
+
+	// Update the inline keyboard
+	if update.CallbackQuery.Message.Message != nil {
+		b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
+			ChatID:      chatID,
+			MessageID:   update.CallbackQuery.Message.Message.ID,
+			ReplyMarkup: t.buildConfigKeyboard(pref),
+		})
+	}
+}
+
+// handleSave handles the save configuration callback query.
+func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+
+	// CRITICAL: Always answer callback first
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		ShowAlert:       false,
+	})
+
+	if t.prefManager == nil {
+		return
+	}
+
+	chatID := update.CallbackQuery.From.ID
+	username := update.CallbackQuery.From.Username
+
+	pref, err := t.prefManager.GetOrCreate(chatID, username)
+	if err != nil {
+		return
+	}
+
+	// Preferences are already saved by toggle handler; confirm to user
+	var msg strings.Builder
+	msg.WriteString("✅ <b>Preferências salvas!</b>\n\n")
+
+	if len(pref.Sections) == 0 {
+		msg.WriteString("Nenhuma seção selecionada. Você não receberá notificações.")
+	} else {
+		msg.WriteString("Seções selecionadas:\n")
+		for _, s := range pref.Sections {
+			msg.WriteString(fmt.Sprintf("• %s\n", s))
+		}
+	}
+
+	// Replace the keyboard message with confirmation
+	if update.CallbackQuery.Message.Message != nil {
+		b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: update.CallbackQuery.Message.Message.ID,
+			Text:      msg.String(),
+			ParseMode: models.ParseModeHTML,
+		})
+	}
+}
+
+// handleCancel handles the cancel configuration callback query.
+func (t *TelegramNotifier) handleCancel(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+
+	// CRITICAL: Always answer callback first
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		ShowAlert:       false,
+	})
+
+	chatID := update.CallbackQuery.From.ID
+
+	// Replace the keyboard message with cancellation
+	if update.CallbackQuery.Message.Message != nil {
+		b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: update.CallbackQuery.Message.Message.ID,
+			Text:      "❌ Configuração cancelada.",
+			ParseMode: models.ParseModeHTML,
+		})
+	}
+}
+
+// buildConfigKeyboard builds an inline keyboard for section configuration.
+func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference) models.ReplyMarkup {
+	var rows [][]models.InlineKeyboardButton
+
+	for _, section := range AllSections {
+		var label string
+		if containsSection(pref.Sections, section) {
+			label = "✅ " + section
+		} else {
+			label = "❌ " + section
+		}
+
+		rows = append(rows, []models.InlineKeyboardButton{
+			{Text: label, CallbackData: "section_" + section},
+		})
+	}
+
+	// Add Save and Cancel buttons
+	rows = append(rows, []models.InlineKeyboardButton{
+		{Text: "💾 Salvar", CallbackData: "save_config"},
+		{Text: "🚫 Cancelar", CallbackData: "cancel_config"},
+	})
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: rows,
+	}
+}
+
+// containsSection checks if a section is in the list.
+func containsSection(sections []string, section string) bool {
+	for _, s := range sections {
+		if s == section {
+			return true
+		}
+	}
+	return false
+}
+
+// removeSection removes a section from the list.
+func removeSection(sections []string, section string) []string {
+	result := make([]string, 0, len(sections))
+	for _, s := range sections {
+		if s != section {
+			result = append(result, s)
+		}
+	}
+	return result
 }

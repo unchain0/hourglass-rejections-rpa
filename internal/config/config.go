@@ -17,6 +17,11 @@ type Config struct {
 	// Hourglass API Authentication
 	HourglassXSRFToken string `env:"HOURGLASS_XSRF_TOKEN"`
 	HourglassHGLogin     string `env:"HOURGLASS_HGLOGIN_COOKIE"`
+	// Playwright Authentication
+	HourglassEmail    string `env:"HOURGLASS_EMAIL"`
+	HourglassPassword string `env:"HOURGLASS_PASSWORD"`
+	// User Preferences
+	UserPrefsFile string `env:"USER_PREFS_FILE" envDefault:"data/preferences.json"`
 	// Sentry configuration
 	SentryDSN         string `env:"SENTRY_DSN"`
 	SentryEnvironment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`
