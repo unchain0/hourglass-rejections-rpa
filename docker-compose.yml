@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   rpa:
     build:
@@ -14,8 +12,8 @@ services:
       # HOURGLASS_XSRF_TOKEN must be set in .env file
       # Get it from: Hourglass → DevTools → Network → X-Hourglass-XSRF-Token header
     volumes:
-      - ./outputs:/app/outputs
-      - ./data:/app/data
+      - outputs:/app/outputs
+      - data:/app/data
     networks:
       - rpa-network
     logging:
