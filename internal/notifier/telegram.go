@@ -208,6 +208,21 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 		username = update.Message.From.Username
 	}
 
+	if !t.IsAuthorized(chatID) {
+		text := "🤖 <b>Bem-vindo ao Hourglass RPA Bot!</b>\n\n" +
+			"Você pode interagir com o bot, mas <b>não está autorizado a receber notificações</b>.\n\n" +
+			"📧 Para receber notificações de rejeições, entre em contato com o administrador " +
+			"e solicite que seu Chat ID seja adicionado à lista de permissões.\n\n" +
+			"Seu Chat ID: <code>" + fmt.Sprintf("%d", chatID) + "</code>"
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      text,
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
 	// Ensure user preferences exist
 	if t.prefManager != nil {
 		_, _ = t.prefManager.GetOrCreate(chatID, username)
@@ -218,7 +233,7 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 		"Use /status para ver suas preferências atuais.\n" +
 		"Use /ajuda para ver todos os comandos disponíveis."
 
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      text,
 		ParseMode: models.ParseModeHTML,
@@ -233,6 +248,16 @@ func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update 
 
 	chatID := update.Message.Chat.ID
 	username := update.Message.From.Username
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			//nolint:misspell // Portuguese text
+			Text:      "❌ Você não está autorizado a usar este comando. Entre em contato com o administrador.",
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
 
 	if t.prefManager == nil {
 		return
@@ -264,6 +289,16 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 
 	chatID := update.Message.Chat.ID
 	username := update.Message.From.Username
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			//nolint:misspell // Portuguese text
+			Text:      "❌ Você não está autorizado a usar este comando. Entre em contato com o administrador.",
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
 
 	if t.prefManager == nil {
 		return
@@ -376,8 +411,19 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 		return
 	}
 
+	chatID := update.CallbackQuery.From.ID
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			ShowAlert:       true,
+			Text:            "Você não está autorizado. Entre em contato com o administrador.",
+		})
+		return
+	}
+
 	// CRITICAL: Always answer callback first
-	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: update.CallbackQuery.ID,
 		ShowAlert:       false,
 	})
@@ -386,7 +432,6 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 		return
 	}
 
-	chatID := update.CallbackQuery.From.ID
 	username := update.CallbackQuery.From.Username
 
 	// Extract section name from callback data ("section_Campo" -> "Campo")
@@ -425,8 +470,19 @@ func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *m
 		return
 	}
 
+	chatID := update.CallbackQuery.From.ID
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			ShowAlert:       true,
+			Text:            "Você não está autorizado. Entre em contato com o administrador.",
+		})
+		return
+	}
+
 	// CRITICAL: Always answer callback first
-	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: update.CallbackQuery.ID,
 		ShowAlert:       false,
 	})
@@ -435,7 +491,6 @@ func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *m
 		return
 	}
 
-	chatID := update.CallbackQuery.From.ID
 	username := update.CallbackQuery.From.Username
 
 	pref, err := t.prefManager.GetOrCreate(chatID, username)
@@ -473,13 +528,22 @@ func (t *TelegramNotifier) handleCancel(ctx context.Context, b *bot.Bot, update 
 		return
 	}
 
+	chatID := update.CallbackQuery.From.ID
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			ShowAlert:       true,
+			Text:            "Você não está autorizado. Entre em contato com o administrador.",
+		})
+		return
+	}
+
 	// CRITICAL: Always answer callback first
-	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: update.CallbackQuery.ID,
 		ShowAlert:       false,
 	})
-
-	chatID := update.CallbackQuery.From.ID
 
 	// Replace the keyboard message with cancellation
 	if update.CallbackQuery.Message.Message != nil {

@@ -29,7 +29,6 @@ type Config struct {
 	SentryEnvironment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`
 	// Telegram Bot configuration
 	TelegramBotToken  string `env:"TELEGRAM_BOT_TOKEN"`
-	TelegramChatID    string `env:"TELEGRAM_CHAT_ID"`
 	TelegramWhitelist string `env:"TELEGRAM_WHITELIST"`
 }
 

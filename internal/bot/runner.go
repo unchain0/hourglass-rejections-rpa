@@ -240,8 +240,15 @@ func (b *BotRunner) sendRejectionsNotification(chatID int64, rejections []domain
 
 func (b *BotRunner) getWhitelist() []int64 {
 	var whitelist []int64
-	if chatIDs := os.Getenv("TELEGRAM_CHAT_ID"); chatIDs != "" {
-		for _, idStr := range strings.Split(chatIDs, ",") {
+	var whitelistEnv string
+	if b.cfg != nil {
+		whitelistEnv = b.cfg.TelegramWhitelist
+	}
+	if whitelistEnv == "" {
+		whitelistEnv = os.Getenv("TELEGRAM_WHITELIST")
+	}
+	if whitelistEnv != "" {
+		for _, idStr := range strings.Split(whitelistEnv, ",") {
 			id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
 			if err != nil {
 				continue

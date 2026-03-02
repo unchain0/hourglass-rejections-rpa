@@ -666,8 +666,8 @@ func TestSendRejectionsNotification_Success(t *testing.T) {
 }
 
 func TestGetWhitelist(t *testing.T) {
-	os.Setenv("TELEGRAM_CHAT_ID", "123, 456, invalid, 789")
-	defer os.Unsetenv("TELEGRAM_CHAT_ID")
+	_ = os.Setenv("TELEGRAM_WHITELIST", "123, 456, invalid, 789")
+	defer func() { _ = os.Unsetenv("TELEGRAM_WHITELIST") }()
 
 	runner := &BotRunner{}
 	whitelist := runner.getWhitelist()
@@ -681,10 +681,10 @@ func TestGetWhitelist(t *testing.T) {
 }
 
 func TestRun_NoNotifier_WithToken_Success(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "dummy_token")
-	os.Setenv("TELEGRAM_CHAT_ID", "12345")
-	defer os.Unsetenv("TELEGRAM_BOT_TOKEN")
-	defer os.Unsetenv("TELEGRAM_CHAT_ID")
+	_ = os.Setenv("TELEGRAM_BOT_TOKEN", "dummy_token")
+	_ = os.Setenv("TELEGRAM_WHITELIST", "12345")
+	defer func() { _ = os.Unsetenv("TELEGRAM_BOT_TOKEN") }()
+	defer func() { _ = os.Unsetenv("TELEGRAM_WHITELIST") }()
 
 	origNewTelegramNotifier := newTelegramNotifier
 	newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (Notifier, error) {
@@ -727,10 +727,10 @@ func TestNewTelegramNotifier(t *testing.T) {
 }
 
 func TestRun_NoNotifier_WithToken(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "dummy_token")
-	os.Setenv("TELEGRAM_CHAT_ID", "12345,invalid,67890")
-	defer os.Unsetenv("TELEGRAM_BOT_TOKEN")
-	defer os.Unsetenv("TELEGRAM_CHAT_ID")
+	_ = os.Setenv("TELEGRAM_BOT_TOKEN", "dummy_token")
+	_ = os.Setenv("TELEGRAM_WHITELIST", "12345,invalid,67890")
+	defer func() { _ = os.Unsetenv("TELEGRAM_BOT_TOKEN") }()
+	defer func() { _ = os.Unsetenv("TELEGRAM_WHITELIST") }()
 
 	origNewTelegramNotifier := newTelegramNotifier
 	newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (Notifier, error) {
