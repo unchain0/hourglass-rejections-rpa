@@ -27,6 +27,10 @@ type Config struct {
 	// Sentry configuration
 	SentryDSN         string `env:"SENTRY_DSN"`
 	SentryEnvironment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`
+	// Telegram Bot configuration
+	TelegramBotToken  string `env:"TELEGRAM_BOT_TOKEN"`
+	TelegramChatID    string `env:"TELEGRAM_CHAT_ID"`
+	TelegramWhitelist string `env:"TELEGRAM_WHITELIST"`
 }
 
 func Load() (*Config, error) {
