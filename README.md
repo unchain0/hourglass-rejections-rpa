@@ -37,10 +37,42 @@ docker-compose up -d
 go install github.com/unchain0/hourglass-rejections-rpa/cmd/rpa@latest
 ```
 
-### Local Build
+### Local Build (Manual)
+
+Build the binary manually from source:
 
 ```bash
+# Clone the repository
+git clone https://github.com/unchain0/hourglass-rejections-rpa.git
+cd hourglass-rejections-rpa
+
+# Download dependencies
+go mod download
+
+# Build the binary
 go build -o rpa ./cmd/rpa
+
+# Make it executable (Linux/macOS)
+chmod +x rpa
+
+# Run it
+./rpa -once
+```
+
+**Requirements:**
+- Go 1.24 or higher
+- Git
+
+**Build for different platforms:**
+```bash
+# Linux
+GOOS=linux GOARCH=amd64 go build -o rpa-linux ./cmd/rpa
+
+# macOS
+GOOS=darwin GOARCH=amd64 go build -o rpa-macos ./cmd/rpa
+
+# Windows
+GOOS=windows GOARCH=amd64 go build -o rpa.exe ./cmd/rpa
 ```
 
 ## ⚙️ Configuration
@@ -95,15 +127,6 @@ OUTPUT_DIR=./outputs
 5. In the request headers, copy:
    - `X-Hourglass-XSRF-Token`
    - Cookie `hglogin`
-
-Or run in browser console:
-```javascript
-// XSRF Token
-document.cookie.split('; ').find(row => row.startsWith('XSRF-TOKEN='))?.split('=')[1]
-
-// HGLogin Cookie
-decodeURIComponent(document.cookie.match(/hglogin=([^;]+)/)?.[1])
-```
 
 ### Telegram Bot
 
