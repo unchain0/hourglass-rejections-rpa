@@ -49,8 +49,8 @@ USER rpa
 # Set environment variables
 ENV TZ=America/Sao_Paulo
 
-# Expose volume for outputs
-VOLUME ["/app/outputs"]
+# Expose volumes for persistent data
+VOLUME ["/app/outputs", "/app/data"]
 
 # Health check - using ps instead of pgrep for non-root compatibility
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
