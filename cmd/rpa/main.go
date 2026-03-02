@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -35,10 +36,10 @@ func init() {
 func loadEnvFiles() {
 	// Possible locations for .env file
 	locations := []string{
-		".env",       // Current directory
-		"../.env",    // Parent directory
-		"../../.env", // Grandparent directory
-		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", ".env"), // Home directory
+		".",       // Current directory
+		"../.",    // Parent directory
+		"../../.", // Grandparent directory
+		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", "."), // Home directory
 	}
 
 	for _, location := range locations {
@@ -50,7 +51,7 @@ func loadEnvFiles() {
 		}
 	}
 
-	// Try default .env (will silently fail if not exists)
+	// Try default . (will silently fail if not exists)
 	_ = godotenv.Load()
 }
 
@@ -118,8 +119,11 @@ func main() {
 	// Once mode: run analysis once and exit
 	if *onceMode {
 		logger.Info("running in once mode")
-		if err := runOnce(ctx, analyzer, store); err != nil {
+		if err := runOnce(ctx, sentryClient, analyzer, store); err != nil {
 			logger.Error("run failed", "error", err)
+			if sentryClient.IsEnabled() {
+				sentryClient.Flush(2 * time.Second)
+			}
 			os.Exit(1)
 		}
 		logger.Info("analysis complete")
@@ -128,13 +132,16 @@ func main() {
 
 	// Scheduler mode: run jobs at scheduled times
 	logger.Info("starting scheduler mode")
-	if err := runScheduler(ctx, analyzer, store); err != nil {
+	if err := runScheduler(ctx, sentryClient, analyzer, store); err != nil {
 		logger.Error("scheduler failed", "error", err)
+		if sentryClient.IsEnabled() {
+			sentryClient.Flush(2 * time.Second)
+		}
 		os.Exit(1)
 	}
 }
 
-func runOnce(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+func runOnce(ctx context.Context, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	// Analyze all sections
 	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
 	var allRejections []domain.Rejeicao
@@ -145,11 +152,23 @@ func runOnce(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.File
 		result, err := analyzer.AnalyzeSection(section)
 		if err != nil {
 			slog.Error("failed to analyze section", "section", section, "error", err)
+			if sentryClient.IsEnabled() {
+				sentryClient.CaptureError(err, map[string]interface{}{
+					"section":   section,
+					"operation": "analyze_section",
+				})
+			}
 			continue
 		}
 
 		if result.Error != nil {
 			slog.Error("analysis returned error", "section", section, "error", result.Error)
+			if sentryClient.IsEnabled() {
+				sentryClient.CaptureError(result.Error, map[string]interface{}{
+					"section":   section,
+					"operation": "analyze_section_result",
+				})
+			}
 			continue
 		}
 
@@ -164,13 +183,19 @@ func runOnce(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.File
 			allRejections = append(allRejections, result.Rejeicoes...)
 			if err := store.Save(ctx, result.Rejeicoes); err != nil {
 				slog.Error("failed to save results", "section", section, "error", err)
+				if sentryClient.IsEnabled() {
+					sentryClient.CaptureError(err, map[string]interface{}{
+						"section":   section,
+						"operation": "save_results",
+					})
+				}
 			}
 		}
 	}
 
 	// Send Telegram notification if there are rejections
 	if len(allRejections) > 0 {
-		if err := sendTelegramNotification(allRejections); err != nil {
+		if err := sendTelegramNotification(sentryClient, allRejections); err != nil {
 			slog.Error("failed to send telegram notification", "error", err)
 		}
 	}
@@ -178,7 +203,7 @@ func runOnce(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.File
 	return nil
 }
 
-func sendTelegramNotification(rejections []domain.Rejeicao) error {
+func sendTelegramNotification(sentryClient *sentry.Client, rejections []domain.Rejeicao) error {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
 	whitelistStr := os.Getenv("TELEGRAM_WHITELIST")
@@ -193,6 +218,11 @@ func sendTelegramNotification(rejections []domain.Rejeicao) error {
 
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 	if err != nil {
+		if sentryClient.IsEnabled() {
+			sentryClient.CaptureError(err, map[string]interface{}{
+				"operation": "parse_chat_id",
+			})
+		}
 		return fmt.Errorf("invalid telegram chat ID: %w", err)
 	}
 
@@ -210,6 +240,11 @@ func sendTelegramNotification(rejections []domain.Rejeicao) error {
 
 	tgBot, err := notifier.NewTelegramNotifier(token, chatID, whitelist)
 	if err != nil {
+		if sentryClient.IsEnabled() {
+			sentryClient.CaptureError(err, map[string]interface{}{
+				"operation": "create_telegram_notifier",
+			})
+		}
 		return fmt.Errorf("failed to create telegram notifier: %w", err)
 	}
 
@@ -219,6 +254,11 @@ func sendTelegramNotification(rejections []domain.Rejeicao) error {
 	}
 
 	if err := tgBot.SendRejectionsNotification(rejections); err != nil {
+		if sentryClient.IsEnabled() {
+			sentryClient.CaptureError(err, map[string]interface{}{
+				"operation": "send_telegram_notification",
+			})
+		}
 		return fmt.Errorf("failed to send telegram notification: %w", err)
 	}
 
@@ -226,7 +266,7 @@ func sendTelegramNotification(rejections []domain.Rejeicao) error {
 	return nil
 }
 
-func runScheduler(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+func runScheduler(ctx context.Context, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	logger := slog.Default()
 
 	// Create scheduler
@@ -235,7 +275,7 @@ func runScheduler(ctx context.Context, analyzer *api.APIAnalyzer, store *storage
 	// Create job function
 	jobFunc := func(ctx context.Context) error {
 		logger.Info("running scheduled analysis")
-		return runOnce(ctx, analyzer, store)
+		return runOnce(ctx, sentryClient, analyzer, store)
 	}
 
 	// Schedule jobs for 9:00 AM and 5:00 PM
