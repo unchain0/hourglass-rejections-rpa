@@ -138,6 +138,21 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "save_config", bot.MatchTypeExact, t.handleSave)
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "cancel_config", bot.MatchTypeExact, t.handleCancel)
 
+	commands := []models.BotCommand{
+		{Command: "start", Description: "Mensagem de boas-vindas"},
+		{Command: "configurar", Description: "Configurar seções de notificação"},
+		{Command: "status", Description: "Ver preferências atuais"},
+		{Command: "ajuda", Description: "Mostrar comandos disponíveis"},
+		{Command: "checknow", Description: "Verificação imediata (admin)"},
+	}
+
+	_, err := t.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{
+		Commands: commands,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set bot commands: %w", err)
+	}
+
 	botCtx, cancel := context.WithCancel(ctx)
 	t.mu.Lock()
 	t.cancelFunc = cancel

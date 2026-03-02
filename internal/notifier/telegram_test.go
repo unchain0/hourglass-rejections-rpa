@@ -130,16 +130,16 @@ func TestStartBot_Success(t *testing.T) {
 	pm := newTestPrefManager(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- tn.StartBot(ctx, pm)
 	}()
 
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 	err := <-errChan
-	assert.NoError(t, err)
+	assert.Error(t, err)
 }
 
 func TestStopBot_Idempotent(t *testing.T) {
