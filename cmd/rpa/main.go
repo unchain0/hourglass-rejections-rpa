@@ -204,66 +204,81 @@ func runOnce(ctx context.Context, sentryClient *sentry.Client, analyzer *api.API
 }
 
 func sendTelegramNotification(sentryClient *sentry.Client, rejections []domain.Rejeicao) error {
-	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
-	whitelistStr := os.Getenv("TELEGRAM_WHITELIST")
+token := os.Getenv("TELEGRAM_BOT_TOKEN")
+chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
+whitelistStr := os.Getenv("TELEGRAM_WHITELIST")
 
-	if token == "" || chatIDStr == "" {
-		slog.Warn("Telegram configuration missing, skipping notification",
-			"has_token", token != "",
-			"has_chat_id", chatIDStr != "",
-		)
-		return nil
-	}
+if token == "" || chatIDStr == "" {
+slog.Warn("Telegram configuration missing, skipping notification",
+"has_token", token != "",
+"has_chat_id", chatIDStr != "",
+)
+return nil
+}
 
-	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
-	if err != nil {
-		if sentryClient.IsEnabled() {
-			sentryClient.CaptureError(err, map[string]interface{}{
-				"operation": "parse_chat_id",
-			})
-		}
-		return fmt.Errorf("invalid telegram chat ID: %w", err)
-	}
+// Parse chat IDs (supports comma-separated list)
+var chatIDs []int64
+for _, idStr := range strings.Split(chatIDStr, ",") {
+id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+if err != nil {
+slog.Warn("invalid chat ID in TELEGRAM_CHAT_ID, skipping", "id", idStr, "error", err)
+continue
+}
+chatIDs = append(chatIDs, id)
+}
 
-	var whitelist []int64
-	if whitelistStr != "" {
-		for _, idStr := range strings.Split(whitelistStr, ",") {
-			id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
-			if err != nil {
-				slog.Warn("invalid chat ID in whitelist, skipping", "id", idStr, "error", err)
-				continue
-			}
-			whitelist = append(whitelist, id)
-		}
-	}
+if len(chatIDs) == 0 {
+return fmt.Errorf("no valid telegram chat IDs found")
+}
 
-	tgBot, err := notifier.NewTelegramNotifier(token, chatID, whitelist)
-	if err != nil {
-		if sentryClient.IsEnabled() {
-			sentryClient.CaptureError(err, map[string]interface{}{
-				"operation": "create_telegram_notifier",
-			})
-		}
-		return fmt.Errorf("failed to create telegram notifier: %w", err)
-	}
+var whitelist []int64
+if whitelistStr != "" {
+for _, idStr := range strings.Split(whitelistStr, ",") {
+id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+if err != nil {
+slog.Warn("invalid chat ID in whitelist, skipping", "id", idStr, "error", err)
+continue
+}
+whitelist = append(whitelist, id)
+}
+}
 
-	if !tgBot.IsAuthorized(chatID) {
-		slog.Warn("unauthorized chat ID, skipping notification", "chat_id", chatID)
-		return nil
-	}
+tgBot, err := notifier.NewTelegramNotifier(token, chatIDs[0], whitelist)
+if err != nil {
+if sentryClient != nil && sentryClient.IsEnabled() {
+sentryClient.CaptureError(err, map[string]interface{}{
+"operation": "create_telegram_notifier",
+})
+}
+return fmt.Errorf("failed to create telegram notifier: %w", err)
+}
 
-	if err := tgBot.SendRejectionsNotification(rejections); err != nil {
-		if sentryClient.IsEnabled() {
-			sentryClient.CaptureError(err, map[string]interface{}{
-				"operation": "send_telegram_notification",
-			})
-		}
-		return fmt.Errorf("failed to send telegram notification: %w", err)
-	}
+// Send notification to each chat ID
+var sentCount int
+for _, chatID := range chatIDs {
+if !tgBot.IsAuthorized(chatID) {
+slog.Warn("unauthorized chat ID, skipping notification", "chat_id", chatID)
+continue
+}
+if err := tgBot.SendRejectionsNotification(chatID, rejections); err != nil {
+slog.Error("failed to send telegram notification to chat", "chat_id", chatID, "error", err)
+if sentryClient != nil && sentryClient.IsEnabled() {
+sentryClient.CaptureError(err, map[string]interface{}{
+"operation": "send_telegram_notification",
+"chat_id": chatID,
+})
+}
+continue
+}
+sentCount++
+slog.Info("telegram notification sent successfully", "chat_id", chatID, "count", len(rejections))
+}
 
-	slog.Info("telegram notification sent successfully", "count", len(rejections))
-	return nil
+if sentCount == 0 {
+return fmt.Errorf("failed to send telegram notification to any chat")
+}
+
+return nil
 }
 
 func runScheduler(ctx context.Context, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {

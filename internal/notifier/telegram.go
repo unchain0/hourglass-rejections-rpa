@@ -52,41 +52,41 @@ func (t *TelegramNotifier) IsAuthorized(chatID int64) bool {
 	return false
 }
 
-// SendRejectionsNotification sends a notification about rejections.
-func (t *TelegramNotifier) SendRejectionsNotification(rejections []domain.Rejeicao) error {
-	if len(rejections) == 0 {
-		return nil
-	}
+// SendRejectionsNotification sends a notification about rejections to a specific chat ID.
+func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error {
+if len(rejections) == 0 {
+return nil
+}
 
-	if !t.IsAuthorized(t.chatID) {
-		return fmt.Errorf("unauthorized chat ID: %d", t.chatID)
-	}
+	if !t.IsAuthorized(chatID) {
+		return fmt.Errorf("unauthorized chat ID: %d", chatID)
+}
 
-	// Build message (using HTML instead of Markdown to avoid escaping issues)
-	var msg strings.Builder
-	msg.WriteString("<b>❌ Rejeições Detectadas no Hourglass</b>\n\n")
-	msg.WriteString(fmt.Sprintf("Foram detectadas <b>%d</b> designação(ões) recusada(s):\n\n", len(rejections)))
+// Build message (using HTML instead of Markdown to avoid escaping issues)
+var msg strings.Builder
+msg.WriteString("<b>❌ Rejeições Detectadas no Hourglass</b>\n\n")
+msg.WriteString(fmt.Sprintf("Foram detectadas <b>%d</b> designação(ões) recusada(s):\n\n", len(rejections)))
 
-	for i, r := range rejections {
-		msg.WriteString(fmt.Sprintf("<b>Rejeição #%d:</b>\n", i+1))
-		msg.WriteString(fmt.Sprintf("👤 <b>Quem:</b> %s\n", r.Quem))
-		msg.WriteString(fmt.Sprintf("📋 <b>Seção:</b> %s\n", r.Secao))
-		msg.WriteString(fmt.Sprintf("📝 <b>Designação:</b> %s\n", r.OQue))
-		msg.WriteString(fmt.Sprintf("📅 <b>Data:</b> %s\n\n", r.PraQuando))
-	}
+for i, r := range rejections {
+msg.WriteString(fmt.Sprintf("<b>Rejeição #%d:</b>\n", i+1))
+msg.WriteString(fmt.Sprintf("👤 <b>Quem:</b> %s\n", r.Quem))
+msg.WriteString(fmt.Sprintf("📋 <b>Seção:</b> %s\n", r.Secao))
+msg.WriteString(fmt.Sprintf("📝 <b>Designação:</b> %s\n", r.OQue))
+msg.WriteString(fmt.Sprintf("📅 <b>Data:</b> %s\n\n", r.PraQuando))
+}
 
-	// Send message
-	_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
-		ChatID:    t.chatID,
-		Text:      msg.String(),
-		ParseMode: models.ParseModeHTML,
-	})
+// Send message
+_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
+		ChatID:    chatID,
+Text:      msg.String(),
+ParseMode: models.ParseModeHTML,
+})
 
-	if err != nil {
-		return fmt.Errorf("failed to send telegram message: %w", err)
-	}
+if err != nil {
+return fmt.Errorf("failed to send telegram message: %w", err)
+}
 
-	return nil
+return nil
 }
 
 // IsConfigured checks if the notifier is properly configured.

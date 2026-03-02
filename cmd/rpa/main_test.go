@@ -145,7 +145,7 @@ func TestSendTelegramNotification_MissingConfig(t *testing.T) {
 		{Secao: "Test Section", Quem: "Test User", OQue: "Test Assignment", PraQuando: "01/03/2026"},
 	}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	if err != nil {
 		t.Errorf("sendTelegramNotification with missing config should return nil, got error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestSendTelegramNotification_MissingConfig(t *testing.T) {
 	os.Setenv("TELEGRAM_CHAT_ID", "123456789")
 	os.Unsetenv("TELEGRAM_BOT_TOKEN")
 
-	err = sendTelegramNotification(rejections)
+	err = sendTelegramNotification(nil, rejections)
 	if err != nil {
 		t.Errorf("sendTelegramNotification with missing token should return nil, got error: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestSendTelegramNotification_MissingConfig(t *testing.T) {
 	os.Unsetenv("TELEGRAM_CHAT_ID")
 	os.Setenv("TELEGRAM_BOT_TOKEN", "fake-token")
 
-	err = sendTelegramNotification(rejections)
+	err = sendTelegramNotification(nil, rejections)
 	if err != nil {
 		t.Errorf("sendTelegramNotification with missing chat ID should return nil, got error: %v", err)
 	}
@@ -185,14 +185,14 @@ func TestSendTelegramNotification_InvalidChatID(t *testing.T) {
 		{Secao: "Test Section", Quem: "Test User", OQue: "Test Assignment", PraQuando: "01/03/2026"},
 	}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	if err == nil {
 		t.Error("sendTelegramNotification with invalid chat ID should return error")
 	}
 
-	if !strings.Contains(err.Error(), "invalid telegram chat ID") {
-		t.Errorf("error message should mention invalid chat ID, got: %v", err)
-	}
+	if !strings.Contains(err.Error(), "no valid telegram chat IDs") {
+		t.Errorf("error message should mention no valid chat IDs, got: %v", err)
+}
 }
 
 // TestSendTelegramNotification_EmptyWhitelist tests with empty whitelist
@@ -220,7 +220,7 @@ func TestSendTelegramNotification_EmptyWhitelist(t *testing.T) {
 	}
 
 	// This will fail to create TelegramNotifier with fake token, which is expected
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	// Error is expected due to fake token, not due to empty whitelist
 	// The important part is that it doesn't fail due to whitelist parsing
 	if err == nil {
@@ -251,7 +251,7 @@ func TestSendTelegramNotification_ValidWhitelist(t *testing.T) {
 		{Secao: "Test Section", Quem: "Test User", OQue: "Test Assignment", PraQuando: "01/03/2026"},
 	}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	// Will fail due to fake token, but whitelist should parse correctly
 	if err == nil {
 		t.Log("Note: Telegram notification would fail in real scenario due to fake token")
@@ -281,7 +281,7 @@ func TestSendTelegramNotification_WhitelistWithInvalidIDs(t *testing.T) {
 		{Secao: "Test Section", Quem: "Test User", OQue: "Test Assignment", PraQuando: "01/03/2026"},
 	}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	// Should skip invalid IDs but continue with valid ones
 	if err == nil {
 		t.Log("Note: Telegram notification would fail in real scenario due to fake token")
@@ -302,7 +302,7 @@ func TestSendTelegramNotification_EmptyRejections(t *testing.T) {
 
 	rejections := []domain.Rejeicao{}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	// Empty list will fail with fake token - this is expected behavior
 	// The function still validates config and creates the notifier even for empty lists
 	if err != nil {
@@ -333,7 +333,7 @@ func TestSendTelegramNotification_MultipleRejections(t *testing.T) {
 
 	}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	// Will fail due to fake token, but should handle multiple entries
 	if err == nil {
 		t.Log("Note: Telegram notification would fail in real scenario due to fake token")
@@ -363,7 +363,7 @@ func TestSendTelegramNotification_WhitespaceInWhitelist(t *testing.T) {
 		{Secao: "Test Section", Quem: "Test User", OQue: "Test Assignment", PraQuando: "01/03/2026"},
 	}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	// Should handle whitespace correctly
 	if err == nil {
 		t.Log("Note: Telegram notification would fail in real scenario due to fake token")
@@ -441,7 +441,7 @@ func TestSendTelegramNotification_RejectionWithSpecialCharacters(t *testing.T) {
 		},
 	}
 
-	err := sendTelegramNotification(rejections)
+	err := sendTelegramNotification(nil, rejections)
 	if err == nil {
 		t.Log("Note: Telegram notification would fail in real scenario due to fake token")
 	}
