@@ -6,10 +6,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 	"hourglass-rejections-rpa/internal/domain"
 	"hourglass-rejections-rpa/internal/preferences"
+
+	"github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 )
 
 // AllSections lists all configurable sections for notifications.
