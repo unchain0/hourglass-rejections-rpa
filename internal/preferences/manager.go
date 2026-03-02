@@ -72,3 +72,13 @@ func (pm *PreferenceManager) ToggleEnabled(chatID int64, enabled bool) error {
 func (pm *PreferenceManager) List() ([]UserPreference, error) {
 	return pm.store.List()
 }
+
+// RecordDiscoveredChat saves a discovered chat (user who messaged the bot)
+// This is separate from whitelist authorization - it just tracks who contacted the bot
+func (pm *PreferenceManager) RecordDiscoveredChat(chatID int64, username string) error {
+	// Try to cast to *Store to access the method
+	if store, ok := pm.store.(*Store); ok {
+		return store.SaveDiscoveredChat(chatID, username)
+	}
+	return nil
+}

@@ -51,6 +51,17 @@ type JobExecution struct {
 	ErrorMsg   string
 }
 
+// DiscoveredChat stores chat IDs of users who messaged the bot
+// This is separate from whitelist - admins can review and add to whitelist
+type DiscoveredChat struct {
+	ID           uint      `gorm:"primaryKey"`
+	ChatID       int64     `gorm:"uniqueIndex;not null"`
+	Username     string    `gorm:"size:255"`
+	FirstSeen    time.Time `gorm:"index;not null"`
+	LastSeen     time.Time `gorm:"index;not null"`
+	MessageCount int       `gorm:"default:1"`
+}
+
 func (u *UserPreference) Sections() []string {
 	var sections []string
 	if err := json.Unmarshal([]byte(u.SectionsJSON), &sections); err != nil {
@@ -90,7 +101,7 @@ func NewStore(dbPath string) (*Store, error) {
 	db.Exec("PRAGMA synchronous = NORMAL")
 	db.Exec("PRAGMA busy_timeout = 5000")
 
-	if err := db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}); err != nil {
+	if err := db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -211,6 +222,50 @@ func (s *Store) GetLastExecution(jobName string) (*time.Time, error) {
 func (s *Store) CleanupExpiredData() (int64, error) {
 	result := s.db.Where("data_retention < ?", time.Now()).Delete(&UserPreference{})
 	return result.RowsAffected, result.Error
+}
+
+// SaveDiscoveredChat saves or updates a discovered chat (user who messaged the bot)
+func (s *Store) SaveDiscoveredChat(chatID int64, username string) error {
+	var chat DiscoveredChat
+	result := s.db.Where("chat_id = ?", chatID).First(&chat)
+
+	now := time.Now()
+	if result.Error == gorm.ErrRecordNotFound {
+		// New chat - create record
+		chat = DiscoveredChat{
+			ChatID:       chatID,
+			Username:     username,
+			FirstSeen:    now,
+			LastSeen:     now,
+			MessageCount: 1,
+		}
+		return s.db.Create(&chat).Error
+	}
+
+	// Existing chat - update last seen and increment count
+	chat.LastSeen = now
+	chat.MessageCount++
+	if username != "" && chat.Username == "" {
+		chat.Username = username
+	}
+	return s.db.Save(&chat).Error
+}
+
+// GetDiscoveredChat retrieves a discovered chat by chatID
+func (s *Store) GetDiscoveredChat(chatID int64) (*DiscoveredChat, error) {
+	var chat DiscoveredChat
+	result := s.db.Where("chat_id = ?", chatID).First(&chat)
+	if result.Error == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &chat, result.Error
+}
+
+// ListDiscoveredChats returns all discovered chats
+func (s *Store) ListDiscoveredChats() ([]DiscoveredChat, error) {
+	var chats []DiscoveredChat
+	result := s.db.Order("first_seen DESC").Find(&chats)
+	return chats, result.Error
 }
 
 func (s *Store) Close() error {

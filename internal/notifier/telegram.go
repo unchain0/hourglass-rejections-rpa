@@ -208,6 +208,11 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 		username = update.Message.From.Username
 	}
 
+	// Save discovered chat (user who messaged the bot) - separate from whitelist
+	if t.prefManager != nil {
+		_ = t.prefManager.RecordDiscoveredChat(chatID, username)
+	}
+
 	if !t.IsAuthorized(chatID) {
 		text := "🤖 <b>Bem-vindo ao Hourglass RPA Bot!</b>\n\n" +
 			"Você pode interagir com o bot, mas <b>não está autorizado a receber notificações</b>.\n\n" +
