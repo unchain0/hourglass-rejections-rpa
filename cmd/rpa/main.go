@@ -2,692 +2,160 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/joho/godotenv"
 
 	"hourglass-rejections-rpa/internal/api"
+	"hourglass-rejections-rpa/internal/bot"
 	"hourglass-rejections-rpa/internal/config"
-	"hourglass-rejections-rpa/internal/domain"
 	"hourglass-rejections-rpa/internal/logger"
-	"hourglass-rejections-rpa/internal/notifier"
-	"hourglass-rejections-rpa/internal/preferences"
+	"hourglass-rejections-rpa/internal/scheduler"
 	"hourglass-rejections-rpa/internal/sentry"
 	"hourglass-rejections-rpa/internal/storage"
 )
 
-// rejectionCache stores the last rejection results to avoid duplicate notifications
-type rejectionCache struct {
-	mu         sync.RWMutex
-	lastResult []domain.Rejeicao
-	lastCheck  time.Time
+type runOptions struct {
+	args   []string
+	getenv func(string) string
+	exit   func(int)
 }
 
-var cache = &rejectionCache{}
-
-func (c *rejectionCache) hasChanges(newRejections []domain.Rejeicao) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if len(c.lastResult) == 0 && len(newRejections) > 0 {
-		c.lastResult = newRejections
-		c.lastCheck = time.Now()
-		return true
-	}
-
-	if len(newRejections) == 0 && len(c.lastResult) == 0 {
-		c.lastCheck = time.Now()
-		return false
-	}
-
-	if len(newRejections) != len(c.lastResult) {
-		c.lastResult = newRejections
-		c.lastCheck = time.Now()
-		return true
-	}
-
-	for i, new := range newRejections {
-		old := c.lastResult[i]
-		if new.Secao != old.Secao || new.Quem != old.Quem || new.OQue != old.OQue {
-			c.lastResult = newRejections
-			c.lastCheck = time.Now()
-			return true
-		}
-	}
-
-	c.lastCheck = time.Now()
-	slog.Info("no changes detected since last check, skipping notification",
-		"last_check", c.lastCheck,
-		"rejections_count", len(newRejections))
-	return false
-}
-
-// init loads .env file if it exists
 func init() {
-	// Try to load .env from multiple possible locations
-	// Silently ignore if not found (allows using system env vars)
 	loadEnvFiles()
 }
 
-// loadEnvFiles attempts to load .env files from various locations
 func loadEnvFiles() {
-	// Possible locations for .env file
 	locations := []string{
-		".",       // Current directory
-		"../.",    // Parent directory
-		"../../.", // Grandparent directory
-		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", "."), // Home directory
+		".",
+		"../.",
+		"../../.",
+		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", "."),
 	}
 
 	for _, location := range locations {
 		if _, err := os.Stat(location); err == nil {
 			if err := godotenv.Load(location); err == nil {
-				// Successfully loaded
 				return
 			}
 		}
 	}
-
-	// Try default . (will silently fail if not exists)
 	_ = godotenv.Load()
 }
 
 func main() {
-	var (
-		onceMode = flag.Bool("once", false, "Run once and exit (don't start scheduler)")
-	)
-	flag.Parse()
+	opts := runOptions{
+		args:   os.Args[1:],
+		getenv: os.Getenv,
+		exit:   os.Exit,
+	}
 
-	// Initialize logger with charmbracelet/log
+	if err := run(context.Background(), opts); err != nil {
+		if err.Error() != "" {
+			slog.Error("application error", "error", err)
+		}
+		opts.exit(1)
+	}
+}
+
+func run(ctx context.Context, opts runOptions) error {
+	fs := flag.NewFlagSet("rpa", flag.ContinueOnError)
+	onceMode := fs.Bool("once", false, "Run once and exit")
+
+	if err := fs.Parse(opts.args); err != nil {
+		return fmt.Errorf("failed to parse flags: %w", err)
+	}
+
+	setupLogging(opts.getenv("LOG_LEVEL"))
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	sentryClient := setupSentry(cfg)
+	if sentryClient.IsEnabled() {
+		defer sentryClient.Close()
+	}
+
+	slog.Info("starting hourglass-rejections-rpa", "version", "1.0.0", "once_mode", *onceMode)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	analyzer, store := setupDependencies(cfg)
+
+	if *onceMode {
+		slog.Info("running in once mode")
+		return runOnceMode(ctx, cfg, sentryClient, analyzer, store)
+	}
+
+	return runFullMode(ctx, cfg, sentryClient, analyzer, store)
+}
+
+func setupLogging(level string) {
 	logCfg := logger.ForTerminal()
-	logCfg.Level = os.Getenv("LOG_LEVEL")
+	logCfg.Level = level
 	if logCfg.Level == "" {
 		logCfg.Level = "info"
 	}
-	logger := logger.New(logCfg)
-	slog.SetDefault(logger)
+	l := logger.New(logCfg)
+	slog.SetDefault(l)
+}
 
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		logger.Error("failed to load configuration", "error", err)
-		os.Exit(1)
-	}
-
-	// Initialize Sentry
-	sentryClient, err := sentry.New(sentry.Config{
+func setupSentry(cfg *config.Config) *sentry.Client {
+	client, _ := sentry.New(sentry.Config{
 		DSN:         cfg.SentryDSN,
 		Environment: cfg.SentryEnvironment,
 		Release:     "1.0.0",
 	})
-	if err != nil {
-		logger.Error("failed to initialize sentry", "error", err)
-	} else if sentryClient.IsEnabled() {
-		logger.Info("sentry initialized successfully")
-		defer sentryClient.Close()
-	}
-	logger.Info("starting hourglass-rejections-rpa",
-		"version", "1.0.0",
-		"once_mode", *onceMode,
-	)
+	return client
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func setupDependencies(cfg *config.Config) (*api.APIAnalyzer, *storage.FileStorage) {
 	apiClient := api.NewClient()
-
-	if xsrfToken := os.Getenv("HOURGLASS_XSRF_TOKEN"); xsrfToken != "" {
-		apiClient.SetXSRFToken(xsrfToken)
-		logger.Info("XSRF token configured")
+	if cfg.HourglassXSRFToken != "" {
+		apiClient.SetXSRFToken(cfg.HourglassXSRFToken)
 	}
-
-	if hglogin := os.Getenv("HOURGLASS_HGLOGIN_COOKIE"); hglogin != "" {
-		apiClient.SetHGLogin(hglogin)
-		logger.Info("HGLogin cookie configured")
+	if cfg.HourglassHGLogin != "" {
+		apiClient.SetHGLogin(cfg.HourglassHGLogin)
 	}
 
 	analyzer := api.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
+	return analyzer, store
+}
 
-	if *onceMode {
-		logger.Info("running in once mode")
-		if err := runOnce(ctx, cfg, sentryClient, analyzer, store); err != nil {
-			logger.Error("run failed", "error", err)
-			if sentryClient.IsEnabled() {
-				sentryClient.Flush(2 * time.Second)
-			}
-			os.Exit(1)
-		}
-		logger.Info("analysis complete")
-		return
+func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+	if err := runOnce(ctx, cfg, sentryClient, analyzer, store); err != nil {
+		return fmt.Errorf("run failed: %w", err)
 	}
+	return nil
+}
 
-	logger.Info("starting full mode (scheduler + bot)")
+func runFullMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+	slog.Info("starting full mode (scheduler + bot)")
 
-	botErrChan := make(chan error, 1)
 	go func() {
-		if err := runBot(ctx, cfg, sentryClient, analyzer, store); err != nil {
-			logger.Error("bot error", "error", err)
-			botErrChan <- err
+		botRunner := bot.New(cfg, sentryClient, analyzer, store)
+		if err := botRunner.Run(ctx); err != nil {
+			slog.Error("bot error", "error", err)
 		}
 	}()
 
-	logger.Info("starting scheduler")
-	if err := runScheduler(ctx, cfg, sentryClient, analyzer, store); err != nil {
-		logger.Error("scheduler failed", "error", err)
-		if sentryClient.IsEnabled() {
-			sentryClient.Flush(2 * time.Second)
-		}
-		os.Exit(1)
+	sched := scheduler.New(cfg, sentryClient, analyzer, store)
+	if err := sched.Run(ctx); err != nil {
+		return fmt.Errorf("scheduler failed: %w", err)
 	}
+
+	return nil
 }
 
 func runOnce(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
-	// Analyze all sections
-	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
-	var allRejections []domain.Rejeicao
-
-	for _, section := range sections {
-		slog.Info("analyzing section", "section", section)
-
-		result, err := analyzer.AnalyzeSection(section)
-		if err != nil {
-			slog.Error("failed to analyze section", "section", section, "error", err)
-			if sentryClient.IsEnabled() {
-				sentryClient.CaptureError(err, map[string]interface{}{
-					"section":   section,
-					"operation": "analyze_section",
-				})
-			}
-			continue
-		}
-
-		if result.Error != nil {
-			slog.Error("analysis returned error", "section", section, "error", result.Error)
-			if sentryClient.IsEnabled() {
-				sentryClient.CaptureError(result.Error, map[string]interface{}{
-					"section":   section,
-					"operation": "analyze_section_result",
-				})
-			}
-			continue
-		}
-
-		slog.Info("section analysis complete",
-			"section", section,
-			"total", result.Total,
-			"duration", result.Duration,
-		)
-
-		// Save results
-		if len(result.Rejeicoes) > 0 {
-			allRejections = append(allRejections, result.Rejeicoes...)
-			if err := store.Save(ctx, result.Rejeicoes); err != nil {
-				slog.Error("failed to save results", "section", section, "error", err)
-				if sentryClient.IsEnabled() {
-					sentryClient.CaptureError(err, map[string]interface{}{
-						"section":   section,
-						"operation": "save_results",
-					})
-				}
-			}
-		}
-	}
-
-	// Send Telegram notifications (filtered per user if preferences configured)
-	if len(allRejections) > 0 {
-		prefStore := preferences.NewFilePreferenceStore(cfg.UserPrefsFile)
-		prefManager := preferences.NewPreferenceManager(prefStore)
-
-		// Try filtered notifications first; fallback to broadcast if no users configured
-		users, listErr := prefManager.List()
-		if listErr != nil {
-			slog.Warn("failed to list user preferences, falling back to broadcast", "error", listErr)
-			if err := sendTelegramNotification(sentryClient, allRejections); err != nil {
-				slog.Error("failed to send telegram notification", "error", err)
-			}
-		} else if len(users) == 0 {
-			slog.Info("no user preferences configured, using broadcast notification")
-			if err := sendTelegramNotification(sentryClient, allRejections); err != nil {
-				slog.Error("failed to send telegram notification", "error", err)
-			}
-		} else {
-			if err := sendFilteredNotifications(sentryClient, allRejections, prefManager); err != nil {
-				slog.Error("failed to send filtered notifications", "error", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func sendTelegramNotification(sentryClient *sentry.Client, rejections []domain.Rejeicao) error {
-	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
-	whitelistStr := os.Getenv("TELEGRAM_WHITELIST")
-
-	if token == "" || chatIDStr == "" {
-		slog.Warn("Telegram configuration missing, skipping notification",
-			"has_token", token != "",
-			"has_chat_id", chatIDStr != "",
-		)
-		return nil
-	}
-
-	// Parse chat IDs (supports comma-separated list)
-	var chatIDs []int64
-	for _, idStr := range strings.Split(chatIDStr, ",") {
-		id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
-		if err != nil {
-			slog.Warn("invalid chat ID in TELEGRAM_CHAT_ID, skipping", "id", idStr, "error", err)
-			continue
-		}
-		chatIDs = append(chatIDs, id)
-	}
-
-	if len(chatIDs) == 0 {
-		return fmt.Errorf("no valid telegram chat IDs found")
-	}
-
-	var whitelist []int64
-	if whitelistStr != "" {
-		for _, idStr := range strings.Split(whitelistStr, ",") {
-			id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
-			if err != nil {
-				slog.Warn("invalid chat ID in whitelist, skipping", "id", idStr, "error", err)
-				continue
-			}
-			whitelist = append(whitelist, id)
-		}
-	}
-
-	tgBot, err := notifier.NewTelegramNotifier(token, chatIDs[0], whitelist)
-	if err != nil {
-		if sentryClient != nil && sentryClient.IsEnabled() {
-			sentryClient.CaptureError(err, map[string]interface{}{
-				"operation": "create_telegram_notifier",
-			})
-		}
-		return fmt.Errorf("failed to create telegram notifier: %w", err)
-	}
-
-	// Send notification to each chat ID
-	var sentCount int
-	for _, chatID := range chatIDs {
-		if !tgBot.IsAuthorized(chatID) {
-			slog.Warn("unauthorized chat ID, skipping notification", "chat_id", chatID)
-			continue
-		}
-		if err := tgBot.SendRejectionsNotification(chatID, rejections); err != nil {
-			slog.Error("failed to send telegram notification to chat", "chat_id", chatID, "error", err)
-			if sentryClient != nil && sentryClient.IsEnabled() {
-				sentryClient.CaptureError(err, map[string]interface{}{
-					"operation": "send_telegram_notification",
-					"chat_id":   chatID,
-				})
-			}
-			continue
-		}
-		sentCount++
-		slog.Info("telegram notification sent successfully", "chat_id", chatID, "count", len(rejections))
-	}
-
-	if sentCount == 0 {
-		return fmt.Errorf("failed to send telegram notification to any chat")
-	}
-
-	return nil
-}
-
-// sendFilteredNotifications sends per-user filtered notifications based on section preferences.
-func sendFilteredNotifications(
-	sentryClient *sentry.Client,
-	rejections []domain.Rejeicao,
-	prefManager *preferences.PreferenceManager,
-) error {
-	if len(rejections) == 0 {
-		return nil
-	}
-
-	if !cache.hasChanges(rejections) {
-		slog.Info("skipping notification - no changes from last check")
-		return nil
-	}
-
-	bySection := make(map[string][]domain.Rejeicao)
-	for _, r := range rejections {
-		bySection[r.Secao] = append(bySection[r.Secao], r)
-	}
-
-	users, err := prefManager.List()
-	if err != nil {
-		return fmt.Errorf("failed to list user preferences: %w", err)
-	}
-
-	// Create Telegram notifier
-	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if token == "" {
-		slog.Warn("Telegram bot token not configured, skipping filtered notifications")
-		return nil
-	}
-
-	// Use a dummy chat ID for notifier creation (actual sending uses per-user chat IDs)
-	tgBot, err := notifier.NewTelegramNotifier(token, users[0].ChatID, nil)
-	if err != nil {
-		if sentryClient != nil && sentryClient.IsEnabled() {
-			sentryClient.CaptureError(err, map[string]interface{}{
-				"operation": "create_telegram_notifier_filtered",
-			})
-		}
-		return fmt.Errorf("failed to create telegram notifier: %w", err)
-	}
-
-	var sentCount int
-	for _, user := range users {
-		if !user.Enabled {
-			slog.Debug("user notifications disabled, skipping", "chat_id", user.ChatID, "username", user.Username)
-			continue
-		}
-
-		// Collect rejections from user's selected sections
-		var userRejections []domain.Rejeicao
-		for _, section := range user.Sections {
-			userRejections = append(userRejections, bySection[section]...)
-		}
-
-		if len(userRejections) == 0 {
-			slog.Debug("no rejections for user's sections, skipping", "chat_id", user.ChatID, "username", user.Username)
-			continue
-		}
-
-		// Send to this specific user
-		if err := tgBot.SendRejectionsNotification(user.ChatID, userRejections); err != nil {
-			slog.Error("failed to send filtered notification",
-				"chat_id", user.ChatID,
-				"username", user.Username,
-				"rejection_count", len(userRejections),
-				"error", err,
-			)
-			if sentryClient != nil && sentryClient.IsEnabled() {
-				sentryClient.CaptureError(err, map[string]interface{}{
-					"operation": "send_filtered_notification",
-					"chat_id":   user.ChatID,
-					"username":  user.Username,
-				})
-			}
-			continue
-		}
-
-		sentCount++
-		slog.Info("filtered notification sent successfully",
-			"chat_id", user.ChatID,
-			"username", user.Username,
-			"rejection_count", len(userRejections),
-		)
-	}
-
-	slog.Info("filtered notifications complete", "sent", sentCount, "total_users", len(users))
-	return nil
-}
-
-func runOnceForUser(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage, prefManager *preferences.PreferenceManager, targetChatID int64) error {
-	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
-	var allRejections []domain.Rejeicao
-
-	for _, section := range sections {
-		slog.Info("analyzing section", "section", section)
-
-		result, err := analyzer.AnalyzeSection(section)
-		if err != nil {
-			slog.Error("failed to analyze section", "section", section, "error", err)
-			if sentryClient.IsEnabled() {
-				sentryClient.CaptureError(err, map[string]interface{}{
-					"section":   section,
-					"operation": "analyze_section",
-				})
-			}
-			continue
-		}
-
-		if result.Error != nil {
-			slog.Error("analysis returned error", "section", section, "error", result.Error)
-			if sentryClient.IsEnabled() {
-				sentryClient.CaptureError(result.Error, map[string]interface{}{
-					"section":   section,
-					"operation": "analyze_section_result",
-				})
-			}
-			continue
-		}
-
-		slog.Info("section analysis complete",
-			"section", section,
-			"total", result.Total,
-			"duration", result.Duration,
-		)
-
-		if len(result.Rejeicoes) > 0 {
-			allRejections = append(allRejections, result.Rejeicoes...)
-			if err := store.Save(ctx, result.Rejeicoes); err != nil {
-				slog.Error("failed to save results", "section", section, "error", err)
-				if sentryClient.IsEnabled() {
-					sentryClient.CaptureError(err, map[string]interface{}{
-						"section":   section,
-						"operation": "save_results",
-					})
-				}
-			}
-		}
-	}
-
-	if len(allRejections) == 0 {
-		slog.Info("no rejections found for manual check")
-
-		token := os.Getenv("TELEGRAM_BOT_TOKEN")
-		if token == "" {
-			return nil
-		}
-
-		tgBot, err := notifier.NewTelegramNotifier(token, targetChatID, nil)
-		if err != nil {
-			return err
-		}
-
-		tgBot.SendRejectionsNotification(targetChatID, nil)
-		return nil
-	}
-
-	if err := sendFilteredNotificationsForUser(ctx, sentryClient, allRejections, prefManager, targetChatID); err != nil {
-		slog.Error("failed to send notifications", "error", err)
-		return err
-	}
-
-	return nil
-}
-
-func sendFilteredNotificationsForUser(ctx context.Context, sentryClient *sentry.Client, rejections []domain.Rejeicao, prefManager *preferences.PreferenceManager, targetChatID int64) error {
-	if len(rejections) == 0 {
-		return nil
-	}
-
-	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if token == "" {
-		slog.Warn("Telegram bot token not configured, skipping notification")
-		return nil
-	}
-
-	user, err := prefManager.Get(targetChatID)
-	if err != nil {
-		slog.Error("failed to get user preferences", "chat_id", targetChatID, "error", err)
-		user = &preferences.UserPreference{
-			ChatID:   targetChatID,
-			Sections: []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"},
-			Enabled:  true,
-		}
-	}
-
-	if !user.Enabled {
-		slog.Info("user disabled, skipping notification", "chat_id", targetChatID)
-		return nil
-	}
-
-	bySection := make(map[string][]domain.Rejeicao)
-	for _, r := range rejections {
-		bySection[r.Secao] = append(bySection[r.Secao], r)
-	}
-
-	var userRejections []domain.Rejeicao
-	for _, section := range user.Sections {
-		userRejections = append(userRejections, bySection[section]...)
-	}
-
-	if len(userRejections) == 0 {
-		slog.Info("no rejections for user's sections", "chat_id", targetChatID)
-
-		tgBot, err := notifier.NewTelegramNotifier(token, targetChatID, nil)
-		if err != nil {
-			return err
-		}
-
-		tgBot.SendRejectionsNotification(targetChatID, nil)
-		return nil
-	}
-
-	tgBot, err := notifier.NewTelegramNotifier(token, targetChatID, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create telegram notifier: %w", err)
-	}
-
-	if err := tgBot.SendRejectionsNotification(targetChatID, userRejections); err != nil {
-		slog.Error("failed to send notification", "chat_id", targetChatID, "error", err)
-		if sentryClient.IsEnabled() {
-			sentryClient.CaptureError(err, map[string]interface{}{
-				"operation": "send_telegram_notification",
-				"chat_id":   targetChatID,
-			})
-		}
-		return err
-	}
-
-	slog.Info("notification sent to user",
-		"chat_id", targetChatID,
-		"rejection_count", len(userRejections),
-	)
-
-	return nil
-}
-
-func runScheduler(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
-	logger := slog.Default()
-	logger.Info("starting smart scheduler", "business_hours", "30min", "night_hours", "2h")
-
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	nextRun := time.Now()
-
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("scheduler stopped")
-			return nil
-		case now := <-ticker.C:
-			if now.Before(nextRun) {
-				continue
-			}
-
-			hour := now.Hour()
-			var interval time.Duration
-
-			if hour >= 6 && hour < 22 {
-				interval = 30 * time.Minute
-				logger.Info("business hours check", "hour", hour, "next_interval", interval)
-			} else {
-				interval = 2 * time.Hour
-				logger.Info("night hours check", "hour", hour, "next_interval", interval)
-			}
-
-			logger.Info("running scheduled analysis", "time", now.Format("15:04"))
-			if err := runOnce(ctx, cfg, sentryClient, analyzer, store); err != nil {
-				logger.Error("scheduled analysis failed", "error", err)
-				if sentryClient != nil && sentryClient.IsEnabled() {
-					sentryClient.CaptureError(err, map[string]interface{}{
-						"operation": "scheduled_analysis",
-						"timestamp": now,
-					})
-				}
-			}
-
-			nextRun = now.Add(interval)
-			logger.Info("next check scheduled", "at", nextRun.Format("15:04"))
-		}
-	}
-}
-
-func runBot(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
-	logger := slog.Default()
-
-	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if token == "" {
-		return fmt.Errorf("TELEGRAM_BOT_TOKEN not configured")
-	}
-
-	prefStore := preferences.NewFilePreferenceStore(cfg.UserPrefsFile)
-	prefManager := preferences.NewPreferenceManager(prefStore)
-
-	var whitelist []int64
-	if chatIDs := os.Getenv("TELEGRAM_CHAT_ID"); chatIDs != "" {
-		for _, idStr := range strings.Split(chatIDs, ",") {
-			id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
-			if err != nil {
-				logger.Warn("invalid chat ID in env, skipping", "id", idStr, "error", err)
-				continue
-			}
-			whitelist = append(whitelist, id)
-		}
-	}
-
-	var chatID int64
-	if len(whitelist) > 0 {
-		chatID = whitelist[0]
-	}
-
-	tgBot, err := notifier.NewTelegramNotifier(token, chatID, whitelist)
-	if err != nil {
-		return fmt.Errorf("failed to create telegram notifier: %w", err)
-	}
-
-	tgBot.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
-		logger.Info("manual check triggered via bot", "chat_id", chatID)
-		if err := runOnceForUser(ctx, cfg, sentryClient, analyzer, store, prefManager, chatID); err != nil {
-			logger.Error("manual check failed", "error", err)
-			return err
-		}
-		return nil
-	})
-
-	logger.Info("starting telegram bot", "whitelist_count", len(whitelist))
-
-	if err := tgBot.StartBot(ctx, prefManager); err != nil {
-		return fmt.Errorf("failed to start bot: %w", err)
-	}
-
-	logger.Info("bot started successfully - send /start to your bot")
-
-	<-ctx.Done()
-
-	if err := tgBot.StopBot(); err != nil {
-		logger.Error("error stopping bot", "error", err)
-	}
-
-	logger.Info("bot stopped")
-	return nil
+	return errors.New("runOnce not implemented")
 }

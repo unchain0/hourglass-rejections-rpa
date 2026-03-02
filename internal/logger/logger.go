@@ -56,6 +56,8 @@ func New(cfg Config) *slog.Logger {
 	case "charm", "pretty":
 		logger := log.New(output)
 		logger.SetLevel(charmLevel(level))
+		logger.SetReportTimestamp(true)
+		logger.SetTimeFormat("2006-01-02 15:04:05")
 		return slog.New(logger)
 	case "text":
 		return slog.New(slog.NewTextHandler(output, &slog.HandlerOptions{Level: level}))

@@ -1,0 +1,332 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>bot: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">hourglass-rejections-rpa/internal/bot/runner.go (99.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package bot
+
+import (
+        "context"
+        "fmt"
+        "log/slog"
+        "os"
+        "strconv"
+        "strings"
+
+        "hourglass-rejections-rpa/internal/api"
+        "hourglass-rejections-rpa/internal/config"
+        "hourglass-rejections-rpa/internal/domain"
+        "hourglass-rejections-rpa/internal/notifier"
+        "hourglass-rejections-rpa/internal/preferences"
+        "hourglass-rejections-rpa/internal/sentry"
+        "hourglass-rejections-rpa/internal/storage"
+)
+
+type Analyzer interface {
+        AnalyzeSection(section string) (*domain.JobResult, error)
+}
+
+type Notifier interface {
+        StartBot(ctx context.Context, prefManager *preferences.PreferenceManager) error
+        StopBot() error
+        SetCheckNowCallback(callback notifier.CheckNowCallback)
+        SendNoRejectionsMessage(chatID int64, message string) error
+        SendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error
+}
+
+type BotRunner struct {
+        cfg          *config.Config
+        sentryClient *sentry.Client
+        analyzer     Analyzer
+        store        *storage.FileStorage
+
+        notifier  Notifier
+        prefStore preferences.PreferenceStore
+}
+
+func New(cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) *BotRunner <span class="cov8" title="1">{
+        return &amp;BotRunner{
+                cfg:          cfg,
+                sentryClient: sentryClient,
+                analyzer:     analyzer,
+                store:        store,
+        }
+}</span>
+
+func (b *BotRunner) WithNotifier(n Notifier) *BotRunner <span class="cov8" title="1">{
+        b.notifier = n
+        return b
+}</span>
+
+func (b *BotRunner) WithPreferenceStore(s preferences.PreferenceStore) *BotRunner <span class="cov8" title="1">{
+        b.prefStore = s
+        return b
+}</span>
+
+func (b *BotRunner) WithAnalyzer(a Analyzer) *BotRunner <span class="cov8" title="1">{
+        b.analyzer = a
+        return b
+}</span>
+
+var newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (Notifier, error) <span class="cov8" title="1">{
+        return notifier.NewTelegramNotifier(token, chatID, whitelist)
+}</span>
+
+func (b *BotRunner) Run(ctx context.Context) error <span class="cov8" title="1">{
+        logger := slog.Default()
+
+        var prefStore preferences.PreferenceStore
+        if b.prefStore != nil </span><span class="cov8" title="1">{
+                prefStore = b.prefStore
+        }</span> else<span class="cov8" title="1"> {
+                var err error
+                prefStore, err = preferences.NewStore(b.cfg.SQLiteDBPath)
+                if err != nil </span><span class="cov8" title="1">{
+                        return fmt.Errorf("failed to initialize preference store: %w", err)
+                }</span>
+                <span class="cov8" title="1">if closer, ok := prefStore.(interface{ Close() error }); ok </span><span class="cov8" title="1">{
+                        defer closer.Close()
+                }</span>
+        }
+
+        <span class="cov8" title="1">prefManager := preferences.NewPreferenceManager(prefStore)
+
+        var tgBot Notifier
+        if b.notifier != nil </span><span class="cov8" title="1">{
+                tgBot = b.notifier
+        }</span> else<span class="cov8" title="1"> {
+                token := os.Getenv("TELEGRAM_BOT_TOKEN")
+                if token == "" </span><span class="cov8" title="1">{
+                        return fmt.Errorf("TELEGRAM_BOT_TOKEN not configured")
+                }</span>
+
+                <span class="cov8" title="1">whitelist := b.getWhitelist()
+                var chatID int64
+                if len(whitelist) &gt; 0 </span><span class="cov8" title="1">{
+                        chatID = whitelist[0]
+                }</span>
+
+                <span class="cov8" title="1">var err error
+                tgBot, err = newTelegramNotifier(token, chatID, whitelist)
+                if err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to create telegram notifier: %w", err)
+                }</span>
+                <span class="cov8" title="1">b.notifier = tgBot</span>
+        }
+
+        <span class="cov8" title="1">tgBot.SetCheckNowCallback(func(ctx context.Context, chatID int64) error </span><span class="cov8" title="1">{
+                logger.Info("manual check triggered via bot", "chat_id", chatID)
+                return b.runOnceForUser(ctx, prefManager, chatID)
+        }</span>)
+
+        <span class="cov8" title="1">logger.Info("starting telegram bot")
+
+        if err := tgBot.StartBot(ctx, prefManager); err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to start bot: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">logger.Info("bot started successfully - send /start to your bot")
+
+        &lt;-ctx.Done()
+
+        if err := tgBot.StopBot(); err != nil </span><span class="cov8" title="1">{
+                logger.Error("error stopping bot", "error", err)
+        }</span>
+
+        <span class="cov8" title="1">logger.Info("bot stopped")
+        return nil</span>
+}
+
+func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences.PreferenceManager, targetChatID int64) error <span class="cov8" title="1">{
+        logger := slog.Default()
+
+        pref, err := prefManager.Get(targetChatID)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to get user preferences: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if pref == nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("user preferences not found for chat ID: %d", targetChatID)
+        }</span>
+
+        <span class="cov8" title="1">userSections := pref.Sections()
+        if len(userSections) == 0 </span><span class="cov8" title="1">{
+                return b.sendNoRejectionsMessage(targetChatID, "Você não tem nenhuma seção configurada para monitoramento.")
+        }</span>
+
+        <span class="cov8" title="1">var allRejections []domain.Rejeicao
+        for _, section := range userSections </span><span class="cov8" title="1">{
+                logger.Info("analyzing section for user", "section", section, "chat_id", targetChatID)
+
+                result, err := b.analyzer.AnalyzeSection(section)
+                if err != nil </span><span class="cov8" title="1">{
+                        logger.Error("failed to analyze section", "section", section, "error", err)
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">if result.Error != nil </span><span class="cov8" title="1">{
+                        logger.Error("analysis returned error", "section", section, "error", result.Error)
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">if len(result.Rejeicoes) &gt; 0 </span><span class="cov8" title="1">{
+                        allRejections = append(allRejections, result.Rejeicoes...)
+                }</span>
+        }
+
+        <span class="cov8" title="1">if len(allRejections) == 0 </span><span class="cov8" title="1">{
+                return b.sendNoRejectionsMessage(targetChatID, "✅ Nenhuma rejeição encontrada nas seções configuradas.")
+        }</span>
+
+        <span class="cov8" title="1">return b.sendRejectionsNotification(targetChatID, allRejections)</span>
+}
+
+func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error <span class="cov8" title="1">{
+        if b.notifier != nil </span><span class="cov8" title="1">{
+                return b.notifier.SendNoRejectionsMessage(chatID, message)
+        }</span>
+
+        <span class="cov8" title="1">token := os.Getenv("TELEGRAM_BOT_TOKEN")
+        if token == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("TELEGRAM_BOT_TOKEN not configured")
+        }</span>
+
+        <span class="cov8" title="1">whitelist := b.getWhitelist()
+        tgBot, err := newTelegramNotifier(token, chatID, whitelist)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to create telegram notifier: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return tgBot.SendNoRejectionsMessage(chatID, message)</span>
+}
+
+func (b *BotRunner) sendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error <span class="cov8" title="1">{
+        if b.notifier != nil </span><span class="cov8" title="1">{
+                return b.notifier.SendRejectionsNotification(chatID, rejections)
+        }</span>
+
+        <span class="cov8" title="1">token := os.Getenv("TELEGRAM_BOT_TOKEN")
+        if token == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("TELEGRAM_BOT_TOKEN not configured")
+        }</span>
+
+        <span class="cov8" title="1">whitelist := b.getWhitelist()
+        tgBot, err := newTelegramNotifier(token, chatID, whitelist)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to create telegram notifier: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return tgBot.SendRejectionsNotification(chatID, rejections)</span>
+}
+
+func (b *BotRunner) getWhitelist() []int64 <span class="cov8" title="1">{
+        var whitelist []int64
+        if chatIDs := os.Getenv("TELEGRAM_CHAT_ID"); chatIDs != "" </span><span class="cov8" title="1">{
+                for _, idStr := range strings.Split(chatIDs, ",") </span><span class="cov8" title="1">{
+                        id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+                        if err != nil </span><span class="cov8" title="1">{
+                                continue</span>
+                        }
+                        <span class="cov8" title="1">whitelist = append(whitelist, id)</span>
+                }
+        }
+        <span class="cov8" title="1">return whitelist</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

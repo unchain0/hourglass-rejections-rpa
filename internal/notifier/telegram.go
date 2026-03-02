@@ -43,7 +43,9 @@ func NewTelegramNotifier(token string, chatID int64, whitelist []int64) (*Telegr
 		return nil, fmt.Errorf("telegram chat ID is required")
 	}
 
-	b, err := bot.New(token)
+	b, err := bot.New(token, bot.WithDefaultHandler(func(_ context.Context, _ *bot.Bot, _ *models.Update) {
+		// Silent handler - do nothing to suppress [TGBOT] [UPDATE] logs
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
 	}
@@ -66,6 +68,24 @@ func (t *TelegramNotifier) IsAuthorized(chatID int64) bool {
 		}
 	}
 	return false
+}
+
+func (t *TelegramNotifier) SendNoRejectionsMessage(chatID int64, message string) error {
+	if !t.IsAuthorized(chatID) {
+		return fmt.Errorf("unauthorized chat ID: %d", chatID)
+	}
+
+	_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      message,
+		ParseMode: models.ParseModeHTML,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to send telegram message: %w", err)
+	}
+
+	return nil
 }
 
 // SendRejectionsNotification sends a notification about rejections to a specific chat ID.
@@ -263,7 +283,7 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 	msg.WriteString("📊 <b>Suas preferências:</b>\n\n")
 
 	for _, section := range AllSections {
-		if containsSection(pref.Sections, section) {
+		if containsSection(pref.Sections(), section) {
 			msg.WriteString(fmt.Sprintf("✅ %s\n", section))
 		} else {
 			msg.WriteString(fmt.Sprintf("❌ %s\n", section))
@@ -378,14 +398,16 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 	}
 
 	// Toggle the section
-	if containsSection(pref.Sections, section) {
-		pref.Sections = removeSection(pref.Sections, section)
+	sections := pref.Sections()
+	if containsSection(sections, section) {
+		sections = removeSection(sections, section)
 	} else {
-		pref.Sections = append(pref.Sections, section)
+		sections = append(sections, section)
 	}
+	pref.SetSections(sections)
 
 	// Save toggled state temporarily via UpdateSections
-	_ = t.prefManager.UpdateSections(chatID, pref.Sections)
+	_ = t.prefManager.UpdateSections(chatID, sections)
 
 	// Update the inline keyboard
 	if update.CallbackQuery.Message.Message != nil {
@@ -425,11 +447,11 @@ func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *m
 	var msg strings.Builder
 	msg.WriteString("✅ <b>Preferências salvas!</b>\n\n")
 
-	if len(pref.Sections) == 0 {
+	if len(pref.Sections()) == 0 {
 		msg.WriteString("Nenhuma seção selecionada. Você não receberá notificações.")
 	} else {
 		msg.WriteString("Seções selecionadas:\n")
-		for _, s := range pref.Sections {
+		for _, s := range pref.Sections() {
 			msg.WriteString(fmt.Sprintf("• %s\n", s))
 		}
 	}
@@ -476,7 +498,7 @@ func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference)
 
 	for _, section := range AllSections {
 		var label string
-		if containsSection(pref.Sections, section) {
+		if containsSection(pref.Sections(), section) {
 			label = "✅ " + section
 		} else {
 			label = "❌ " + section

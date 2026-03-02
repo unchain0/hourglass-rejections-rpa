@@ -267,3 +267,100 @@ func TestConstants(t *testing.T) {
 
 // Verify PlaywrightScraper satisfies the domain.Scraper interface at compile time.
 var _ domain.Scraper = (*PlaywrightScraper)(nil)
+
+func TestClose_PartialResources(t *testing.T) {
+	s := NewPlaywrightScraper("a@b.com", "pwd", &mockStorage{}, true)
+
+	original := pwRun
+	defer func() { pwRun = original }()
+
+	pwRun = func(options ...*playwright.RunOptions) (*playwright.Playwright, error) {
+		return nil, errors.New("playwright failed")
+	}
+
+	_ = s.Setup(context.Background())
+
+	err := s.Close()
+	assert.NoError(t, err)
+}
+
+func TestIsAuthenticated_NoCookies(t *testing.T) {
+	original := pwRun
+	defer func() { pwRun = original }()
+
+	callCount := 0
+	pwRun = func(options ...*playwright.RunOptions) (*playwright.Playwright, error) {
+		callCount++
+		return nil, errors.New("playwright not available")
+	}
+
+	s := NewPlaywrightScraper("a@b.com", "pwd", &mockStorage{}, true)
+	_ = s.Setup(context.Background())
+
+	auth, err := s.IsAuthenticated(context.Background())
+	assert.False(t, auth)
+	assert.Error(t, err)
+}
+
+func TestLogin_Success(t *testing.T) {
+	original := pwRun
+	defer func() { pwRun = original }()
+
+	pwRun = func(options ...*playwright.RunOptions) (*playwright.Playwright, error) {
+		return nil, errors.New("playwright not available in tests")
+	}
+
+	s := NewPlaywrightScraper("a@b.com", "pwd", &mockStorage{}, true)
+	_ = s.Setup(context.Background())
+
+	err := s.Login(context.Background())
+	assert.Error(t, err)
+}
+
+func TestLogin_AllRetriesFail(t *testing.T) {
+	original := pwRun
+	defer func() { pwRun = original }()
+
+	pwRun = func(options ...*playwright.RunOptions) (*playwright.Playwright, error) {
+		return nil, errors.New("playwright not available")
+	}
+
+	s := NewPlaywrightScraper("a@b.com", "pwd", &mockStorage{}, true)
+	_ = s.Setup(context.Background())
+
+	err := s.Login(context.Background())
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, domain.ErrAuthenticationFailed)
+}
+
+func TestIsAuthenticated_NotAuthenticated(t *testing.T) {
+	original := pwRun
+	defer func() { pwRun = original }()
+
+	pwRun = func(options ...*playwright.RunOptions) (*playwright.Playwright, error) {
+		return nil, errors.New("playwright not available")
+	}
+
+	s := NewPlaywrightScraper("a@b.com", "pwd", &mockStorage{}, true)
+	_ = s.Setup(context.Background())
+
+	auth, err := s.IsAuthenticated(context.Background())
+	assert.False(t, auth)
+	assert.Error(t, err)
+}
+
+func TestAnalyzeSection_NotAuthenticated(t *testing.T) {
+	original := pwRun
+	defer func() { pwRun = original }()
+
+	pwRun = func(options ...*playwright.RunOptions) (*playwright.Playwright, error) {
+		return nil, errors.New("playwright not available")
+	}
+
+	s := NewPlaywrightScraper("a@b.com", "pwd", &mockStorage{}, true)
+	_ = s.Setup(context.Background())
+
+	result, err := s.AnalyzeSection(context.Background(), "Campo")
+	assert.Nil(t, result)
+	assert.Error(t, err)
+}

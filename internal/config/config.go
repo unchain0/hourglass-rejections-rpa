@@ -16,12 +16,14 @@ type Config struct {
 	Timeout         time.Duration `env:"TIMEOUT" envDefault:"60s"`
 	// Hourglass API Authentication
 	HourglassXSRFToken string `env:"HOURGLASS_XSRF_TOKEN"`
-	HourglassHGLogin     string `env:"HOURGLASS_HGLOGIN_COOKIE"`
+	HourglassHGLogin   string `env:"HOURGLASS_HGLOGIN_COOKIE"`
 	// Playwright Authentication
 	HourglassEmail    string `env:"HOURGLASS_EMAIL"`
 	HourglassPassword string `env:"HOURGLASS_PASSWORD"`
-	// User Preferences
+	// User Preferences (SQLite is default)
+	UseJSON       bool   `env:"USE_JSON" envDefault:"false"`
 	UserPrefsFile string `env:"USER_PREFS_FILE" envDefault:"data/preferences.json"`
+	SQLiteDBPath  string `env:"SQLITE_DB_PATH" envDefault:"data/hourglass.db"`
 	// Sentry configuration
 	SentryDSN         string `env:"SENTRY_DSN"`
 	SentryEnvironment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`

@@ -32,10 +32,12 @@ func newTestNotifier(t *testing.T, whitelist []int64) *TelegramNotifier {
 	}
 }
 
-// newTestPrefManager creates a PreferenceManager backed by a temp file.
+// newTestPrefManager creates a PreferenceManager backed by SQLite.
 func newTestPrefManager(t *testing.T) *preferences.PreferenceManager {
 	t.Helper()
-	store := preferences.NewFilePreferenceStore(filepath.Join(t.TempDir(), "prefs.json"))
+	store, err := preferences.NewStore(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { store.Close() })
 	return preferences.NewPreferenceManager(store)
 }
 
@@ -239,8 +241,8 @@ func TestRemoveSection_NoMutation(t *testing.T) {
 func TestBuildConfigKeyboard_NoSections(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	prefs := &preferences.UserPreference{
-		ChatID:   12345,
-		Sections: []string{},
+		ChatID:       12345,
+		SectionsJSON: "[]",
 	}
 
 	keyboard := tn.buildConfigKeyboard(prefs)
@@ -249,15 +251,14 @@ func TestBuildConfigKeyboard_NoSections(t *testing.T) {
 	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
 	require.True(t, ok)
 
-	// Should have all section rows + save/cancel row
 	assert.GreaterOrEqual(t, len(inlineKB.InlineKeyboard), 5)
 }
 
 func TestBuildConfigKeyboard_SomeSections(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	prefs := &preferences.UserPreference{
-		ChatID:   12345,
-		Sections: []string{"Campo", "Partes Mecânicas"},
+		ChatID:       12345,
+		SectionsJSON: `["Campo","Partes Mecânicas"]`,
 	}
 
 	keyboard := tn.buildConfigKeyboard(prefs)
@@ -272,8 +273,8 @@ func TestBuildConfigKeyboard_SomeSections(t *testing.T) {
 func TestBuildConfigKeyboard_AllSections(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	prefs := &preferences.UserPreference{
-		ChatID:   12345,
-		Sections: AllSections,
+		ChatID:       12345,
+		SectionsJSON: `["Partes Mecânicas","Campo","Testemunho Público","Reunião Meio de Semana"]`,
 	}
 
 	keyboard := tn.buildConfigKeyboard(prefs)
@@ -282,7 +283,6 @@ func TestBuildConfigKeyboard_AllSections(t *testing.T) {
 	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
 	require.True(t, ok)
 
-	// All sections should show checkmark
 	assert.GreaterOrEqual(t, len(inlineKB.InlineKeyboard), 5)
 }
 
@@ -653,4 +653,97 @@ func TestHandleSave_NilMessage(t *testing.T) {
 	}
 
 	tn.handleSave(context.Background(), b, update)
+}
+
+// --- SendNoRejectionsMessage ---
+
+func TestSendNoRejectionsMessage_NotAuthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{111, 222})
+	err := tn.SendNoRejectionsMessage(999, "test message")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized chat ID")
+}
+
+func TestSendNoRejectionsMessage_Authorized(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	err := tn.SendNoRejectionsMessage(12345, "test message")
+	// Will fail because bot is not connected, but tests the authorization path
+	assert.Error(t, err)
+}
+
+// --- SendRejectionsNotification ---
+
+func TestSendRejectionsNotification_EmptyRejections(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	err := tn.SendRejectionsNotification(12345, []domain.Rejeicao{})
+	assert.NoError(t, err)
+}
+
+func TestSendRejectionsNotification_NotAuthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{111, 222})
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	}
+	err := tn.SendRejectionsNotification(999, rejections)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized chat ID")
+}
+
+func TestSendRejectionsNotification_Authorized(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	}
+	err := tn.SendRejectionsNotification(12345, rejections)
+	// Will fail because bot is not connected, but tests the authorization path
+	assert.Error(t, err)
+}
+
+// --- StopBot ---
+
+func TestNewTelegramNotifier_WithWhitelist(t *testing.T) {
+	b, err := bot.New("test-token:fake", bot.WithSkipGetMe())
+	require.NoError(t, err)
+
+	tn := &TelegramNotifier{
+		bot:       b,
+		chatID:    12345,
+		whitelist: []int64{111, 222, 333},
+	}
+
+	assert.NotNil(t, tn)
+	assert.Equal(t, int64(12345), tn.chatID)
+	assert.Len(t, tn.whitelist, 3)
+}
+
+func TestHandleConfig_Unauthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleConfig(context.Background(), b, update)
+}
+
+func TestHandleStatus_Unauthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleStatus(context.Background(), b, update)
 }

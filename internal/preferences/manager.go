@@ -1,23 +1,17 @@
 package preferences
 
 import (
-	"fmt"
 	"time"
 )
 
-// PreferenceManager provides high-level operations on user preferences.
 type PreferenceManager struct {
 	store PreferenceStore
 }
 
-// NewPreferenceManager creates a new PreferenceManager with the given store.
 func NewPreferenceManager(store PreferenceStore) *PreferenceManager {
-	return &PreferenceManager{
-		store: store,
-	}
+	return &PreferenceManager{store: store}
 }
 
-// GetOrCreate retrieves an existing preference or creates a new one with defaults.
 func (pm *PreferenceManager) Get(chatID int64) (*UserPreference, error) {
 	return pm.store.Get(chatID)
 }
@@ -25,9 +19,8 @@ func (pm *PreferenceManager) Get(chatID int64) (*UserPreference, error) {
 func (pm *PreferenceManager) GetOrCreate(chatID int64, username string) (*UserPreference, error) {
 	pref, err := pm.store.Get(chatID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get preference: %w", err)
+		return nil, err
 	}
-
 	if pref != nil {
 		return pref, nil
 	}
@@ -36,60 +29,46 @@ func (pm *PreferenceManager) GetOrCreate(chatID int64, username string) (*UserPr
 	newPref := &UserPreference{
 		ChatID:    chatID,
 		Username:  username,
-		Sections:  []string{},
 		Enabled:   true,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+	newPref.SetSections([]string{})
 
 	if err := pm.store.Save(newPref); err != nil {
-		return nil, fmt.Errorf("failed to save new preference: %w", err)
+		return nil, err
 	}
-
 	return newPref, nil
 }
 
-// UpdateSections updates the monitored sections for a user.
 func (pm *PreferenceManager) UpdateSections(chatID int64, sections []string) error {
 	pref, err := pm.store.Get(chatID)
 	if err != nil {
-		return fmt.Errorf("failed to get preference: %w", err)
+		return err
 	}
-
 	if pref == nil {
-		return fmt.Errorf("preference not found for chat ID %d", chatID)
+		return nil
 	}
 
-	pref.Sections = sections
-
-	if err := pm.store.Save(pref); err != nil {
-		return fmt.Errorf("failed to save preference: %w", err)
-	}
-
-	return nil
+	pref.SetSections(sections)
+	pref.UpdatedAt = time.Now().UTC()
+	return pm.store.Save(pref)
 }
 
-// ToggleEnabled enables or disables notifications for a user.
 func (pm *PreferenceManager) ToggleEnabled(chatID int64, enabled bool) error {
 	pref, err := pm.store.Get(chatID)
 	if err != nil {
-		return fmt.Errorf("failed to get preference: %w", err)
+		return err
 	}
-
 	if pref == nil {
-		return fmt.Errorf("preference not found for chat ID %d", chatID)
+		return nil
 	}
 
 	pref.Enabled = enabled
-
-	if err := pm.store.Save(pref); err != nil {
-		return fmt.Errorf("failed to save preference: %w", err)
-	}
-
-	return nil
+	pref.UpdatedAt = time.Now().UTC()
+	return pm.store.Save(pref)
 }
 
-// List returns all stored user preferences.
 func (pm *PreferenceManager) List() ([]UserPreference, error) {
 	return pm.store.List()
 }

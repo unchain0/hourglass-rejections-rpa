@@ -2,91 +2,130 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/robfig/cron/v3"
+	"hourglass-rejections-rpa/internal/cache"
+	"hourglass-rejections-rpa/internal/config"
+	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/sentry"
 )
 
-// JobFunc is the function signature for scheduled jobs.
-type JobFunc func(ctx context.Context) error
+type Analyzer interface {
+	AnalyzeSection(section string) (*domain.JobResult, error)
+}
 
-// Scheduler handles cron-based job scheduling.
+type Storage interface {
+	Save(ctx context.Context, rejections []domain.Rejeicao) error
+}
+
 type Scheduler struct {
-	cron   *cron.Cron
-	logger *slog.Logger
-	jobs   map[string]cron.EntryID
+	cfg          *config.Config
+	sentryClient *sentry.Client
+	analyzer     Analyzer
+	store        Storage
+	cache        *cache.RejectionCache
 }
 
-// New creates a new Scheduler instance.
-func New(logger *slog.Logger) *Scheduler {
+func New(cfg *config.Config, sentryClient *sentry.Client, analyzer Analyzer, store Storage) *Scheduler {
 	return &Scheduler{
-		cron:   cron.New(cron.WithSeconds()),
-		logger: logger,
-		jobs:   make(map[string]cron.EntryID),
+		cfg:          cfg,
+		sentryClient: sentryClient,
+		analyzer:     analyzer,
+		store:        store,
+		cache:        cache.New(),
 	}
 }
 
-// AddJob schedules a job to run according to the given cron expression.
-func (s *Scheduler) AddJob(name string, schedule string, job JobFunc) error {
-	entryID, err := s.cron.AddFunc(schedule, func() {
-		s.logger.Info("starting scheduled job", "job", name, "time", time.Now())
-		
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		
-		if err := job(ctx); err != nil {
-			s.logger.Error("job failed", "job", name, "error", err)
-		} else {
-			s.logger.Info("job completed successfully", "job", name)
+func (s *Scheduler) Run(ctx context.Context) error {
+	logger := slog.Default()
+	logger.Info("starting smart scheduler", "business_hours", "30min", "night_hours", "2h")
+
+	return s.runWithTicker(ctx, time.NewTicker(1*time.Minute))
+}
+
+func (s *Scheduler) runWithTicker(ctx context.Context, ticker *time.Ticker) error {
+	logger := slog.Default()
+	defer ticker.Stop()
+
+	nextRun := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("scheduler stopped")
+			return nil
+		case now := <-ticker.C:
+			if now.Before(nextRun) {
+				continue
+			}
+
+			interval := s.calculateInterval(now)
+
+			logger.Info("running scheduled analysis", "time", now.Format("15:04"))
+			if err := s.runAnalysis(ctx); err != nil {
+				logger.Error("scheduled analysis failed", "error", err)
+			}
+
+			nextRun = now.Add(interval)
+			logger.Info("next check scheduled", "at", nextRun.Format("15:04"))
 		}
-	})
-	
-	if err != nil {
-		return fmt.Errorf("failed to add job %s: %w", name, err)
 	}
-	
-	s.jobs[name] = entryID
-	s.logger.Info("job scheduled", "job", name, "schedule", schedule)
+}
+
+func (s *Scheduler) calculateInterval(now time.Time) time.Duration {
+	hour := now.Hour()
+	var interval time.Duration
+
+	if hour >= 6 && hour < 22 {
+		interval = 30 * time.Minute
+		slog.Info("business hours check", "hour", hour, "next_interval", interval)
+	} else {
+		interval = 2 * time.Hour
+		slog.Info("night hours check", "hour", hour, "next_interval", interval)
+	}
+
+	return interval
+}
+
+func (s *Scheduler) runAnalysis(ctx context.Context) error {
+	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
+	var allRejections []domain.Rejeicao
+
+	for _, section := range sections {
+		slog.Info("analyzing section", "section", section)
+
+		result, err := s.analyzer.AnalyzeSection(section)
+		if err != nil {
+			slog.Error("failed to analyze section", "section", section, "error", err)
+			continue
+		}
+
+		if result.Error != nil {
+			slog.Error("analysis returned error", "section", section, "error", result.Error)
+			continue
+		}
+
+		slog.Info("section analysis complete", "section", section, "total", result.Total)
+
+		if len(result.Rejeicoes) > 0 {
+			allRejections = append(allRejections, result.Rejeicoes...)
+			s.store.Save(ctx, result.Rejeicoes)
+		}
+	}
+
+	return s.sendNotifications(allRejections)
+}
+
+func (s *Scheduler) sendNotifications(rejections []domain.Rejeicao) error {
+	if len(rejections) == 0 {
+		return nil
+	}
+
+	if !s.cache.HasChanges(rejections) {
+		slog.Info("skipping notification - no changes from last check")
+		return nil
+	}
+
 	return nil
-}
-
-// AddDailyJob schedules a job to run daily at a specific hour and minute.
-func (s *Scheduler) AddDailyJob(name string, hour, minute int, job JobFunc) error {
-	// Cron expression: second minute hour day month dayOfWeek
-	// 0 <minute> <hour> * * * means daily at hour:minute:00
-	schedule := fmt.Sprintf("0 %d %d * * *", minute, hour)
-	return s.AddJob(name, schedule, job)
-}
-
-// Start begins the scheduler.
-func (s *Scheduler) Start() {
-	s.cron.Start()
-	s.logger.Info("scheduler started")
-}
-
-// Stop stops the scheduler gracefully.
-func (s *Scheduler) Stop() {	s.cron.Stop()
-	s.logger.Info("scheduler stopped")
-}
-
-// NextRun returns the next scheduled run time for a job.
-func (s *Scheduler) NextRun(name string) (time.Time, bool) {
-	entryID, exists := s.jobs[name]
-	if !exists {
-		return time.Time{}, false
-	}
-	
-	entry := s.cron.Entry(entryID)
-	return entry.Next, true
-}
-
-// ListJobs returns a list of all scheduled job names.
-func (s *Scheduler) ListJobs() []string {
-	names := make([]string, 0, len(s.jobs))
-	for name := range s.jobs {
-		names = append(names, name)
-	}
-	return names
 }

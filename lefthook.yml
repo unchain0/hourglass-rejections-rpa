@@ -1,0 +1,36 @@
+# lefthook.yml
+# Git hooks configuration for Go projects
+# Install: go install github.com/evilmartians/lefthook@latest
+# Setup: lefthook install
+
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "*.go"
+      run: gofmt -w {staged_files}
+    lint:
+      glob: "*.go"
+      run: golangci-lint run --new-from-rev HEAD
+    test:
+      glob: "*.go"
+      run: go test -race -timeout 5m ./...
+    govulncheck:
+      glob: "*.go"
+      run: govulncheck ./...
+    build:
+      glob: "*.go"
+      run: go build -o rpa ./cmd/rpa
+
+pre-push:
+  commands:
+    test:
+      run: go test -v -race -coverprofile=coverage.out ./...
+    coverage:
+      run: |
+        go tool cover -func=coverage.out | grep total | awk '{print "Total coverage: " $3}'
+        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+        if (( $(echo "$COVERAGE < 85" | bc -l) )); then
+          echo "Coverage is below 85%"
+          exit 1
+        fi
