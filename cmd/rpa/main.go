@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -21,10 +20,55 @@ import (
 	"hourglass-rejections-rpa/internal/logger"
 	"hourglass-rejections-rpa/internal/notifier"
 	"hourglass-rejections-rpa/internal/preferences"
-	"hourglass-rejections-rpa/internal/scheduler"
 	"hourglass-rejections-rpa/internal/sentry"
 	"hourglass-rejections-rpa/internal/storage"
 )
+
+// rejectionCache stores the last rejection results to avoid duplicate notifications
+type rejectionCache struct {
+	mu         sync.RWMutex
+	lastResult []domain.Rejeicao
+	lastCheck  time.Time
+}
+
+var cache = &rejectionCache{}
+
+func (c *rejectionCache) hasChanges(newRejections []domain.Rejeicao) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(c.lastResult) == 0 && len(newRejections) > 0 {
+		c.lastResult = newRejections
+		c.lastCheck = time.Now()
+		return true
+	}
+
+	if len(newRejections) == 0 && len(c.lastResult) == 0 {
+		c.lastCheck = time.Now()
+		return false
+	}
+
+	if len(newRejections) != len(c.lastResult) {
+		c.lastResult = newRejections
+		c.lastCheck = time.Now()
+		return true
+	}
+
+	for i, new := range newRejections {
+		old := c.lastResult[i]
+		if new.Secao != old.Secao || new.Quem != old.Quem || new.OQue != old.OQue {
+			c.lastResult = newRejections
+			c.lastCheck = time.Now()
+			return true
+		}
+	}
+
+	c.lastCheck = time.Now()
+	slog.Info("no changes detected since last check, skipping notification",
+		"last_check", c.lastCheck,
+		"rejections_count", len(newRejections))
+	return false
+}
 
 // init loads .env file if it exists
 func init() {
@@ -313,13 +357,16 @@ func sendFilteredNotifications(
 		return nil
 	}
 
-	// Group rejections by section for efficient filtering
+	if !cache.hasChanges(rejections) {
+		slog.Info("skipping notification - no changes from last check")
+		return nil
+	}
+
 	bySection := make(map[string][]domain.Rejeicao)
 	for _, r := range rejections {
 		bySection[r.Secao] = append(bySection[r.Secao], r)
 	}
 
-	// Get all users with preferences
 	users, err := prefManager.List()
 	if err != nil {
 		return fmt.Errorf("failed to list user preferences: %w", err)
@@ -540,47 +587,49 @@ func sendFilteredNotificationsForUser(ctx context.Context, sentryClient *sentry.
 
 func runScheduler(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	logger := slog.Default()
+	logger.Info("starting smart scheduler", "business_hours", "30min", "night_hours", "2h")
 
-	// Create scheduler
-	s := scheduler.New(logger)
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
 
-	// Create job function
-	jobFunc := func(ctx context.Context) error {
-		logger.Info("running scheduled analysis")
-		return runOnce(ctx, cfg, sentryClient, analyzer, store)
+	nextRun := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("scheduler stopped")
+			return nil
+		case now := <-ticker.C:
+			if now.Before(nextRun) {
+				continue
+			}
+
+			hour := now.Hour()
+			var interval time.Duration
+
+			if hour >= 6 && hour < 22 {
+				interval = 30 * time.Minute
+				logger.Info("business hours check", "hour", hour, "next_interval", interval)
+			} else {
+				interval = 2 * time.Hour
+				logger.Info("night hours check", "hour", hour, "next_interval", interval)
+			}
+
+			logger.Info("running scheduled analysis", "time", now.Format("15:04"))
+			if err := runOnce(ctx, cfg, sentryClient, analyzer, store); err != nil {
+				logger.Error("scheduled analysis failed", "error", err)
+				if sentryClient != nil && sentryClient.IsEnabled() {
+					sentryClient.CaptureError(err, map[string]interface{}{
+						"operation": "scheduled_analysis",
+						"timestamp": now,
+					})
+				}
+			}
+
+			nextRun = now.Add(interval)
+			logger.Info("next check scheduled", "at", nextRun.Format("15:04"))
+		}
 	}
-
-	// Schedule jobs for 9:00 AM and 5:00 PM
-	if err := s.AddDailyJob("morning-analysis", 9, 0, jobFunc); err != nil {
-		return fmt.Errorf("failed to schedule morning job: %w", err)
-	}
-
-	if err := s.AddDailyJob("evening-analysis", 17, 0, jobFunc); err != nil {
-		return fmt.Errorf("failed to schedule evening job: %w", err)
-	}
-
-	// List scheduled jobs
-	jobs := s.ListJobs()
-	logger.Info("scheduled jobs", "count", len(jobs), "jobs", jobs)
-
-	// Start scheduler
-	s.Start()
-	defer s.Stop()
-
-	logger.Info("scheduler running - press Ctrl+C to stop")
-
-	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	select {
-	case <-sigChan:
-		logger.Info("received shutdown signal")
-	case <-ctx.Done():
-		logger.Info("context cancelled")
-	}
-
-	return nil
 }
 
 func runBot(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
