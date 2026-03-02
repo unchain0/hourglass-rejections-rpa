@@ -18,6 +18,10 @@ func NewPreferenceManager(store PreferenceStore) *PreferenceManager {
 }
 
 // GetOrCreate retrieves an existing preference or creates a new one with defaults.
+func (pm *PreferenceManager) Get(chatID int64) (*UserPreference, error) {
+	return pm.store.Get(chatID)
+}
+
 func (pm *PreferenceManager) GetOrCreate(chatID int64, username string) (*UserPreference, error) {
 	pref, err := pm.store.Get(chatID)
 	if err != nil {

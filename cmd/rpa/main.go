@@ -391,6 +391,153 @@ func sendFilteredNotifications(
 	return nil
 }
 
+func runOnceForUser(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage, prefManager *preferences.PreferenceManager, targetChatID int64) error {
+	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
+	var allRejections []domain.Rejeicao
+
+	for _, section := range sections {
+		slog.Info("analyzing section", "section", section)
+
+		result, err := analyzer.AnalyzeSection(section)
+		if err != nil {
+			slog.Error("failed to analyze section", "section", section, "error", err)
+			if sentryClient.IsEnabled() {
+				sentryClient.CaptureError(err, map[string]interface{}{
+					"section":   section,
+					"operation": "analyze_section",
+				})
+			}
+			continue
+		}
+
+		if result.Error != nil {
+			slog.Error("analysis returned error", "section", section, "error", result.Error)
+			if sentryClient.IsEnabled() {
+				sentryClient.CaptureError(result.Error, map[string]interface{}{
+					"section":   section,
+					"operation": "analyze_section_result",
+				})
+			}
+			continue
+		}
+
+		slog.Info("section analysis complete",
+			"section", section,
+			"total", result.Total,
+			"duration", result.Duration,
+		)
+
+		if len(result.Rejeicoes) > 0 {
+			allRejections = append(allRejections, result.Rejeicoes...)
+			if err := store.Save(ctx, result.Rejeicoes); err != nil {
+				slog.Error("failed to save results", "section", section, "error", err)
+				if sentryClient.IsEnabled() {
+					sentryClient.CaptureError(err, map[string]interface{}{
+						"section":   section,
+						"operation": "save_results",
+					})
+				}
+			}
+		}
+	}
+
+	if len(allRejections) == 0 {
+		slog.Info("no rejections found for manual check")
+
+		token := os.Getenv("TELEGRAM_BOT_TOKEN")
+		if token == "" {
+			return nil
+		}
+
+		tgBot, err := notifier.NewTelegramNotifier(token, targetChatID, nil)
+		if err != nil {
+			return err
+		}
+
+		tgBot.SendRejectionsNotification(targetChatID, nil)
+		return nil
+	}
+
+	if err := sendFilteredNotificationsForUser(ctx, sentryClient, allRejections, prefManager, targetChatID); err != nil {
+		slog.Error("failed to send notifications", "error", err)
+		return err
+	}
+
+	return nil
+}
+
+func sendFilteredNotificationsForUser(ctx context.Context, sentryClient *sentry.Client, rejections []domain.Rejeicao, prefManager *preferences.PreferenceManager, targetChatID int64) error {
+	if len(rejections) == 0 {
+		return nil
+	}
+
+	token := os.Getenv("TELEGRAM_BOT_TOKEN")
+	if token == "" {
+		slog.Warn("Telegram bot token not configured, skipping notification")
+		return nil
+	}
+
+	user, err := prefManager.Get(targetChatID)
+	if err != nil {
+		slog.Error("failed to get user preferences", "chat_id", targetChatID, "error", err)
+		user = &preferences.UserPreference{
+			ChatID:   targetChatID,
+			Sections: []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"},
+			Enabled:  true,
+		}
+	}
+
+	if !user.Enabled {
+		slog.Info("user disabled, skipping notification", "chat_id", targetChatID)
+		return nil
+	}
+
+	bySection := make(map[string][]domain.Rejeicao)
+	for _, r := range rejections {
+		bySection[r.Secao] = append(bySection[r.Secao], r)
+	}
+
+	var userRejections []domain.Rejeicao
+	for _, section := range user.Sections {
+		userRejections = append(userRejections, bySection[section]...)
+	}
+
+	if len(userRejections) == 0 {
+		slog.Info("no rejections for user's sections", "chat_id", targetChatID)
+
+		tgBot, err := notifier.NewTelegramNotifier(token, targetChatID, nil)
+		if err != nil {
+			return err
+		}
+
+		tgBot.SendRejectionsNotification(targetChatID, nil)
+		return nil
+	}
+
+	tgBot, err := notifier.NewTelegramNotifier(token, targetChatID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create telegram notifier: %w", err)
+	}
+
+	if err := tgBot.SendRejectionsNotification(targetChatID, userRejections); err != nil {
+		slog.Error("failed to send notification", "chat_id", targetChatID, "error", err)
+		if sentryClient.IsEnabled() {
+			sentryClient.CaptureError(err, map[string]interface{}{
+				"operation": "send_telegram_notification",
+				"chat_id":   targetChatID,
+			})
+		}
+		return err
+	}
+
+	slog.Info("notification sent to user",
+		"chat_id", targetChatID,
+		"rejection_count", len(userRejections),
+	)
+
+	return nil
+}
+
 func runScheduler(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	logger := slog.Default()
 
@@ -471,7 +618,7 @@ func runBot(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client
 
 	tgBot.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
 		logger.Info("manual check triggered via bot", "chat_id", chatID)
-		if err := runOnce(ctx, cfg, sentryClient, analyzer, store); err != nil {
+		if err := runOnceForUser(ctx, cfg, sentryClient, analyzer, store, prefManager, chatID); err != nil {
 			logger.Error("manual check failed", "error", err)
 			return err
 		}
