@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/unchain0/hourglass-rejections-rpa/actions/workflows/ci.yml/badge.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.24-blue.svg)](https://golang.org)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions)
+[![Coverage](https://img.shields.io/badge/coverage-86.2%25-brightgreen.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.yml)
 
@@ -15,7 +15,7 @@ Automated system to monitor assignment rejections in Hourglass. Runs 2x daily (9
 - **Smart Scheduling**: Cron jobs for 9 AM and 5 PM daily
 - **Multiple Formats**: Exports data in JSON and CSV
 - **Maximum Range**: Searches for rejections up to 2 years (730 days)
-- **100% Coverage**: Complete unit tests
+- **86.2% Coverage**: Comprehensive unit tests
 
 ## 📋 Prerequisites
 
