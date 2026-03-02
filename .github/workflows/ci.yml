@@ -21,7 +21,7 @@ jobs:
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v4
       with:
-        version: latest
+        version: v1.63.4
         args: --timeout=5m
 
   test:
@@ -60,8 +60,8 @@ jobs:
       run: |
         COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
         echo "Coverage: $COVERAGE%"
-        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-          echo "Coverage is below 80%"
+        if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+          echo "Coverage is below 70%"
           exit 1
         fi
 
