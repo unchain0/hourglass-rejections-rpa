@@ -28,19 +28,18 @@ func TestNew_Disabled(t *testing.T) {
 }
 
 func TestNew_InvalidDSN(t *testing.T) {
-	// This would actually try to connect to Sentry
-	// In real tests, we might want to mock this
-	t.Skip("Skipping test that requires Sentry connection")
-
 	cfg := Config{
 		DSN:         "invalid-dsn",
 		Environment: "test",
 		Release:     "1.0.0",
 	}
 
-	_, err := New(cfg)
+	client, err := New(cfg)
 	if err == nil {
 		t.Error("expected error for invalid DSN")
+	}
+	if client != nil {
+		t.Error("expected nil client for invalid DSN")
 	}
 }
 
@@ -98,3 +97,122 @@ func TestParseLevel(t *testing.T) {
 		})
 	}
 }
+
+func TestNew_Enabled(t *testing.T) {
+	// Use a test DSN that initializes but doesn't send real events
+	cfg := Config{
+		DSN:         "https://test@sentry.io/123",
+		Environment: "test",
+		Release:     "1.0.0",
+	}
+
+	client, err := New(cfg)
+	if err != nil {
+		t.Errorf("New() error = %v", err)
+	}
+
+	if client == nil {
+		t.Fatal("New() returned nil")
+	}
+
+	if !client.IsEnabled() {
+		t.Error("expected client to be enabled when DSN is valid")
+	}
+	// Clean up
+	client.Close()
+}
+
+func TestNew_IsEnabled(t *testing.T) {
+	// Test disabled client
+	disabledClient, err := New(Config{DSN: ""})
+	if err != nil {
+		t.Errorf("New() error = %v", err)
+	}
+	if disabledClient.IsEnabled() {
+		t.Error("expected disabled client to return false for IsEnabled()")
+	}
+
+	// Test enabled client
+	enabledClient, err := New(Config{DSN: "https://test@sentry.io/123"})
+	if err != nil {
+		t.Errorf("New() error = %v", err)
+	}
+	if !enabledClient.IsEnabled() {
+		t.Error("expected enabled client to return true for IsEnabled()")
+	}
+	// Clean up
+	enabledClient.Close()
+}
+
+func TestClient_CaptureError_Enabled(t *testing.T) {
+	client, err := New(Config{DSN: "https://test@sentry.io/123"})
+	if err != nil {
+		t.Errorf("New() error = %v", err)
+	}
+
+	// Test with nil error - should not panic
+	client.CaptureError(nil, nil)
+
+	// Test with error and no extras
+	testErr := errors.New("test error")
+	client.CaptureError(testErr, nil)
+
+	// Test with error and extras
+	client.CaptureError(testErr, map[string]interface{}{
+		"key1": "value1",
+		"key2": 123,
+		"key3": true,
+	})
+
+	// Clean up
+	client.Close()
+}
+
+func TestClient_CaptureMessage_Enabled(t *testing.T) {
+	client, err := New(Config{DSN: "https://test@sentry.io/123"})
+	if err != nil {
+		t.Errorf("New() error = %v", err)
+	}
+
+	// Test with different levels
+	levels := []string{"debug", "info", "warn", "warning", "error", "fatal", "unknown"}
+	for _, level := range levels {
+		// Should not panic with any level
+		client.CaptureMessage("test message", level)
+	}
+
+	// Clean up
+	client.Close()
+}
+
+func TestClient_Flush_Enabled(t *testing.T) {
+	client, err := New(Config{DSN: "https://test@sentry.io/123"})
+	if err != nil {
+		t.Errorf("New() error = %v", err)
+	}
+
+	// Should not panic when enabled
+	client.Flush(1 * time.Second)
+
+	// Clean up
+	client.Close()
+}
+
+func TestClient_Close_Enabled(t *testing.T) {
+	client, err := New(Config{DSN: "https://test@sentry.io/123"})
+	if err != nil {
+		t.Errorf("New() error = %v", err)
+	}
+
+	// Should not panic when enabled
+	client.Close()
+}
+
+func TestParseLevel_EmptyString(t *testing.T) {
+	// Empty string should default to Info level
+	got := parseLevel("")
+	if string(got) != "info" {
+		t.Errorf("parseLevel(\"\") = %v, want info", got)
+	}
+}
+

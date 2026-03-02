@@ -127,31 +127,14 @@ func TestClient_GetMeetings(t *testing.T) {
 		{
 			Date:   "2026-03-02",
 			LGroup: 48092,
-			TGW: MeetingSection{
-				ID: 123,
-				Participants: []Participant{
-					{
-						ID:        1,
-						UserID:    31944,
-						Type:      "tgw",
-						Slot:      1,
-						Optional:  false,
-						Confirmed: true,
-					},
-				},
+			TGW: []MeetingPart{
+				{ID: 123, Title: "Joias Espirituais", Info: "", Time: "10 min", Type: "dfg"},
 			},
-			FM: MeetingSection{
-				ID: 124,
-				Participants: []Participant{
-					{
-						ID:        2,
-						UserID:    31945,
-						Type:      "fm",
-						Slot:      1,
-						Optional:  false,
-						Confirmed: false,
-					},
-				},
+			FM: []MeetingPart{
+				{ID: 124, Title: "Iniciando conversas", Info: "", Time: "3 min", Type: "initcall"},
+			},
+			LAC: []MeetingPart{
+				{ID: 125, Title: "Estudo bíblico", Info: "", Time: "30 min", Type: "cbs"},
 			},
 		},
 	}
@@ -173,8 +156,9 @@ func TestClient_GetMeetings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, meetings, 1)
 	assert.Equal(t, "2026-03-02", meetings[0].Date)
-	assert.Equal(t, 1, len(meetings[0].TGW.Participants))
+	assert.Equal(t, 1, len(meetings[0].TGW))
 }
+
 
 func TestClient_GetMeetings_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

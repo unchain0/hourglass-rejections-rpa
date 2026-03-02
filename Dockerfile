@@ -22,10 +22,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o rpa ./cmd/rpa
 # Final stage
 FROM alpine:latest
 
-# Install ca-certificates and timezone data
+# Install ca-certificates, timezone data, and procps for healthcheck
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
+    procps \
     && rm -rf /var/cache/apk/*
 
 # Create non-root user
@@ -51,9 +52,9 @@ ENV TZ=America/Sao_Paulo
 # Expose volume for outputs
 VOLUME ["/app/outputs"]
 
-# Health check
+# Health check - using ps instead of pgrep for non-root compatibility
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -x rpa >/dev/null || exit 1
+    CMD ps aux | grep -v grep | grep -q "rpa" || exit 1
 
 # Run the application
 ENTRYPOINT ["./rpa"]

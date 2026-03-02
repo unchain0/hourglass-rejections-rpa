@@ -258,13 +258,17 @@ func TestAPIAnalyzer_AnalyzeAllSections(t *testing.T) {
 	pathAva := fmt.Sprintf("/scheduling/notifications/%s_%s/ava", startRange, endRange)
 	pathFm := fmt.Sprintf("/scheduling/notifications/%s_%s/fm", startRange, endRange)
 	pathPubwit := fmt.Sprintf("/scheduling/notifications/%s_%s/pubwit", startRange, endRange)
+ pathMm := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
+ meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
-		case pathAva, pathFm, pathPubwit:
-			json.NewEncoder(w).Encode([]Notification{})
+ case pathAva, pathFm, pathPubwit, pathMm:
+ json.NewEncoder(w).Encode([]Notification{})
+ case meetingPath:
+ json.NewEncoder(w).Encode([]Meeting{})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -277,10 +281,11 @@ func TestAPIAnalyzer_AnalyzeAllSections(t *testing.T) {
 
 	results, err := analyzer.AnalyzeAllSections()
 	require.NoError(t, err)
-	assert.Len(t, results, 3)
-	assert.Equal(t, "Partes Mecânicas", results[0].Secao)
-	assert.Equal(t, "Campo", results[1].Secao)
-	assert.Equal(t, "Testemunho Público", results[2].Secao)
+ assert.Len(t, results, 4)
+ assert.Equal(t, "Partes Mecânicas", results[0].Secao)
+ assert.Equal(t, "Campo", results[1].Secao)
+ assert.Equal(t, "Testemunho Público", results[2].Secao)
+ assert.Equal(t, "Reunião Meio de Semana", results[3].Secao)
 }
 
 func TestAPIAnalyzer_GetUserName(t *testing.T) {
@@ -482,9 +487,274 @@ func TestAPIAnalyzer_AnalyzeAllSections_WithError(t *testing.T) {
 
 	results, err := analyzer.AnalyzeAllSections()
 	require.NoError(t, err)
-	assert.Len(t, results, 3)
+ assert.Len(t, results, 4)
 	// All sections should have errors
 	for _, result := range results {
 		assert.Error(t, result.Error)
 	}
+}
+
+func TestAPIAnalyzer_SetDaysToLookAhead(t *testing.T) {
+	client := NewClient()
+	analyzer := NewAPIAnalyzer(client)
+
+	analyzer.SetDaysToLookAhead(365)
+	assert.Equal(t, 365, analyzer.daysToLookAhead)
+}
+
+func TestGetMidweekFlagName(t *testing.T) {
+	tests := []struct {
+		flag     int
+		expected string
+	}{
+		{10, "Leitor do EBC"},
+		{11, "Leitor do EBC"},
+		{20, "Orador/Dirigente"},
+		{30, "Estudante"},
+		{40, "Ajudante"},
+		{50, "Designação Especial"},
+		{60, "Outra Designação"},
+		{99, "Designação (flag 99)"},
+		{0, "Designação (flag 0)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("flag_%d", tt.flag), func(t *testing.T) {
+			result := getMidweekFlagName(tt.flag)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetFriendlyTypeName(t *testing.T) {
+	tests := []struct {
+		typeName string
+		expected  string
+	}{
+		{"video", "Vídeo"},
+		{"console", "Console"},
+		{"mics", "Microfone"},
+		{"attendant", "Atendente"},
+		{"ava", "Áudio/Vídeo & Indicadores"},
+		{"pubwit", "Testemunho Público"},
+		{"fm", "Reunião de Campo"},
+		{"unknown", "unknown"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typeName, func(t *testing.T) {
+			result := getFriendlyTypeName(tt.typeName)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatDateToBrazilian(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"2026-03-02", "02/03/2026"},
+		{"2024-12-31", "31/12/2024"},
+		{"2020-01-01", "01/01/2020"},
+		{"invalid", "invalid"},
+		{"2026/03/02", "2026/03/02"},
+		{"", ""},
+		{"2026-03", "2026-03"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := formatDateToBrazilian(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestAPIAnalyzer_AnalyzeMidweekMeetings(t *testing.T) {
+	users := []User{{ID: 1, Firstname: "João", Lastname: "Silva", Descriptor: "João Silva"}}
+
+	// Create meetings with parts
+	meetings := []Meeting{{
+		TGW: []MeetingPart{{ID: 100, Title: "Leitura da Bíblia"}},
+		FM:  []MeetingPart{{ID: 101, Title: "Apresentação"}},
+		LAC: []MeetingPart{{ID: 102, Title: "Discussão"}},
+	}}
+
+	notifications := []Notification{
+		{
+			ID:             1,
+			CongregationID: 48092,
+			Date:           "2026-03-01",
+			Type:           "mm",
+			Status:         "declined",
+			Assignee:       1,
+			Part:           100,
+			Flag:           10,
+		},
+		{
+			ID:             2,
+			CongregationID: 48092,
+			Date:           "2026-03-02",
+			Type:           "mm",
+			Status:         "declined",
+			Assignee:       1,
+			Part:           101,
+			Flag:           20,
+		},
+		{
+			ID:             3,
+			CongregationID: 48092,
+			Date:           "2026-03-03",
+			Type:           "mm",
+			Status:         "pending",
+			Assignee:       1,
+			Part:           102,
+			Flag:           30,
+		},
+	}
+
+	startRange := time.Now().Format("2006-01-02")
+	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
+	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
+	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/fsreport/users":
+			json.NewEncoder(w).Encode(UsersResponse{Users: users})
+		case expectedPath:
+			json.NewEncoder(w).Encode(notifications)
+		case meetingPath:
+			json.NewEncoder(w).Encode(meetings)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	analyzer := NewAPIAnalyzer(client)
+
+	rejeicoes, err := analyzer.analyzeMidweekMeetings()
+	require.NoError(t, err)
+	assert.Len(t, rejeicoes, 2)
+	assert.Equal(t, "Leitura da Bíblia", rejeicoes[0].OQue)
+	assert.Equal(t, "Apresentação", rejeicoes[1].OQue)
+}
+
+func TestAPIAnalyzer_AnalyzeMidweekMeetings_GetNotificationsError(t *testing.T) {
+	users := []User{{ID: 1, Firstname: "Test"}}
+
+	startRange := time.Now().Format("2006-01-02")
+	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
+	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/fsreport/users":
+			json.NewEncoder(w).Encode(UsersResponse{Users: users})
+		case expectedPath:
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	analyzer := NewAPIAnalyzer(client)
+
+	_, err := analyzer.analyzeMidweekMeetings()
+	assert.Error(t, err)
+}
+
+func TestAPIAnalyzer_AnalyzeMidweekMeetings_GetMeetingsError(t *testing.T) {
+	users := []User{{ID: 1, Firstname: "Test"}}
+
+	notifications := []Notification{{
+		ID:             1,
+		CongregationID: 48092,
+		Date:           "2026-03-01",
+		Type:           "mm",
+		Status:         "declined",
+		Assignee:       1,
+		Part:           100,
+		Flag:           10,
+	}}
+
+	startRange := time.Now().Format("2006-01-02")
+	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
+	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
+	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/fsreport/users":
+			json.NewEncoder(w).Encode(UsersResponse{Users: users})
+		case expectedPath:
+			json.NewEncoder(w).Encode(notifications)
+		case meetingPath:
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	analyzer := NewAPIAnalyzer(client)
+
+	_, err := analyzer.analyzeMidweekMeetings()
+	assert.Error(t, err)
+}
+
+func TestAPIAnalyzer_AnalyzeMidweekMeetings_FallbackFlagName(t *testing.T) {
+	users := []User{{ID: 1, Firstname: "João", Lastname: "Silva", Descriptor: "João Silva"}}
+
+	// Create meetings without the part ID
+	meetings := []Meeting{{TGW: []MeetingPart{{ID: 999, Title: "Some Other Part"}}}}
+
+	notifications := []Notification{{
+		ID:             1,
+		CongregationID: 48092,
+		Date:           "2026-03-01",
+		Type:           "mm",
+		Status:         "declined",
+		Assignee:       1,
+		Part:           100, // Not in meetings
+		Flag:           30,
+	}}
+
+	startRange := time.Now().Format("2006-01-02")
+	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
+	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
+	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/fsreport/users":
+			json.NewEncoder(w).Encode(UsersResponse{Users: users})
+		case expectedPath:
+			json.NewEncoder(w).Encode(notifications)
+		case meetingPath:
+			json.NewEncoder(w).Encode(meetings)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	analyzer := NewAPIAnalyzer(client)
+
+	rejeicoes, err := analyzer.analyzeMidweekMeetings()
+	require.NoError(t, err)
+	assert.Len(t, rejeicoes, 1)
+	assert.Equal(t, "Estudante", rejeicoes[0].OQue)
 }

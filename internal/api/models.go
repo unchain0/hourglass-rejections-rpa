@@ -12,11 +12,11 @@ type User struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
 // UsersResponse represents the response from the users endpoint.
 type UsersResponse struct {
 	Users []User `json:"users"`
 }
-
 
 // AVAttendant represents a mechanical assignment (Áudio/Vídeo & Indicadores).
 type AVAttendant struct {
@@ -32,16 +32,25 @@ type AVAttendant struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Meeting represents a weekend meeting schedule.
+// Meeting represents a midweek meeting schedule.
 type Meeting struct {
-	Date   string         `json:"date"`
-	LGroup int            `json:"lgroup"`
-	TGW    MeetingSection `json:"tgw"` // Treasures from God's Word
-	FM     MeetingSection `json:"fm"`  // Field Ministry
-	LAC    MeetingSection `json:"lac"` // Living as Christians
+	Date   string        `json:"date"`
+	LGroup int           `json:"lgroup"`
+	TGW    []MeetingPart `json:"tgw"` // Treasures from God's Word
+	FM     []MeetingPart `json:"fm"`  // Field Ministry
+	LAC    []MeetingPart `json:"lac"` // Living as Christians
 }
 
-// MeetingSection represents a section within a meeting (TGW, FM, or LAC).
+// MeetingPart represents a single part within a meeting section.
+type MeetingPart struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+	Info  string `json:"info"`
+	Time  string `json:"time"`
+	Type  string `json:"type"`
+}
+
+// MeetingSection represents participants for a meeting part.
 type MeetingSection struct {
 	ID           int           `json:"id"`
 	Participants []Participant `json:"participants"`
@@ -85,7 +94,7 @@ type Notification struct {
 type NotificationStatus string
 
 const (
-	StatusPending   NotificationStatus = "pending"
-	StatusComplete  NotificationStatus = "complete"
-	StatusDeclined  NotificationStatus = "declined"
+	StatusPending  NotificationStatus = "pending"
+	StatusComplete NotificationStatus = "complete"
+	StatusDeclined NotificationStatus = "declined"
 )

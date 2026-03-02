@@ -7,9 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/joho/godotenv"
 
 	"hourglass-rejections-rpa/internal/api"
 	"hourglass-rejections-rpa/internal/config"
@@ -20,6 +23,36 @@ import (
 	"hourglass-rejections-rpa/internal/sentry"
 	"hourglass-rejections-rpa/internal/storage"
 )
+
+// init loads .env file if it exists
+func init() {
+	// Try to load .env from multiple possible locations
+	// Silently ignore if not found (allows using system env vars)
+	loadEnvFiles()
+}
+
+// loadEnvFiles attempts to load .env files from various locations
+func loadEnvFiles() {
+	// Possible locations for .env file
+	locations := []string{
+		".env",       // Current directory
+		"../.env",    // Parent directory
+		"../../.env", // Grandparent directory
+		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", ".env"), // Home directory
+	}
+
+	for _, location := range locations {
+		if _, err := os.Stat(location); err == nil {
+			if err := godotenv.Load(location); err == nil {
+				// Successfully loaded
+				return
+			}
+		}
+	}
+
+	// Try default .env (will silently fail if not exists)
+	_ = godotenv.Load()
+}
 
 func main() {
 	var (
@@ -103,7 +136,7 @@ func main() {
 
 func runOnce(ctx context.Context, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	// Analyze all sections
-	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público"}
+	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
 	var allRejections []domain.Rejeicao
 
 	for _, section := range sections {

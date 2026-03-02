@@ -42,7 +42,7 @@ func TestFileStorage_Save(t *testing.T) {
 			Quem:      "Quem 1",
 			OQue:      "O Que 1",
 			PraQuando: "Pra Quando 1",
-			Timestamp: time.Now().Truncate(time.Second),
+			Timestamp: time.Now().UTC().Truncate(time.Second),
 		},
 	}
 

@@ -10,19 +10,19 @@ import (
 
 // APIAnalyzer uses the Hourglass REST API to detect rejections.
 type APIAnalyzer struct {
-	client         *Client
-	userCache      map[int]*User
-	congregationID int
+	client          *Client
+	userCache       map[int]*User
+	congregationID  int
 	daysToLookAhead int
 }
 
 // NewAPIAnalyzer creates a new API-based analyzer.
 func NewAPIAnalyzer(client *Client) *APIAnalyzer {
 	return &APIAnalyzer{
-		client:         client,
-		userCache:      make(map[int]*User),
-		congregationID: 48092, // Default congregation ID
-		daysToLookAhead: 730,     // Default: 2 years (730 days) to catch all rejections
+		client:          client,
+		userCache:       make(map[int]*User),
+		congregationID:  48092, // Default congregation ID
+		daysToLookAhead: 730,   // Default: 2 years (730 days) to catch all rejections
 	}
 }
 
@@ -62,6 +62,8 @@ func (a *APIAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error) 
 		rejeicoes, err = a.analyzeCampo()
 	case "Testemunho Público", "publicWitnessing":
 		rejeicoes, err = a.analyzeTestemunhoPublico()
+	case "Reunião Meio de Semana", "midweekMeeting":
+		rejeicoes, err = a.analyzeMidweekMeetings()
 	default:
 		return &domain.JobResult{
 			Secao:    section,
@@ -142,6 +144,7 @@ func (a *APIAnalyzer) analyzePartesMecanicas() ([]domain.Rejeicao, error) {
 
 	return rejeicoes, nil
 }
+
 // formatDateToBrazilian converts YYYY-MM-DD to DD/MM/YYYY
 func formatDateToBrazilian(date string) string {
 	parts := strings.Split(date, "-")
@@ -172,8 +175,6 @@ func getFriendlyTypeName(typeName string) string {
 		return typeName
 	}
 }
-
-
 
 // analyzeCampo analyzes field ministry assignments for rejections.
 // Uses notifications endpoint to detect declined assignments.
@@ -237,9 +238,86 @@ func (a *APIAnalyzer) analyzeTestemunhoPublico() ([]domain.Rejeicao, error) {
 	return rejeicoes, nil
 }
 
-// AnalyzeAllSections analyzes all three sections.
+// analyzeMidweekMeetings analyzes midweek meeting assignments for rejections.
+func (a *APIAnalyzer) analyzeMidweekMeetings() ([]domain.Rejeicao, error) {
+	start := time.Now().Format("2006-01-02")
+	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
+
+	notifications, err := a.client.GetNotifications(start, end, "mm")
+	if err != nil {
+		return nil, err
+	}
+
+	// Buscar programa da reunião para obter títulos das partes
+	meetings, err := a.client.GetMeetings(start, end, a.congregationID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Criar mapa de part ID -> título da designação
+	partTitles := make(map[int]string)
+	for _, meeting := range meetings {
+		// TGW - Tesouros da Palavra de Deus
+		for _, part := range meeting.TGW {
+			partTitles[part.ID] = part.Title
+		}
+		// FM - Reunião de Campo
+		for _, part := range meeting.FM {
+			partTitles[part.ID] = part.Title
+		}
+		// LAC - Vida Cristã
+		for _, part := range meeting.LAC {
+			partTitles[part.ID] = part.Title
+		}
+	}
+
+	var rejeicoes []domain.Rejeicao
+	timestamp := time.Now()
+
+	for _, notif := range notifications {
+		if notif.Status == "declined" {
+			// Usar título real se disponível, senão fallback para nome do flag
+			title := partTitles[notif.Part]
+			if title == "" {
+				title = getMidweekFlagName(notif.Flag)
+			}
+
+			rejeicoes = append(rejeicoes, domain.Rejeicao{
+				Secao:     "Reunião Meio de Semana",
+				Quem:      a.getUserName(notif.Assignee),
+				OQue:      title,
+				PraQuando: formatDateToBrazilian(notif.Date),
+				Timestamp: timestamp,
+			})
+		}
+	}
+
+	return rejeicoes, nil
+}
+
+// getMidweekFlagName converts flag values to designação names
+func getMidweekFlagName(flag int) string {
+	switch flag {
+	case 10, 11:
+		return "Leitor do EBC"
+	case 20:
+		return "Orador/Dirigente"
+	case 30:
+		return "Estudante"
+	case 40:
+		return "Ajudante"
+	case 50:
+		return "Designação Especial"
+	case 60:
+		return "Outra Designação"
+	default:
+		return fmt.Sprintf("Designação (flag %d)", flag)
+	}
+}
+
+// AnalyzeAllSections analyzes all sections.
 func (a *APIAnalyzer) AnalyzeAllSections() ([]domain.JobResult, error) {
-	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público"}
+	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
 	var results []domain.JobResult
 
 	for _, section := range sections {

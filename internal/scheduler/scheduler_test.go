@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -110,6 +111,78 @@ func TestScheduler_NextRun_NotFound(t *testing.T) {
 	if exists {
 		t.Error("expected false for non-existent job")
 	}
+}
+
+func TestScheduler_NextRun_Found(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	s := New(logger)
+
+	job := func(ctx context.Context) error {
+		return nil
+	}
+
+	// Start scheduler so entry.Next is populated
+	s.AddJob("test-job", "* * * * * *", job)
+	s.Start()
+
+	nextTime, exists := s.NextRun("test-job")
+	s.Stop()
+
+	if !exists {
+		t.Error("expected true for existing job")
+	}
+
+	if nextTime.IsZero() {
+		t.Error("expected non-zero next run time")
+	}
+}
+
+func TestScheduler_JobExecution_Error(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	s := New(logger)
+
+	jobExecuted := make(chan bool, 1)
+	job := func(ctx context.Context) error {
+		jobExecuted <- true
+		return fmt.Errorf("test error")
+	}
+
+	s.AddJob("error-job", "* * * * * *", job)
+	s.Start()
+
+	// Wait for job to execute (should run immediately with * * * * * *)
+	select {
+	case <-jobExecuted:
+		// Job executed successfully
+	case <-time.After(2 * time.Second):
+		t.Error("job was not executed within timeout")
+	}
+
+	s.Stop()
+}
+
+func TestScheduler_JobExecution_Success(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	s := New(logger)
+
+	jobExecuted := make(chan bool, 1)
+	job := func(ctx context.Context) error {
+		jobExecuted <- true
+		return nil
+	}
+
+	s.AddJob("success-job", "* * * * * *", job)
+	s.Start()
+
+	// Wait for job to execute (should run immediately with * * * * * *)
+	select {
+	case <-jobExecuted:
+		// Job executed successfully
+	case <-time.After(2 * time.Second):
+		t.Error("job was not executed within timeout")
+	}
+
+	s.Stop()
 }
 
 func TestScheduler_AddJob_InvalidSchedule(t *testing.T) {
