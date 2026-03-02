@@ -3,6 +3,7 @@ package notifier
 import (
 	"context"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -416,9 +417,9 @@ func TestHandleCheckNow_WithCallback(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	b := newTestBot(t)
 
-	called := false
+	var called atomic.Bool
 	tn.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
-		called = true
+		called.Store(true)
 		return nil
 	})
 
@@ -431,7 +432,7 @@ func TestHandleCheckNow_WithCallback(t *testing.T) {
 	tn.handleCheckNow(context.Background(), b, update)
 
 	// Wait for goroutine
-	assert.Eventually(t, func() bool { return called }, 2*time.Second, 100*time.Millisecond)
+	assert.Eventually(t, func() bool { return called.Load() }, 2*time.Second, 100*time.Millisecond)
 }
 
 func TestHandleSectionToggle_NilCallbackQuery(t *testing.T) {

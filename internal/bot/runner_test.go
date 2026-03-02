@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -287,8 +288,11 @@ func TestRun_CheckNowCallback(t *testing.T) {
 	runner := New(cfg, nil, nil, nil)
 
 	var callback notifier.CheckNowCallback
+	var mu sync.Mutex
 	mockNotifier := &MockNotifier{
 		SetCheckNowCallbackFunc: func(cb notifier.CheckNowCallback) {
+			mu.Lock()
+			defer mu.Unlock()
 			callback = cb
 		},
 		StartBotFunc: func(ctx context.Context, prefManager *preferences.PreferenceManager) error {
@@ -313,11 +317,14 @@ func TestRun_CheckNowCallback(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	if callback == nil {
+	mu.Lock()
+	cb := callback
+	mu.Unlock()
+	if cb == nil {
 		t.Fatal("expected callback to be set")
 	}
 
-	err := callback(context.Background(), 123)
+	err := cb(context.Background(), 123)
 	if err == nil || err.Error() != "failed to get user preferences: get error" {
 		t.Errorf("expected get error, got %v", err)
 	}
@@ -678,7 +685,7 @@ func TestRun_NoNotifier_WithToken_Success(t *testing.T) {
 	os.Setenv("TELEGRAM_CHAT_ID", "12345")
 	defer os.Unsetenv("TELEGRAM_BOT_TOKEN")
 	defer os.Unsetenv("TELEGRAM_CHAT_ID")
-	
+
 	origNewTelegramNotifier := newTelegramNotifier
 	newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (Notifier, error) {
 		return &MockNotifier{
@@ -688,7 +695,7 @@ func TestRun_NoNotifier_WithToken_Success(t *testing.T) {
 		}, nil
 	}
 	defer func() { newTelegramNotifier = origNewTelegramNotifier }()
-	
+
 	cfg := &config.Config{}
 	runner := New(cfg, nil, nil, nil)
 
@@ -696,7 +703,7 @@ func TestRun_NoNotifier_WithToken_Success(t *testing.T) {
 	runner.WithPreferenceStore(mockStore)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	errCh := make(chan error)
 	go func() {
 		errCh <- runner.Run(ctx)
@@ -724,13 +731,13 @@ func TestRun_NoNotifier_WithToken(t *testing.T) {
 	os.Setenv("TELEGRAM_CHAT_ID", "12345,invalid,67890")
 	defer os.Unsetenv("TELEGRAM_BOT_TOKEN")
 	defer os.Unsetenv("TELEGRAM_CHAT_ID")
-	
+
 	origNewTelegramNotifier := newTelegramNotifier
 	newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (Notifier, error) {
 		return nil, errors.New("mock error")
 	}
 	defer func() { newTelegramNotifier = origNewTelegramNotifier }()
-	
+
 	cfg := &config.Config{}
 	runner := New(cfg, nil, nil, nil)
 
@@ -738,7 +745,7 @@ func TestRun_NoNotifier_WithToken(t *testing.T) {
 	runner.WithPreferenceStore(mockStore)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	errCh := make(chan error)
 	go func() {
 		errCh <- runner.Run(ctx)
