@@ -170,18 +170,18 @@ After sending a message to your bot, you can use these commands:
 | Command | Description |
 |---------|-------------|
 | `/start` | Welcome message and instructions |
-| `/configurar` | Configure which sections to receive notifications for |
+| `/configure` | Configure which sections to receive notifications for |
 | `/status` | Show your current preferences |
-| `/ajuda` | List all available commands |
-| `/checknow` | Trigger immediate check (admin only) |
+| `/help` | List all available commands |
+| `/checknow` | Trigger immediate check |
 
 ### User Preferences
 
 Users can customize which sections they receive notifications for:
 
-1. Send `/configurar` to the bot
+1. Send `/configure` to the bot
 2. Click on sections to toggle them on/off (✅/❌)
-3. Click "Salvar" to save your preferences
+3. Click "Save" to save your preferences
 4. You'll only receive notifications for selected sections
 
 Available sections:

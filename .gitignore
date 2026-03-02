@@ -61,3 +61,8 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Documentation (keep only README.md)
+HOOKS.md
+SECURITY.md
+docs/

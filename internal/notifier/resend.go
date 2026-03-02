@@ -42,7 +42,7 @@ func (r *ResendNotifier) SendJobCompletion(summary string, duration time.Duratio
 <p><strong>Timestamp:</u003e/strong> %s</p>
 
 <hr>
-<p>Hourglass Rejeições RPA</p>
+<p>Hourglass Rejections RPA</p>
 `, summary, duration, time.Now().Format(time.RFC3339))
 
 	return r.sendEmail(subject, body)
@@ -59,7 +59,7 @@ func (r *ResendNotifier) SendJobFailure(step string, err error) error {
 <p><strong>Timestamp:</u003e/strong> %s</p>
 
 <hr>
-<p>Hourglass Rejeições RPA</p>
+<p>Hourglass Rejections RPA</p>
 `, step, err.Error(), time.Now().Format(time.RFC3339))
 
 	return r.sendEmail(subject, body)
@@ -70,24 +70,24 @@ func (r *ResendNotifier) SendDailyReport(stats domain.DailyStats) error {
 	// Build sections summary
 	sectionsHTML := ""
 	for section, count := range stats.Sections {
-		sectionsHTML += fmt.Sprintf("\u003cli><strong>%s:</strong> %d rejeições</li>\n", section, count)
+		sectionsHTML += fmt.Sprintf("\u003cli><strong>%s:</strong> %d rejections</li>\n", section, count)
 	}
 
 	subject := "📊 Hourglass RPA - Relatório Diário"
 	body := fmt.Sprintf(`
 <h1>Relatório Diário 📊</h1>
 
-<p><strong>Data:</u003e/strong> %s</p>
-<p><strong>Total de Jobs:</u003e/strong> %d</p>
-<p><strong>Total de Rejeições:</u003e/strong> %d</p>
+<p><strong>Date:</u003e/strong> %s</p>
+<p><strong>Total Jobs:</u003e/strong> %d</p>
+<p><strong>Total Rejections:</u003e/strong> %d</p>
 
-<h2>Por Seção:</h2>
+<h2>By Section:</h2>
 <ul>
 %s
 </ul>
 
 <hr>
-<p>Hourglass Rejeições RPA</p>
+<p>Hourglass Rejections RPA</p>
 `, stats.Date.Format("2006-01-02"), stats.TotalJobs, stats.TotalRej, sectionsHTML)
 
 	return r.sendEmail(subject, body)
