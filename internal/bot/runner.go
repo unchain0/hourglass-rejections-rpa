@@ -145,7 +145,7 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 
 	if pref == nil {
 		logger.Error("user preferences not found", "chat_id", targetChatID)
-		return fmt.Errorf("user preferences not found for chat ID: %d", targetChatID)
+		return fmt.Errorf("user preferences not found")
 	}
 
 	userSections := pref.Sections()

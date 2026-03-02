@@ -358,7 +358,7 @@ func TestRunOnceForUser_NotFound(t *testing.T) {
 	prefManager := preferences.NewPreferenceManager(mockStore)
 
 	err := runner.runOnceForUser(context.Background(), prefManager, 123)
-	if err == nil || err.Error() != "user preferences not found for chat ID: 123" {
+	if err == nil || err.Error() != "user preferences not found" {
 		t.Errorf("expected not found error, got %v", err)
 	}
 }
