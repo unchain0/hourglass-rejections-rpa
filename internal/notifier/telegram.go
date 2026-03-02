@@ -20,14 +20,17 @@ var AllSections = []string{
 	"Reunião Meio de Semana",
 }
 
+type CheckNowCallback func(ctx context.Context, chatID int64) error
+
 // TelegramNotifier sends notifications via Telegram Bot.
 type TelegramNotifier struct {
-	bot         *bot.Bot
-	chatID      int64
-	whitelist   []int64
-	prefManager *preferences.PreferenceManager
-	cancelFunc  context.CancelFunc
-	mu          sync.Mutex
+	bot              *bot.Bot
+	chatID           int64
+	whitelist        []int64
+	prefManager      *preferences.PreferenceManager
+	cancelFunc       context.CancelFunc
+	mu               sync.Mutex
+	checkNowCallback CheckNowCallback
 }
 
 // NewTelegramNotifier creates a new Telegram notifier.
@@ -107,6 +110,12 @@ func (t *TelegramNotifier) IsConfigured() bool {
 	return t != nil && t.bot != nil && t.chatID != 0
 }
 
+func (t *TelegramNotifier) SetCheckNowCallback(callback CheckNowCallback) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.checkNowCallback = callback
+}
+
 // StartBot starts the bot in listener mode with interactive handlers.
 func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preferences.PreferenceManager) error {
 	if prefManager == nil {
@@ -159,7 +168,10 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 	}
 
 	chatID := update.Message.Chat.ID
-	username := update.Message.From.Username
+	username := ""
+	if update.Message.From != nil {
+		username = update.Message.From.Username
+	}
 
 	// Ensure user preferences exist
 	if t.prefManager != nil {
@@ -298,6 +310,29 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 		Text:      "🔄 Verificação imediata solicitada. Processando...",
 		ParseMode: models.ParseModeHTML,
 	})
+
+	t.mu.Lock()
+	callback := t.checkNowCallback
+	t.mu.Unlock()
+
+	if callback == nil {
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      "⚠️ Verificação manual não disponível no modo bot. Use o modo scheduler.",
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	go func() {
+		if err := callback(ctx, chatID); err != nil {
+			b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:    chatID,
+				Text:      fmt.Sprintf("❌ Erro na verificação: %v", err),
+				ParseMode: models.ParseModeHTML,
+			})
+		}
+	}()
 }
 
 // handleSectionToggle handles section toggle callback queries.

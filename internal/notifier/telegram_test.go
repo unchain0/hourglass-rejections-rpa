@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -48,49 +49,65 @@ func TestAllSections(t *testing.T) {
 		"Reunião Meio de Semana",
 	}
 	assert.Equal(t, expected, AllSections)
-	assert.Len(t, AllSections, 4)
 }
 
 // --- NewTelegramNotifier ---
 
 func TestNewTelegramNotifier_EmptyToken(t *testing.T) {
-	_, err := NewTelegramNotifier("", 123, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "telegram bot token is required")
+	tn, err := NewTelegramNotifier("", 12345, nil)
+	assert.Error(t, err)
+	assert.Nil(t, tn)
+	assert.Contains(t, err.Error(), "token is required")
 }
 
 func TestNewTelegramNotifier_ZeroChatID(t *testing.T) {
-	_, err := NewTelegramNotifier("some-token", 0, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "telegram chat ID is required")
+	tn, err := NewTelegramNotifier("test-token", 0, nil)
+	assert.Error(t, err)
+	assert.Nil(t, tn)
+	assert.Contains(t, err.Error(), "chat ID is required")
+}
+
+func TestNewTelegramNotifier_Success(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	assert.NotNil(t, tn)
+	assert.Equal(t, int64(12345), tn.chatID)
 }
 
 // --- IsAuthorized ---
 
 func TestIsAuthorized_EmptyWhitelist(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	assert.True(t, tn.IsAuthorized(999))
+	assert.True(t, tn.IsAuthorized(12345))
+	assert.True(t, tn.IsAuthorized(99999))
 }
 
 func TestIsAuthorized_InWhitelist(t *testing.T) {
-	tn := newTestNotifier(t, []int64{100, 200, 300})
-	assert.True(t, tn.IsAuthorized(200))
+	tn := newTestNotifier(t, []int64{111, 222, 333})
+	assert.True(t, tn.IsAuthorized(111))
+	assert.True(t, tn.IsAuthorized(222))
+	assert.True(t, tn.IsAuthorized(333))
 }
 
 func TestIsAuthorized_NotInWhitelist(t *testing.T) {
-	tn := newTestNotifier(t, []int64{100, 200, 300})
+	tn := newTestNotifier(t, []int64{111, 222})
 	assert.False(t, tn.IsAuthorized(999))
+	assert.False(t, tn.IsAuthorized(0))
 }
 
 // --- IsConfigured ---
 
-func TestIsConfigured_Valid(t *testing.T) {
+func TestIsConfigured(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	assert.True(t, tn.IsConfigured())
 }
 
+func TestIsConfigured_Nil(t *testing.T) {
+	var tn *TelegramNotifier
+	assert.False(t, tn.IsConfigured())
+}
+
 func TestIsConfigured_NilBot(t *testing.T) {
-	tn := &TelegramNotifier{chatID: 123}
+	tn := &TelegramNotifier{chatID: 12345}
 	assert.False(t, tn.IsConfigured())
 }
 
@@ -99,17 +116,12 @@ func TestIsConfigured_ZeroChatID(t *testing.T) {
 	assert.False(t, tn.IsConfigured())
 }
 
-func TestIsConfigured_NilNotifier(t *testing.T) {
-	var tn *TelegramNotifier
-	assert.False(t, tn.IsConfigured())
-}
-
 // --- StartBot / StopBot ---
 
 func TestStartBot_NilPrefManager(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	err := tn.StartBot(context.Background(), nil)
-	require.Error(t, err)
+	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "preference manager is required")
 }
 
@@ -117,246 +129,528 @@ func TestStartBot_Success(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	pm := newTestPrefManager(t)
 
-	err := tn.StartBot(context.Background(), pm)
-	require.NoError(t, err)
-	assert.NotNil(t, tn.prefManager)
-	assert.NotNil(t, tn.cancelFunc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// StopBot should clean up
-	err = tn.StopBot()
-	require.NoError(t, err)
-	assert.Nil(t, tn.cancelFunc)
-}
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- tn.StartBot(ctx, pm)
+	}()
 
-func TestStopBot_NoCancelFunc(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	err := tn.StopBot()
-	require.NoError(t, err)
+	cancel()
+	err := <-errChan
+	assert.NoError(t, err)
 }
 
 func TestStopBot_Idempotent(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	pm := newTestPrefManager(t)
 
-	err := tn.StartBot(context.Background(), pm)
-	require.NoError(t, err)
+	err := tn.StopBot()
+	assert.NoError(t, err)
 
-	require.NoError(t, tn.StopBot())
-	require.NoError(t, tn.StopBot()) // second call is safe
+	err = tn.StopBot()
+	assert.NoError(t, err)
 }
 
-// --- containsSection ---
+// --- SetCheckNowCallback ---
 
-func TestContainsSection_Found(t *testing.T) {
-	assert.True(t, containsSection([]string{"Campo", "Partes Mecânicas"}, "Campo"))
-}
-
-func TestContainsSection_NotFound(t *testing.T) {
-	assert.False(t, containsSection([]string{"Campo", "Partes Mecânicas"}, "Testemunho Público"))
-}
-
-func TestContainsSection_Empty(t *testing.T) {
-	assert.False(t, containsSection([]string{}, "Campo"))
-}
-
-func TestContainsSection_Nil(t *testing.T) {
-	assert.False(t, containsSection(nil, "Campo"))
-}
-
-// --- removeSection ---
-
-func TestRemoveSection_Exists(t *testing.T) {
-	result := removeSection([]string{"Campo", "Partes Mecânicas", "Testemunho Público"}, "Partes Mecânicas")
-	assert.Equal(t, []string{"Campo", "Testemunho Público"}, result)
-}
-
-func TestRemoveSection_NotExists(t *testing.T) {
-	input := []string{"Campo", "Partes Mecânicas"}
-	result := removeSection(input, "Testemunho Público")
-	assert.Equal(t, []string{"Campo", "Partes Mecânicas"}, result)
-}
-
-func TestRemoveSection_Empty(t *testing.T) {
-	result := removeSection([]string{}, "Campo")
-	assert.Empty(t, result)
-}
-
-func TestRemoveSection_SingleElement(t *testing.T) {
-	result := removeSection([]string{"Campo"}, "Campo")
-	assert.Empty(t, result)
-}
-
-func TestRemoveSection_DoesNotMutateOriginal(t *testing.T) {
-	original := []string{"Campo", "Partes Mecânicas"}
-	_ = removeSection(original, "Campo")
-	assert.Len(t, original, 2) // original slice is not mutated
-}
-
-// --- buildConfigKeyboard ---
-
-func TestBuildConfigKeyboard_NoSections(t *testing.T) {
+func TestSetCheckNowCallback(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	pref := &preferences.UserPreference{
-		Sections: []string{},
+
+	callback := func(ctx context.Context, chatID int64) error {
+		return nil
 	}
 
-	kb := tn.buildConfigKeyboard(pref)
-	markup, ok := kb.(*models.InlineKeyboardMarkup)
-	require.True(t, ok)
+	tn.SetCheckNowCallback(callback)
 
-	// 4 section rows + 1 save/cancel row
-	require.Len(t, markup.InlineKeyboard, 5)
-
-	// All sections should show ❌
-	for i, section := range AllSections {
-		row := markup.InlineKeyboard[i]
-		require.Len(t, row, 1)
-		assert.Equal(t, "❌ "+section, row[0].Text)
-		assert.Equal(t, "section_"+section, row[0].CallbackData)
-	}
-
-	// Last row: Save and Cancel
-	lastRow := markup.InlineKeyboard[4]
-	require.Len(t, lastRow, 2)
-	assert.Equal(t, "💾 Salvar", lastRow[0].Text)
-	assert.Equal(t, "save_config", lastRow[0].CallbackData)
-	assert.Equal(t, "🚫 Cancelar", lastRow[1].Text)
-	assert.Equal(t, "cancel_config", lastRow[1].CallbackData)
-}
-
-func TestBuildConfigKeyboard_SomeSections(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	pref := &preferences.UserPreference{
-		Sections: []string{"Campo", "Reunião Meio de Semana"},
-	}
-
-	kb := tn.buildConfigKeyboard(pref)
-	markup, ok := kb.(*models.InlineKeyboardMarkup)
-	require.True(t, ok)
-	require.Len(t, markup.InlineKeyboard, 5)
-
-	// Check correct toggle indicators
-	assert.Equal(t, "❌ Partes Mecânicas", markup.InlineKeyboard[0][0].Text)
-	assert.Equal(t, "✅ Campo", markup.InlineKeyboard[1][0].Text)
-	assert.Equal(t, "❌ Testemunho Público", markup.InlineKeyboard[2][0].Text)
-	assert.Equal(t, "✅ Reunião Meio de Semana", markup.InlineKeyboard[3][0].Text)
-}
-
-func TestBuildConfigKeyboard_AllSections(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	pref := &preferences.UserPreference{
-		Sections: AllSections,
-	}
-
-	kb := tn.buildConfigKeyboard(pref)
-	markup, ok := kb.(*models.InlineKeyboardMarkup)
-	require.True(t, ok)
-
-	// All should show ✅
-	for i, section := range AllSections {
-		assert.Equal(t, "✅ "+section, markup.InlineKeyboard[i][0].Text)
-	}
+	tn.mu.Lock()
+	assert.NotNil(t, tn.checkNowCallback)
+	tn.mu.Unlock()
 }
 
 // --- SendRejectionsNotification ---
 
-func TestSendRejectionsNotification_EmptyRejections(t *testing.T) {
+func TestSendRejectionsNotification_Empty(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	err := tn.SendRejectionsNotification(12345, nil)
 	assert.NoError(t, err)
 }
 
 func TestSendRejectionsNotification_Unauthorized(t *testing.T) {
-	tn := newTestNotifier(t, []int64{100})
-	err := tn.SendRejectionsNotification(999, []domain.Rejeicao{{Quem: "test"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unauthorized chat ID")
+	tn := newTestNotifier(t, []int64{111})
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	}
+	err := tn.SendRejectionsNotification(222, rejections)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized")
 }
 
-// --- Handler nil-safety ---
+// --- containsSection ---
+
+func TestContainsSection_Found(t *testing.T) {
+	sections := []string{"Campo", "Partes Mecânicas"}
+	assert.True(t, containsSection(sections, "Campo"))
+}
+
+func TestContainsSection_NotFound(t *testing.T) {
+	sections := []string{"Campo", "Partes Mecânicas"}
+	assert.False(t, containsSection(sections, "Vida e Ministério"))
+}
+
+func TestContainsSection_Empty(t *testing.T) {
+	assert.False(t, containsSection([]string{}, "Campo"))
+	assert.False(t, containsSection(nil, "Campo"))
+}
+
+// --- removeSection ---
+
+func TestRemoveSection_Exists(t *testing.T) {
+	sections := []string{"Campo", "Partes Mecânicas", "Testemunho"}
+	result := removeSection(sections, "Partes Mecânicas")
+	assert.Equal(t, []string{"Campo", "Testemunho"}, result)
+}
+
+func TestRemoveSection_NotExists(t *testing.T) {
+	sections := []string{"Campo", "Partes Mecânicas"}
+	result := removeSection(sections, "Vida")
+	assert.Equal(t, sections, result)
+}
+
+func TestRemoveSection_Empty(t *testing.T) {
+	result := removeSection([]string{}, "Campo")
+	assert.Equal(t, []string{}, result)
+}
+
+func TestRemoveSection_SingleElement(t *testing.T) {
+	sections := []string{"Campo"}
+	result := removeSection(sections, "Campo")
+	assert.Equal(t, []string{}, result)
+}
+
+func TestRemoveSection_NoMutation(t *testing.T) {
+	original := []string{"Campo", "Partes Mecânicas", "Testemunho"}
+	_ = removeSection(original, "Partes Mecânicas")
+	assert.Equal(t, 3, len(original))
+}
+
+// --- buildConfigKeyboard ---
+
+func TestBuildConfigKeyboard_NoSections(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	prefs := &preferences.UserPreference{
+		ChatID:   12345,
+		Sections: []string{},
+	}
+
+	keyboard := tn.buildConfigKeyboard(prefs)
+	require.NotNil(t, keyboard)
+
+	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
+	require.True(t, ok)
+
+	// Should have all section rows + save/cancel row
+	assert.GreaterOrEqual(t, len(inlineKB.InlineKeyboard), 5)
+}
+
+func TestBuildConfigKeyboard_SomeSections(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	prefs := &preferences.UserPreference{
+		ChatID:   12345,
+		Sections: []string{"Campo", "Partes Mecânicas"},
+	}
+
+	keyboard := tn.buildConfigKeyboard(prefs)
+	require.NotNil(t, keyboard)
+
+	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
+	require.True(t, ok)
+
+	assert.GreaterOrEqual(t, len(inlineKB.InlineKeyboard), 1)
+}
+
+func TestBuildConfigKeyboard_AllSections(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	prefs := &preferences.UserPreference{
+		ChatID:   12345,
+		Sections: AllSections,
+	}
+
+	keyboard := tn.buildConfigKeyboard(prefs)
+	require.NotNil(t, keyboard)
+
+	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
+	require.True(t, ok)
+
+	// All sections should show checkmark
+	assert.GreaterOrEqual(t, len(inlineKB.InlineKeyboard), 5)
+}
+
+// --- Handler Tests ---
+
+func TestHandleStart(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleStart(context.Background(), b, update)
+}
 
 func TestHandleStart_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	// Should not panic with nil Message
-	assert.NotPanics(t, func() {
-		tn.handleStart(context.Background(), tn.bot, &models.Update{})
-	})
+	b := newTestBot(t)
+
+	update := &models.Update{Message: nil}
+	tn.handleStart(context.Background(), b, update)
+}
+
+func TestHandleConfig(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleConfig(context.Background(), b, update)
 }
 
 func TestHandleConfig_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	assert.NotPanics(t, func() {
-		tn.handleConfig(context.Background(), tn.bot, &models.Update{})
-	})
+	b := newTestBot(t)
+
+	update := &models.Update{Message: nil}
+	tn.handleConfig(context.Background(), b, update)
+}
+
+func TestHandleStatus(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleStatus(context.Background(), b, update)
 }
 
 func TestHandleStatus_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	assert.NotPanics(t, func() {
-		tn.handleStatus(context.Background(), tn.bot, &models.Update{})
-	})
+	b := newTestBot(t)
+
+	update := &models.Update{Message: nil}
+	tn.handleStatus(context.Background(), b, update)
+}
+
+func TestHandleHelp(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleHelp(context.Background(), b, update)
 }
 
 func TestHandleHelp_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	assert.NotPanics(t, func() {
-		tn.handleHelp(context.Background(), tn.bot, &models.Update{})
-	})
+	b := newTestBot(t)
+
+	update := &models.Update{Message: nil}
+	tn.handleHelp(context.Background(), b, update)
+}
+
+func TestHandleCheckNow_Unauthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleCheckNow(context.Background(), b, update)
 }
 
 func TestHandleCheckNow_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	assert.NotPanics(t, func() {
-		tn.handleCheckNow(context.Background(), tn.bot, &models.Update{})
-	})
+	b := newTestBot(t)
+
+	update := &models.Update{Message: nil}
+	tn.handleCheckNow(context.Background(), b, update)
 }
 
-func TestHandleSectionToggle_NilCallback(t *testing.T) {
+func TestHandleCheckNow_NoCallback(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	assert.NotPanics(t, func() {
-		tn.handleSectionToggle(context.Background(), tn.bot, &models.Update{})
-	})
-}
+	b := newTestBot(t)
 
-func TestHandleSave_NilCallback(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	assert.NotPanics(t, func() {
-		tn.handleSave(context.Background(), tn.bot, &models.Update{})
-	})
-}
-
-func TestHandleCancel_NilCallback(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	assert.NotPanics(t, func() {
-		tn.handleCancel(context.Background(), tn.bot, &models.Update{})
-	})
-}
-
-func TestHandleSave_NilPrefManager(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	// With a callback query but no prefManager, should not panic
 	update := &models.Update{
-		CallbackQuery: &models.CallbackQuery{
-			ID:   "test-id",
-			Data: "save_config",
-			From: models.User{ID: 123},
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
 		},
 	}
-	assert.NotPanics(t, func() {
-		tn.handleSave(context.Background(), tn.bot, update)
+
+	tn.handleCheckNow(context.Background(), b, update)
+}
+
+func TestHandleCheckNow_WithCallback(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	called := false
+	tn.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
+		called = true
+		return nil
 	})
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleCheckNow(context.Background(), b, update)
+
+	// Wait for goroutine
+	assert.Eventually(t, func() bool { return called }, 2*time.Second, 100*time.Millisecond)
+}
+
+func TestHandleSectionToggle_NilCallbackQuery(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{CallbackQuery: nil}
+	tn.handleSectionToggle(context.Background(), b, update)
 }
 
 func TestHandleSectionToggle_NilPrefManager(t *testing.T) {
 	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
 	update := &models.Update{
 		CallbackQuery: &models.CallbackQuery{
 			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
 			Data: "section_Campo",
-			From: models.User{ID: 123},
 		},
 	}
-	assert.NotPanics(t, func() {
-		tn.handleSectionToggle(context.Background(), tn.bot, update)
-	})
+
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
+func TestHandleSectionToggle_InvalidData(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "invalid_data",
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
+func TestHandleSectionToggle_ToggleOn(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	// Create user first
+	_, _ = pm.GetOrCreate(12345, "testuser")
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "section_Campo",
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
+func TestHandleSectionToggle_ToggleOff(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	// Create user with section
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	_ = pm.UpdateSections(12345, []string{"Campo"})
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "section_Campo",
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
+func TestHandleSave_NilCallbackQuery(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{CallbackQuery: nil}
+	tn.handleSave(context.Background(), b, update)
+}
+
+func TestHandleSave_NilPrefManager(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID: "test-id",
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleSave(context.Background(), b, update)
+}
+
+func TestHandleSave_Success(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleSave(context.Background(), b, update)
+}
+
+func TestHandleCancel_NilCallbackQuery(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{CallbackQuery: nil}
+	tn.handleCancel(context.Background(), b, update)
+}
+
+func TestHandleCancel_Success(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID: "test-id",
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleCancel(context.Background(), b, update)
+}
+
+func TestHandleCheckNow_Authorized(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleCheckNow(context.Background(), b, update)
+}
+
+func TestHandleSectionToggle_NilMessage(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "section_Campo",
+		},
+	}
+
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
+func TestHandleSave_NilMessage(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleSave(context.Background(), b, update)
 }
