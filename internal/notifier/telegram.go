@@ -3,8 +3,10 @@ package notifier
 import (
 	"context"
 	"fmt"
+	"html"
 	"strings"
 	"sync"
+	"time"
 
 	"hourglass-rejections-rpa/internal/domain"
 	"hourglass-rejections-rpa/internal/preferences"
@@ -23,7 +25,44 @@ var AllSections = []string{
 
 type CheckNowCallback func(ctx context.Context, chatID int64) error
 
+// botNewFunc is a package-level variable to allow testing the constructor.
+var botNewFunc = bot.New
+
 // TelegramNotifier sends notifications via Telegram Bot.
+type rateLimiter struct {
+	mu       sync.RWMutex
+	attempts map[int64][]time.Time
+}
+
+func newRateLimiter() *rateLimiter {
+	return &rateLimiter{
+		attempts: make(map[int64][]time.Time),
+	}
+}
+
+func (rl *rateLimiter) Allow(chatID int64) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-time.Minute)
+
+	var valid []time.Time
+	for _, t := range rl.attempts[chatID] {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+
+	if len(valid) >= 10 {
+		rl.attempts[chatID] = valid
+		return false
+	}
+
+	rl.attempts[chatID] = append(valid, now)
+	return true
+}
+
 type TelegramNotifier struct {
 	bot              *bot.Bot
 	chatID           int64
@@ -32,6 +71,7 @@ type TelegramNotifier struct {
 	cancelFunc       context.CancelFunc
 	mu               sync.Mutex
 	checkNowCallback CheckNowCallback
+	rateLimiter      *rateLimiter
 }
 
 // NewTelegramNotifier creates a new Telegram notifier.
@@ -44,17 +84,17 @@ func NewTelegramNotifier(token string, chatID int64, whitelist []int64) (*Telegr
 		return nil, fmt.Errorf("telegram chat ID is required")
 	}
 
-	b, err := bot.New(token, bot.WithDefaultHandler(func(_ context.Context, _ *bot.Bot, _ *models.Update) {
-		// Silent handler - do nothing to suppress [TGBOT] [UPDATE] logs
+	b, err := botNewFunc(token, bot.WithDefaultHandler(func(_ context.Context, _ *bot.Bot, _ *models.Update) {
 	}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
 	}
 
 	return &TelegramNotifier{
-		bot:       b,
-		chatID:    chatID,
-		whitelist: whitelist,
+		bot:         b,
+		chatID:      chatID,
+		whitelist:   whitelist,
+		rateLimiter: newRateLimiter(),
 	}, nil
 }
 
@@ -106,10 +146,10 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 
 	for i, r := range rejections {
 		msg.WriteString(fmt.Sprintf("<b>Rejection #%d:</b>\n", i+1))
-		msg.WriteString(fmt.Sprintf("👤 <b>Who:</b> %s\n", r.Quem))
-		msg.WriteString(fmt.Sprintf("📋 <b>Section:</b> %s\n", r.Secao))
-		msg.WriteString(fmt.Sprintf("📝 <b>Assignment:</b> %s\n", r.OQue))
-		msg.WriteString(fmt.Sprintf("📅 <b>Date:</b> %s\n\n", r.PraQuando))
+		msg.WriteString(fmt.Sprintf("👤 <b>Who:</b> %s\n", html.EscapeString(r.Quem)))
+		msg.WriteString(fmt.Sprintf("📋 <b>Section:</b> %s\n", html.EscapeString(r.Secao)))
+		msg.WriteString(fmt.Sprintf("📝 <b>Assignment:</b> %s\n", html.EscapeString(r.OQue)))
+		msg.WriteString(fmt.Sprintf("📅 <b>Date:</b> %s\n\n", html.EscapeString(r.PraQuando)))
 	}
 
 	// Send message
@@ -197,13 +237,32 @@ func (t *TelegramNotifier) StopBot() error {
 	return nil
 }
 
-// handleStart handles the /start command.
+// checkRateLimit checks if the user has exceeded the rate limit.
+func (t *TelegramNotifier) checkRateLimit(ctx context.Context, b *bot.Bot, chatID int64) bool {
+	if t.rateLimiter == nil {
+		return true
+	}
+	if !t.rateLimiter.Allow(chatID) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      "⚠️ <b>Rate limit exceeded</b>. Please wait a minute before sending more commands.",
+			ParseMode: models.ParseModeHTML,
+		})
+		return false
+	}
+	return true
+}
+
 func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
 	}
 
 	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
 	username := ""
 	if update.Message.From != nil {
 		username = update.Message.From.Username
@@ -246,13 +305,16 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 	})
 }
 
-// handleConfig handles the /configure command.
 func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
 	}
 
 	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
 	username := update.Message.From.Username
 
 	if !t.IsAuthorized(chatID) {
@@ -287,13 +349,17 @@ func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update 
 	})
 }
 
-// handleStatus handles the /status command.
 func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
 	}
 
 	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
+
 	username := update.Message.From.Username
 
 	if !t.IsAuthorized(chatID) {
@@ -344,9 +410,14 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 	})
 }
 
-// handleHelp handles the /help command.
 func (t *TelegramNotifier) handleHelp(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
 		return
 	}
 
@@ -358,19 +429,22 @@ func (t *TelegramNotifier) handleHelp(ctx context.Context, b *bot.Bot, update *m
 		"/checknow - Immediate check"
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    update.Message.Chat.ID,
+		ChatID:    chatID,
 		Text:      text,
 		ParseMode: models.ParseModeHTML,
 	})
 }
 
-// handleCheckNow handles the /checknow command (admin only).
 func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
 	}
 
 	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
 
 	if !t.IsAuthorized(chatID) {
 		b.SendMessage(ctx, &bot.SendMessageParams{
@@ -411,13 +485,16 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 	}()
 }
 
-// handleSectionToggle handles section toggle callback queries.
 func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.CallbackQuery == nil {
 		return
 	}
 
 	chatID := update.CallbackQuery.From.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
 
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
@@ -470,13 +547,16 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 	}
 }
 
-// handleSave handles the save configuration callback query.
 func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.CallbackQuery == nil {
 		return
 	}
 
 	chatID := update.CallbackQuery.From.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
 
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
@@ -528,13 +608,16 @@ func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *m
 	}
 }
 
-// handleCancel handles the cancel configuration callback query.
 func (t *TelegramNotifier) handleCancel(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.CallbackQuery == nil {
 		return
 	}
 
 	chatID := update.CallbackQuery.From.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
 
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{

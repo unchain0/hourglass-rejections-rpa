@@ -1,7 +1,10 @@
 package notifier
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -287,5 +290,64 @@ func TestResendNotifier_SendJobCompletion_LongDuration(t *testing.T) {
 	err := n.SendJobCompletion("Long job completed", 24*time.Hour+15*time.Minute)
 	if err != nil {
 		t.Errorf("SendJobCompletion() with long duration error = %v", err)
+	}
+}
+
+func TestResendNotifier_sendEmail_MarshalError(t *testing.T) {
+	original := jsonMarshal
+	defer func() { jsonMarshal = original }()
+
+	jsonMarshal = func(_ any) ([]byte, error) {
+		return nil, errors.New("marshal error")
+	}
+
+	n := NewResendNotifier("test-api-key", "from@example.com", "to@example.com")
+	err := n.sendEmail("Test Subject", "<h1>Test</h1>")
+	if err == nil {
+		t.Fatal("expected error for marshal failure")
+	}
+	if err.Error() != "failed to marshal email payload: marshal error" {
+		t.Errorf("unexpected error: %s", err.Error())
+	}
+}
+
+func TestResendNotifier_sendEmail_RestoresMarshal(t *testing.T) {
+	_ = json.Marshal
+	original := jsonMarshal
+	defer func() { jsonMarshal = original }()
+
+	jsonMarshal = func(_ any) ([]byte, error) {
+		return nil, errors.New("fail")
+	}
+	n := NewResendNotifier("k", "f", "t")
+	_ = n.sendEmail("s", "b")
+
+	jsonMarshal = original
+	server, n2 := setupTestServer(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer server.Close()
+
+	err := n2.sendEmail("s", "b")
+	if err != nil {
+		t.Errorf("expected no error after restoring marshal, got %v", err)
+	}
+}
+
+func TestResendNotifier_sendEmail_NewRequestError(t *testing.T) {
+	original := httpNewRequest
+	defer func() { httpNewRequest = original }()
+
+	httpNewRequest = func(_ context.Context, _ string, _ string, _ io.Reader) (*http.Request, error) {
+		return nil, errors.New("request creation error")
+	}
+
+	n := NewResendNotifier("test-api-key", "from@example.com", "to@example.com")
+	err := n.sendEmail("Test Subject", "<h1>Test</h1>")
+	if err == nil {
+		t.Fatal("expected error for request creation failure")
+	}
+	if err.Error() != "failed to create request: request creation error" {
+		t.Errorf("unexpected error: %s", err.Error())
 	}
 }

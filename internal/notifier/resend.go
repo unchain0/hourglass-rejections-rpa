@@ -13,6 +13,10 @@ import (
 
 const resendAPIURL = "https://api.resend.com/emails"
 
+// jsonMarshal is a package-level variable to allow testing error paths.
+var jsonMarshal = json.Marshal
+var httpNewRequest = http.NewRequestWithContext
+
 // ResendNotifier implements domain.Notifier using Resend API.
 type ResendNotifier struct {
 	apiKey string
@@ -102,12 +106,12 @@ func (r *ResendNotifier) sendEmail(subject, htmlBody string) error {
 		"html":    htmlBody,
 	}
 
-	jsonData, err := json.Marshal(payload)
+	jsonData, err := jsonMarshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal email payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", resendAPIURL, bytes.NewBuffer(jsonData))
+	req, err := httpNewRequest(context.Background(), "POST", resendAPIURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

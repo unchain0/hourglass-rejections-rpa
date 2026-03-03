@@ -1,14 +1,18 @@
 package storage
 
 import (
+	"bufio"
 	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
 	"hourglass-rejections-rpa/internal/config"
 	"hourglass-rejections-rpa/internal/domain"
@@ -135,8 +139,6 @@ func TestFileStorage_Save_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to create CSV file")
 }
 
-
-
 func TestFileStorage_Save_CSVError(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "storage_test_save_csv_error")
 	require.NoError(t, err)
@@ -156,7 +158,6 @@ func TestFileStorage_Save_CSVError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create CSV file")
 }
-
 
 func TestFileStorage_SaveCSV_Error(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "storage_csv_error")
@@ -240,7 +241,6 @@ func TestFileStorage_WriteCSV_Error(t *testing.T) {
 	assert.Error(t, err)
 }
 
-
 func TestFileStorage_MarshalError(t *testing.T) {
 	old := jsonMarshalIndent
 	jsonMarshalIndent = func(v interface{}, prefix, indent string) ([]byte, error) {
@@ -249,7 +249,7 @@ func TestFileStorage_MarshalError(t *testing.T) {
 	defer func() { jsonMarshalIndent = old }()
 
 	fs := &FileStorage{}
-	
+
 	// Test saveJSON marshal error
 	err := fs.saveJSON("test.json", []domain.Rejeicao{{}})
 	assert.Error(t, err)
@@ -260,8 +260,6 @@ func TestFileStorage_MarshalError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to marshal cookies")
 }
-
-
 
 type limitedErrorWriter struct {
 	limit int
@@ -279,7 +277,7 @@ func (w *limitedErrorWriter) Write(p []byte) (n int, err error) {
 func TestFileStorage_WriteCSV_LimitedError(t *testing.T) {
 	fs := &FileStorage{}
 	rejeicoes := []domain.Rejeicao{{Secao: "test"}}
-	
+
 	// Fail during header write (if it exceeds buffer, but it won't)
 	// Fail during row write
 	err := fs.writeCSV(&limitedErrorWriter{limit: 10}, rejeicoes)
@@ -296,4 +294,27 @@ func TestFileStorage_WriteCSV_WriteError(t *testing.T) {
 	}
 	err := fs.writeCSV(&errorWriter{}, rejeicoes)
 	assert.Error(t, err)
+}
+
+func TestFileStorage_WriteCSV_HeaderWriteError(t *testing.T) {
+	old := newCSVWriter
+	defer func() { newCSVWriter = old }()
+
+	// Force csv.Writer.Write to fail by replacing its internal bufio.Writer
+	// with a 1-byte buffer over an errorWriter (requires reflect+unsafe since
+	// the field is unexported).
+	newCSVWriter = func(w io.Writer) *csv.Writer {
+		cw := csv.NewWriter(w)
+		bw := bufio.NewWriterSize(&errorWriter{}, 1)
+		rv := reflect.ValueOf(cw).Elem()
+		wField := rv.FieldByName("w")
+		ptr := unsafe.Pointer(wField.UnsafeAddr())
+		*(**bufio.Writer)(ptr) = bw
+		return cw
+	}
+
+	fs := &FileStorage{}
+	err := fs.writeCSV(&errorWriter{}, []domain.Rejeicao{{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write CSV header")
 }

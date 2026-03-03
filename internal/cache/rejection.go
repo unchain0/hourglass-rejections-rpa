@@ -40,6 +40,9 @@ func (c *RejectionCache) HasChanges(newRejections []domain.Rejeicao) bool {
 	}
 
 	for i, new := range newRejections {
+		if i >= len(c.lastResult) {
+			break
+		}
 		old := c.lastResult[i]
 		if new.Secao != old.Secao || new.Quem != old.Quem || new.OQue != old.OQue {
 			c.lastResult = newRejections

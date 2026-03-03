@@ -143,6 +143,58 @@ func TestRun_Error(t *testing.T) {
 	}
 }
 
+func TestMain_Success(t *testing.T) {
+	originalStdout := stdout
+	originalStderr := stderr
+	originalExitFunc := exitFunc
+	defer func() {
+		stdout = originalStdout
+		stderr = originalStderr
+		exitFunc = originalExitFunc
+	}()
+
+	stdout = &bytes.Buffer{}
+	stderr = &bytes.Buffer{}
+
+	var capturedCode int
+	exitFunc = func(code int) { capturedCode = code }
+
+	main()
+
+	if capturedCode != 0 {
+		t.Errorf("main() exit code = %d, want 0", capturedCode)
+	}
+}
+
+func TestMain_Failure(t *testing.T) {
+	originalStdout := stdout
+	originalStderr := stderr
+	originalExitFunc := exitFunc
+	originalRandRead := randRead
+	defer func() {
+		stdout = originalStdout
+		stderr = originalStderr
+		exitFunc = originalExitFunc
+		randRead = originalRandRead
+	}()
+
+	stdout = &bytes.Buffer{}
+	stderr = &bytes.Buffer{}
+
+	randRead = func(b []byte) (n int, err error) {
+		return 0, errors.New("mock random failure")
+	}
+
+	var capturedCode int
+	exitFunc = func(code int) { capturedCode = code }
+
+	main()
+
+	if capturedCode != 1 {
+		t.Errorf("main() exit code = %d, want 1", capturedCode)
+	}
+}
+
 func TestRun_KeyLength(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}

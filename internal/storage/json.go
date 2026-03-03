@@ -16,10 +16,10 @@ import (
 
 var (
 	jsonMarshalIndent = json.MarshalIndent
+	newCSVWriter      = func(w io.Writer) *csv.Writer { return csv.NewWriter(w) }
 )
 
 type FileStorage struct {
-
 	outputDir  string
 	cookieFile string
 }
@@ -32,7 +32,7 @@ func New(cfg *config.Config) *FileStorage {
 }
 
 func (fs *FileStorage) Save(ctx context.Context, rejeicoes []domain.Rejeicao) error {
-	if err := os.MkdirAll(fs.outputDir, 0755); err != nil {
+	if err := os.MkdirAll(fs.outputDir, 0750); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -57,8 +57,7 @@ func (fs *FileStorage) saveJSON(filename string, rejeicoes []domain.Rejeicao) er
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
-
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, data, 0600); err != nil {
 		return fmt.Errorf("failed to write JSON file: %w", err)
 	}
 
@@ -76,7 +75,7 @@ func (fs *FileStorage) saveCSV(filename string, rejeicoes []domain.Rejeicao) err
 }
 
 func (fs *FileStorage) writeCSV(w io.Writer, rejeicoes []domain.Rejeicao) error {
-	writer := csv.NewWriter(w)
+	writer := newCSVWriter(w)
 
 	// Header
 	header := []string{"secao", "quem", "oque", "pra_quando", "timestamp"}
@@ -129,8 +128,7 @@ func (fs *FileStorage) SaveCookies(cookies []domain.Cookie) error {
 		return fmt.Errorf("failed to marshal cookies: %w", err)
 	}
 
-
-	if err := os.WriteFile(fs.cookieFile, data, 0644); err != nil {
+	if err := os.WriteFile(fs.cookieFile, data, 0600); err != nil {
 		return fmt.Errorf("failed to write cookie file: %w", err)
 	}
 

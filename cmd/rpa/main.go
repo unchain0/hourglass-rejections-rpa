@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -26,16 +27,18 @@ type runOptions struct {
 	exit   func(int)
 }
 
+var osExit = os.Exit
+
 func init() {
 	loadEnvFiles()
 }
 
 func loadEnvFiles() {
 	locations := []string{
-		".",
-		"../.",
-		"../../.",
-		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", "."),
+		".env",
+		"../.env",
+		"../../.env",
+		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", ".env"),
 	}
 
 	for _, location := range locations {
@@ -52,7 +55,7 @@ func main() {
 	opts := runOptions{
 		args:   os.Args[1:],
 		getenv: os.Getenv,
-		exit:   os.Exit,
+		exit:   osExit,
 	}
 
 	if err := run(context.Background(), opts); err != nil {
@@ -60,6 +63,15 @@ func main() {
 			slog.Error("application error", "error", err)
 		}
 		opts.exit(1)
+	}
+}
+
+var sentryClientGlobal *sentry.Client
+
+func captureError(err error, extras map[string]interface{}) {
+	if sentryClientGlobal != nil && sentryClientGlobal.IsEnabled() {
+		sentryClientGlobal.CaptureError(err, extras)
+		sentryClientGlobal.Flush(2 * time.Second)
 	}
 }
 
@@ -79,6 +91,7 @@ func run(ctx context.Context, opts runOptions) error {
 	}
 
 	sentryClient := setupSentry(cfg)
+	sentryClientGlobal = sentryClient
 	if sentryClient.IsEnabled() {
 		defer sentryClient.Close()
 	}
@@ -131,8 +144,23 @@ func setupDependencies(cfg *config.Config) (*api.APIAnalyzer, *storage.FileStora
 	return analyzer, store
 }
 
+var runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+	return errors.New("runOnce not implemented")
+}
+
+type runner interface {
+	Run(ctx context.Context) error
+}
+
+var newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) runner {
+	return scheduler.New(cfg, sentryClient, analyzer, store)
+}
+
 func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
-	if err := runOnce(ctx, cfg, sentryClient, analyzer, store); err != nil {
+	if err := runOnceFn(ctx, cfg, sentryClient, analyzer, store); err != nil {
+		sentryClient.CaptureError(err, map[string]interface{}{
+			"phase": "run_once_mode",
+		})
 		return fmt.Errorf("run failed: %w", err)
 	}
 	return nil
@@ -145,17 +173,19 @@ func runFullMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.C
 		botRunner := bot.New(cfg, sentryClient, analyzer, store)
 		if err := botRunner.Run(ctx); err != nil {
 			slog.Error("bot error", "error", err)
+			sentryClient.CaptureError(err, map[string]interface{}{
+				"phase": "bot_run",
+			})
 		}
 	}()
 
-	sched := scheduler.New(cfg, sentryClient, analyzer, store)
+	sched := newSchedulerFn(cfg, sentryClient, analyzer, store)
 	if err := sched.Run(ctx); err != nil {
+		sentryClient.CaptureError(err, map[string]interface{}{
+			"phase": "scheduler_run",
+		})
 		return fmt.Errorf("scheduler failed: %w", err)
 	}
 
 	return nil
-}
-
-func runOnce(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
-	return errors.New("runOnce not implemented")
 }

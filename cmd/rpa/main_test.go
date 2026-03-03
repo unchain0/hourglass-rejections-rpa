@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +69,30 @@ func TestLoadEnvFiles_InvalidHomeDir(t *testing.T) {
 	}
 
 	loadEnvFiles()
+}
+
+func TestLoadEnvFiles_GodotenvLoadSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+
+	envDir := filepath.Join(tmpDir, "sub")
+	os.MkdirAll(envDir, 0755)
+
+	if err := os.Chdir(envDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	envContent := "LOAD_SUCCESS_TEST=yes\n"
+	if err := os.WriteFile(filepath.Join(envDir, ".env"), []byte(envContent), 0644); err != nil {
+		t.Fatalf("failed to create .env: %v", err)
+	}
+
+	loadEnvFiles()
+
+	if got := os.Getenv("LOAD_SUCCESS_TEST"); got != "yes" {
+		t.Errorf("LOAD_SUCCESS_TEST = %q, want %q", got, "yes")
+	}
 }
 
 func TestParseChatID_ValidID(t *testing.T) {
@@ -206,6 +233,97 @@ OUTPUT_DIR=/tmp
 	}
 }
 
+func TestRun_FullMode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	opts := runOptions{
+		args:   []string{},
+		getenv: func(s string) string { return "" },
+		exit:   func(int) {},
+	}
+
+	err := run(ctx, opts)
+	if err != nil {
+		t.Errorf("expected no error for full mode with cancelled context, got: %v", err)
+	}
+}
+
+func TestRun_OnceModeSuccess(t *testing.T) {
+	origFn := runOnceFn
+	defer func() { runOnceFn = origFn }()
+
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+		return nil
+	}
+
+	opts := runOptions{
+		args:   []string{"-once"},
+		getenv: func(s string) string { return "" },
+		exit:   func(int) {},
+	}
+
+	err := run(context.Background(), opts)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+func TestMain_WithError(t *testing.T) {
+	origArgs := os.Args
+	origExit := osExit
+	defer func() {
+		os.Args = origArgs
+		osExit = origExit
+	}()
+
+	os.Args = []string{"rpa", "-invalid-flag-for-test"}
+
+	var exitCode int
+	exitCalled := false
+	osExit = func(code int) {
+		exitCode = code
+		exitCalled = true
+	}
+
+	main()
+
+	if !exitCalled {
+		t.Error("expected exit to be called")
+	}
+	if exitCode != 1 {
+		t.Errorf("expected exit code 1, got %d", exitCode)
+	}
+}
+
+func TestMain_Success(t *testing.T) {
+	origFn := runOnceFn
+	origArgs := os.Args
+	origExit := osExit
+	defer func() {
+		runOnceFn = origFn
+		os.Args = origArgs
+		osExit = origExit
+	}()
+
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+		return nil
+	}
+
+	os.Args = []string{"rpa", "-once"}
+
+	exitCalled := false
+	osExit = func(code int) {
+		exitCalled = true
+	}
+
+	main()
+
+	if exitCalled {
+		t.Error("expected exit not to be called on success")
+	}
+}
+
 func TestSetupLogging(t *testing.T) {
 	setupLogging("debug")
 	setupLogging("")
@@ -271,5 +389,129 @@ func TestRunOnceMode(t *testing.T) {
 	err := runOnceMode(ctx, cfg, sentryClient, analyzer, store)
 	if err == nil {
 		t.Error("expected error because runOnce is not implemented")
+	}
+}
+
+func TestRunOnceMode_Success(t *testing.T) {
+	origFn := runOnceFn
+	defer func() { runOnceFn = origFn }()
+
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+		return nil
+	}
+
+	cfg := &config.Config{}
+	sentryClient := &sentry.Client{}
+	apiClient := api.NewClient()
+	analyzer := api.NewAPIAnalyzer(apiClient)
+	store := storage.New(cfg)
+
+	err := runOnceMode(context.Background(), cfg, sentryClient, analyzer, store)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+func TestRunFullMode_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cfg := &config.Config{}
+	sentryClient := &sentry.Client{}
+	apiClient := api.NewClient()
+	analyzer := api.NewAPIAnalyzer(apiClient)
+	store := storage.New(cfg)
+
+	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
+	if err != nil {
+		t.Errorf("expected no error with cancelled context, got: %v", err)
+	}
+}
+
+func TestRunFullMode_WithTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	cfg := &config.Config{}
+	sentryClient := &sentry.Client{}
+	apiClient := api.NewClient()
+	analyzer := api.NewAPIAnalyzer(apiClient)
+	store := storage.New(cfg)
+
+	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
+	if err != nil {
+		t.Errorf("expected no error when context times out, got: %v", err)
+	}
+}
+
+func TestRun_ConfigLoadError(t *testing.T) {
+	t.Setenv("TIMEOUT", "not-a-duration")
+
+	opts := runOptions{
+		args:   []string{"-once"},
+		getenv: os.Getenv,
+		exit:   func(int) {},
+	}
+
+	err := run(context.Background(), opts)
+	if err == nil {
+		t.Error("expected error for invalid config")
+	}
+}
+
+func TestRun_SentryEnabled(t *testing.T) {
+	origFn := runOnceFn
+	defer func() { runOnceFn = origFn }()
+
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+		return nil
+	}
+
+	t.Setenv("SENTRY_DSN", "https://examplePublicKey@o0.ingest.sentry.io/0")
+	t.Setenv("SENTRY_ENVIRONMENT", "test")
+
+	opts := runOptions{
+		args:   []string{"-once"},
+		getenv: os.Getenv,
+		exit:   func(int) {},
+	}
+
+	err := run(context.Background(), opts)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+type errorRunner struct {
+	err error
+}
+
+func (r *errorRunner) Run(ctx context.Context) error {
+	return r.err
+}
+
+func TestRunFullMode_SchedulerError(t *testing.T) {
+	origFn := newSchedulerFn
+	defer func() { newSchedulerFn = origFn }()
+
+	newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) runner {
+		return &errorRunner{err: fmt.Errorf("mock scheduler failure")}
+	}
+
+	cfg := &config.Config{}
+	sentryClient := &sentry.Client{}
+	apiClient := api.NewClient()
+	analyzer := api.NewAPIAnalyzer(apiClient)
+	store := storage.New(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
+	if err == nil {
+		t.Fatal("expected error from scheduler")
+	}
+	if !strings.Contains(err.Error(), "scheduler failed") {
+		t.Errorf("expected 'scheduler failed' in error, got: %v", err)
 	}
 }

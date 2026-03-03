@@ -159,7 +159,6 @@ func TestClient_GetMeetings(t *testing.T) {
 	assert.Equal(t, 1, len(meetings[0].TGW))
 }
 
-
 func TestClient_GetMeetings_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -394,7 +393,6 @@ func TestClient_GetNotifications(t *testing.T) {
 		assert.Equal(t, "/scheduling/notifications/2026-03-01_2026-03-31/pubwit", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
-
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(expected)
 	}))
@@ -457,4 +455,48 @@ func TestClient_GetNotifications_NetworkError(t *testing.T) {
 	_, err := client.GetNotifications("2026-03-01", "2026-03-31", "pubwit")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to execute request")
+}
+
+func TestClient_SetHGLogin(t *testing.T) {
+	client := NewClient()
+	assert.Empty(t, client.hgLogin)
+
+	client.SetHGLogin("test-hglogin-cookie")
+	assert.Equal(t, "test-hglogin-cookie", client.hgLogin)
+}
+
+func TestClient_setCookies_WithHGLogin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("hglogin")
+		assert.NoError(t, err)
+		assert.Equal(t, "my-session-cookie", cookie.Value)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(UsersResponse{Users: []User{}})
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	client.SetHGLogin("my-session-cookie")
+
+	_, err := client.GetUsers()
+	require.NoError(t, err)
+}
+
+func TestClient_setCookies_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := r.Cookie("hglogin")
+		assert.Error(t, err, "hglogin cookie should not be present")
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(UsersResponse{Users: []User{}})
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+
+	_, err := client.GetUsers()
+	require.NoError(t, err)
 }

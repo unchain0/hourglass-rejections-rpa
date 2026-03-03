@@ -71,10 +71,7 @@ func (u *UserPreference) Sections() []string {
 }
 
 func (u *UserPreference) SetSections(sections []string) {
-	data, err := json.Marshal(sections)
-	if err != nil {
-		return
-	}
+	data, _ := json.Marshal(sections)
 	u.SectionsJSON = string(data)
 }
 
@@ -82,9 +79,10 @@ type Store struct {
 	db *gorm.DB
 }
 
+var setSecurePermissionsFn = setSecurePermissions
+
 // NewStore creates a SQLite database for user preferences
 func NewStore(dbPath string) (*Store, error) {
-	// Ensure secure directory location
 	if err := ensureSecureDirectory(dbPath); err != nil {
 		return nil, fmt.Errorf("failed to ensure secure directory: %w", err)
 	}
@@ -105,7 +103,7 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	if err := setSecurePermissions(dbPath); err != nil {
+	if err := setSecurePermissionsFn(dbPath); err != nil {
 		return nil, fmt.Errorf("failed to set database permissions: %w", err)
 	}
 

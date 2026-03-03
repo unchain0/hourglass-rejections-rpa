@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ func (m *mockAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error)
 }
 
 type mockStorage struct {
+	mu    sync.Mutex
 	saved []domain.Rejeicao
 	err   error
 }
@@ -36,6 +38,8 @@ func (m *mockStorage) Save(ctx context.Context, rejections []domain.Rejeicao) er
 	if m.err != nil {
 		return m.err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.saved = append(m.saved, rejections...)
 	return nil
 }
@@ -370,5 +374,55 @@ func TestScheduler_runWithTicker_MultipleTicks(t *testing.T) {
 	err := s.runWithTicker(ctx, ticker)
 	if err != nil {
 		t.Errorf("runWithTicker should return nil, got: %v", err)
+	}
+}
+
+func TestScheduler_runWithTicker_SkipEarlyTicks(t *testing.T) {
+	analyzer := &mockAnalyzer{
+		results: map[string]*domain.JobResult{},
+	}
+	store := &mockStorage{}
+
+	s := &Scheduler{
+		cfg:          &config.Config{},
+		sentryClient: &sentry.Client{},
+		analyzer:     analyzer,
+		store:        store,
+		cache:        cache.New(),
+	}
+
+	// 1ms ticker: first tick runs analysis, setting nextRun ~30min ahead.
+	// All subsequent ticks hit now.Before(nextRun) → continue (the uncovered branch).
+	ticker := time.NewTicker(1 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := s.runWithTicker(ctx, ticker)
+	if err != nil {
+		t.Errorf("runWithTicker should return nil, got: %v", err)
+	}
+}
+
+func TestScheduler_runWithTicker_AnalysisError(t *testing.T) {
+	s := &Scheduler{
+		cfg:          &config.Config{},
+		sentryClient: &sentry.Client{},
+		analyzer:     &mockAnalyzer{},
+		store:        &mockStorage{},
+		cache:        cache.New(),
+		runAnalysisFn: func(ctx context.Context) error {
+			return errors.New("analysis failed")
+		},
+	}
+
+	ticker := time.NewTicker(1 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := s.runWithTicker(ctx, ticker)
+	if err != nil {
+		t.Errorf("runWithTicker should return nil even on analysis error, got: %v", err)
 	}
 }

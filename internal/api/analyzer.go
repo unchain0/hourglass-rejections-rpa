@@ -114,14 +114,12 @@ func (a *APIAnalyzer) getUserName(userID int) string {
 	return fmt.Sprintf("User %d", userID)
 }
 
-// analyzePartesMecanicas analyzes mechanical assignments for rejections.
-// Uses notifications endpoint to detect declined assignments.
-func (a *APIAnalyzer) analyzePartesMecanicas() ([]domain.Rejeicao, error) {
+// analyzeGenericNotifications is a generic function to analyze notifications for a section.
+func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType string) ([]domain.Rejeicao, error) {
 	start := time.Now().Format("2006-01-02")
 	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
 
-	// Use notifications endpoint with type "ava"
-	notifications, err := a.client.GetNotifications(start, end, "ava")
+	notifications, err := a.client.GetNotifications(start, end, notificationType)
 	if err != nil {
 		return nil, err
 	}
@@ -130,10 +128,9 @@ func (a *APIAnalyzer) analyzePartesMecanicas() ([]domain.Rejeicao, error) {
 	timestamp := time.Now()
 
 	for _, notif := range notifications {
-		// Only detect DECLINED status (recusado)
 		if notif.Status == "declined" {
 			rejeicoes = append(rejeicoes, domain.Rejeicao{
-				Secao:     "Partes Mecânicas",
+				Secao:     sectionName,
 				Quem:      a.getUserName(notif.Assignee),
 				OQue:      getFriendlyTypeName(notif.Type),
 				PraQuando: formatDateToBrazilian(notif.Date),
@@ -143,6 +140,11 @@ func (a *APIAnalyzer) analyzePartesMecanicas() ([]domain.Rejeicao, error) {
 	}
 
 	return rejeicoes, nil
+}
+
+// analyzePartesMecanicas analyzes mechanical assignments for rejections.
+func (a *APIAnalyzer) analyzePartesMecanicas() ([]domain.Rejeicao, error) {
+	return a.analyzeGenericNotifications("Partes Mecânicas", "ava")
 }
 
 // formatDateToBrazilian converts YYYY-MM-DD to DD/MM/YYYY
@@ -176,66 +178,12 @@ func getFriendlyTypeName(typeName string) string {
 	}
 }
 
-// analyzeCampo analyzes field ministry assignments for rejections.
-// Uses notifications endpoint to detect declined assignments.
 func (a *APIAnalyzer) analyzeCampo() ([]domain.Rejeicao, error) {
-	start := time.Now().Format("2006-01-02")
-	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
-
-	// Use notifications endpoint with type "fm" (field ministry)
-	notifications, err := a.client.GetNotifications(start, end, "fm")
-	if err != nil {
-		return nil, err
-	}
-
-	var rejeicoes []domain.Rejeicao
-	timestamp := time.Now()
-
-	for _, notif := range notifications {
-		// Only detect DECLINED status (recusado)
-		if notif.Status == "declined" {
-			rejeicoes = append(rejeicoes, domain.Rejeicao{
-				Secao:     "Campo",
-				Quem:      a.getUserName(notif.Assignee),
-				OQue:      getFriendlyTypeName(notif.Type),
-				PraQuando: formatDateToBrazilian(notif.Date),
-				Timestamp: timestamp,
-			})
-		}
-	}
-
-	return rejeicoes, nil
+	return a.analyzeGenericNotifications("Campo", "fm")
 }
 
-// analyzeTestemunhoPublico analyzes public witnessing assignments for rejections.
-// Uses notifications endpoint to detect declined assignments.
 func (a *APIAnalyzer) analyzeTestemunhoPublico() ([]domain.Rejeicao, error) {
-	start := time.Now().Format("2006-01-02")
-	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
-
-	// Use notifications endpoint with type "pubwit"
-	notifications, err := a.client.GetNotifications(start, end, "pubwit")
-	if err != nil {
-		return nil, err
-	}
-
-	var rejeicoes []domain.Rejeicao
-	timestamp := time.Now()
-
-	for _, notif := range notifications {
-		// Only detect DECLINED status (recusado)
-		if notif.Status == "declined" {
-			rejeicoes = append(rejeicoes, domain.Rejeicao{
-				Secao:     "Testemunho Público",
-				Quem:      a.getUserName(notif.Assignee),
-				OQue:      getFriendlyTypeName(notif.Type),
-				PraQuando: formatDateToBrazilian(notif.Date),
-				Timestamp: timestamp,
-			})
-		}
-	}
-
-	return rejeicoes, nil
+	return a.analyzeGenericNotifications("Testemunho Público", "pubwit")
 }
 
 // analyzeMidweekMeetings analyzes midweek meeting assignments for rejections.

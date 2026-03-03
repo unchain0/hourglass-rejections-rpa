@@ -2,6 +2,7 @@ package preferences
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -340,5 +341,42 @@ func TestPreferenceManager_List_Error(t *testing.T) {
 	_, err := pm.List()
 	if err == nil || err.Error() != "list error" {
 		t.Errorf("expected list error, got %v", err)
+	}
+}
+
+func TestPreferenceManager_RecordDiscoveredChat_WithRealStore(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	pm := NewPreferenceManager(store)
+
+	err = pm.RecordDiscoveredChat(123, "testuser")
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	chat, err := store.GetDiscoveredChat(123)
+	if err != nil {
+		t.Fatalf("failed to get discovered chat: %v", err)
+	}
+	if chat == nil {
+		t.Fatal("expected chat to be saved")
+	}
+	if chat.Username != "testuser" {
+		t.Errorf("expected username testuser, got %s", chat.Username)
+	}
+}
+
+func TestPreferenceManager_RecordDiscoveredChat_WithMockStore(t *testing.T) {
+	store := &mockStore{}
+	pm := NewPreferenceManager(store)
+
+	err := pm.RecordDiscoveredChat(123, "testuser")
+	if err != nil {
+		t.Errorf("expected nil error when store is not *Store, got %v", err)
 	}
 }

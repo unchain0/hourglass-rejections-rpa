@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"hourglass-rejections-rpa/internal/cache"
@@ -25,6 +26,8 @@ type Scheduler struct {
 	analyzer     Analyzer
 	store        Storage
 	cache        *cache.RejectionCache
+
+	runAnalysisFn func(ctx context.Context) error
 }
 
 func New(cfg *config.Config, sentryClient *sentry.Client, analyzer Analyzer, store Storage) *Scheduler {
@@ -63,8 +66,18 @@ func (s *Scheduler) runWithTicker(ctx context.Context, ticker *time.Ticker) erro
 			interval := s.calculateInterval(now)
 
 			logger.Info("running scheduled analysis", "time", now.Format("15:04"))
-			if err := s.runAnalysis(ctx); err != nil {
+
+			analysisFn := s.runAnalysis
+			if s.runAnalysisFn != nil {
+				analysisFn = s.runAnalysisFn
+			}
+			if err := analysisFn(ctx); err != nil {
 				logger.Error("scheduled analysis failed", "error", err)
+				if s.sentryClient != nil {
+					s.sentryClient.CaptureError(err, map[string]interface{}{
+						"phase": "scheduled_analysis",
+					})
+				}
 			}
 
 			nextRun = now.Add(interval)
@@ -91,29 +104,62 @@ func (s *Scheduler) calculateInterval(now time.Time) time.Duration {
 func (s *Scheduler) runAnalysis(ctx context.Context) error {
 	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
 	var allRejections []domain.Rejeicao
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
 	for _, section := range sections {
-		slog.Info("analyzing section", "section", section)
+		wg.Add(1)
+		go func(sec string) {
+			defer wg.Done()
 
-		result, err := s.analyzer.AnalyzeSection(section)
-		if err != nil {
-			slog.Error("failed to analyze section", "section", section, "error", err)
-			continue
-		}
+			slog.Info("analyzing section", "section", sec)
 
-		if result.Error != nil {
-			slog.Error("analysis returned error", "section", section, "error", result.Error)
-			continue
-		}
+			result, err := s.analyzer.AnalyzeSection(sec)
+			if err != nil {
+				slog.Error("failed to analyze section", "section", sec, "error", err)
+				if s.sentryClient != nil {
+					s.sentryClient.CaptureError(err, map[string]interface{}{
+						"section": sec,
+						"phase":   "analysis",
+					})
+				}
+				return
+			}
 
-		slog.Info("section analysis complete", "section", section, "total", result.Total)
+			if result.Error != nil {
+				slog.Error("analysis returned error", "section", sec, "error", result.Error)
+				if s.sentryClient != nil {
+					s.sentryClient.CaptureError(result.Error, map[string]interface{}{
+						"section": sec,
+						"phase":   "analysis_result",
+						"total":   result.Total,
+					})
+				}
+				return
+			}
 
-		if len(result.Rejeicoes) > 0 {
-			allRejections = append(allRejections, result.Rejeicoes...)
-			s.store.Save(ctx, result.Rejeicoes)
-		}
+			slog.Info("section analysis complete", "section", sec, "total", result.Total)
+
+			if len(result.Rejeicoes) > 0 {
+				mu.Lock()
+				allRejections = append(allRejections, result.Rejeicoes...)
+				mu.Unlock()
+
+				if err := s.store.Save(ctx, result.Rejeicoes); err != nil {
+					slog.Error("failed to save rejections", "section", sec, "error", err)
+					if s.sentryClient != nil {
+						s.sentryClient.CaptureError(err, map[string]interface{}{
+							"section": sec,
+							"phase":   "save_rejections",
+							"count":   len(result.Rejeicoes),
+						})
+					}
+				}
+			}
+		}(section)
 	}
 
+	wg.Wait()
 	return s.sendNotifications(allRejections)
 }
 

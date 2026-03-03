@@ -2,7 +2,12 @@ package notifier
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,6 +45,57 @@ func newTestPrefManager(t *testing.T) *preferences.PreferenceManager {
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
 	return preferences.NewPreferenceManager(store)
+}
+
+func newClosedPrefManager(t *testing.T) *preferences.PreferenceManager {
+	t.Helper()
+	store, err := preferences.NewStore(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	pm := preferences.NewPreferenceManager(store)
+	store.Close()
+	return pm
+}
+
+func newMockTelegramServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		var result any
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, "/setMyCommands"),
+			strings.HasSuffix(path, "/deleteMessage"):
+			result = true
+		default:
+			result = map[string]any{
+				"id":         123,
+				"is_bot":     true,
+				"first_name": "TestBot",
+				"username":   "test_bot",
+				"message_id": 1,
+			}
+		}
+
+		resp := map[string]any{"ok": true, "result": result}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+func newTestBotWithServer(t *testing.T, srv *httptest.Server) *bot.Bot {
+	t.Helper()
+	b, err := bot.New("test-token:fake", bot.WithServerURL(srv.URL))
+	require.NoError(t, err)
+	return b
+}
+
+func newTestNotifierWithServer(t *testing.T, srv *httptest.Server, whitelist []int64) *TelegramNotifier {
+	t.Helper()
+	return &TelegramNotifier{
+		bot:       newTestBotWithServer(t, srv),
+		chatID:    12345,
+		whitelist: whitelist,
+	}
 }
 
 // --- AllSections ---
@@ -747,4 +803,394 @@ func TestHandleStatus_Unauthorized(t *testing.T) {
 	}
 
 	tn.handleStatus(context.Background(), b, update)
+}
+
+func TestHandleStart_WithFromAndPrefManager(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleStart(context.Background(), b, update)
+}
+
+func TestHandleStart_UnauthorizedWithPrefManager(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "unauthorized_user"},
+		},
+	}
+
+	tn.handleStart(context.Background(), b, update)
+}
+
+func TestHandleConfig_NilPrefManager(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleConfig(context.Background(), b, update)
+}
+
+func TestHandleStatus_NilPrefManager(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleStatus(context.Background(), b, update)
+}
+
+func TestHandleSectionToggle_Unauthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "section_Campo",
+		},
+	}
+
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
+func TestHandleSave_Unauthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleSave(context.Background(), b, update)
+}
+
+func TestHandleCancel_Unauthorized(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleCancel(context.Background(), b, update)
+}
+
+func TestHandleCancel_NilInnerMessage(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleCancel(context.Background(), b, update)
+}
+
+func TestHandleSave_WithSections(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	_ = pm.UpdateSections(12345, []string{"Campo", "Partes Mecânicas"})
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleSave(context.Background(), b, update)
+}
+
+func TestHandleSave_NoSections(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	_ = pm.UpdateSections(12345, []string{})
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleSave(context.Background(), b, update)
+}
+
+func TestStopBot_WithCancelFunc(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	_, cancel := context.WithCancel(context.Background())
+	tn.cancelFunc = cancel
+
+	err := tn.StopBot()
+	assert.NoError(t, err)
+	assert.Nil(t, tn.cancelFunc)
+}
+
+func TestHandleCheckNow_WithFailingCallback(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	tn.SetCheckNowCallback(func(_ context.Context, _ int64) error {
+		return errors.New("check failed")
+	})
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleCheckNow(context.Background(), b, update)
+	time.Sleep(200 * time.Millisecond)
+}
+
+func TestHandleStatus_Disabled(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBotWithServer(t, srv)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	_ = pm.ToggleEnabled(12345, false)
+	_ = pm.UpdateSections(12345, []string{"Campo"})
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleStatus(context.Background(), b, update)
+}
+
+// --- Constructor success ---
+
+func TestNewTelegramNotifier_ConstructorSuccess(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	orig := botNewFunc
+	defer func() { botNewFunc = orig }()
+	botNewFunc = func(token string, opts ...bot.Option) (*bot.Bot, error) {
+		opts = append(opts, bot.WithServerURL(srv.URL))
+		return bot.New(token, opts...)
+	}
+
+	tn, err := NewTelegramNotifier("123456:ABC-DEF", 12345, []int64{111})
+	assert.NoError(t, err)
+	require.NotNil(t, tn)
+	assert.Equal(t, int64(12345), tn.chatID)
+	assert.Len(t, tn.whitelist, 1)
+}
+
+func TestNewTelegramNotifier_BotNewError(t *testing.T) {
+	orig := botNewFunc
+	defer func() { botNewFunc = orig }()
+	botNewFunc = func(_ string, _ ...bot.Option) (*bot.Bot, error) {
+		return nil, errors.New("bot creation failed")
+	}
+
+	tn, err := NewTelegramNotifier("123456:ABC-DEF", 12345, nil)
+	assert.Error(t, err)
+	assert.Nil(t, tn)
+	assert.Contains(t, err.Error(), "failed to create telegram bot")
+}
+
+func TestNewTelegramNotifier_DefaultHandlerCalled(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	var called atomic.Bool
+	orig := botNewFunc
+	defer func() { botNewFunc = orig }()
+	botNewFunc = func(token string, opts ...bot.Option) (*bot.Bot, error) {
+		opts = append(opts, bot.WithServerURL(srv.URL))
+		return bot.New(token, opts...)
+	}
+
+	tn, err := NewTelegramNotifier("123456:ABC-DEF", 12345, nil)
+	require.NoError(t, err)
+
+	_ = called.Load()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tn.bot.ProcessUpdate(ctx, &models.Update{})
+}
+
+// --- Success paths (SendMessage via mock server) ---
+
+func TestSendNoRejectionsMessage_Success(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+
+	err := tn.SendNoRejectionsMessage(12345, "No rejections found")
+	assert.NoError(t, err)
+}
+
+func TestSendRejectionsNotification_Success(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+
+	rejections := []domain.Rejeicao{
+		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	}
+	err := tn.SendRejectionsNotification(12345, rejections)
+	assert.NoError(t, err)
+}
+
+// --- StartBot success ---
+
+func TestStartBot_SuccessWithMockServer(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newTestPrefManager(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := tn.StartBot(ctx, pm)
+	assert.NoError(t, err)
+	assert.NotNil(t, tn.cancelFunc)
+
+	_ = tn.StopBot()
+}
+
+// --- GetOrCreate error paths ---
+
+func TestHandleConfig_GetOrCreateError(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newClosedPrefManager(t)
+	tn.prefManager = pm
+
+	b := newTestBotWithServer(t, srv)
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+	tn.handleConfig(context.Background(), b, update)
+}
+
+func TestHandleStatus_GetOrCreateError(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newClosedPrefManager(t)
+	tn.prefManager = pm
+
+	b := newTestBotWithServer(t, srv)
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+	tn.handleStatus(context.Background(), b, update)
+}
+
+func TestHandleSectionToggle_GetOrCreateError(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newClosedPrefManager(t)
+	tn.prefManager = pm
+
+	b := newTestBotWithServer(t, srv)
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "section_Campo",
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{ID: 1, Chat: models.Chat{ID: 12345}},
+			},
+		},
+	}
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
+func TestHandleSave_GetOrCreateError(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newClosedPrefManager(t)
+	tn.prefManager = pm
+
+	b := newTestBotWithServer(t, srv)
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{ID: 1, Chat: models.Chat{ID: 12345}},
+			},
+		},
+	}
+	tn.handleSave(context.Background(), b, update)
 }
