@@ -86,12 +86,10 @@ func (b *BotRunner) Run(ctx context.Context) error {
 		var err error
 		prefStore, err = preferences.NewStore(b.cfg.SQLiteDBPath)
 		if err != nil {
-			if b.sentryClient != nil {
-				b.sentryClient.CaptureError(err, map[string]interface{}{
-					"phase":   "init_preference_store",
-					"db_path": b.cfg.SQLiteDBPath,
-				})
-			}
+			b.sentryClient.CaptureError(err, map[string]interface{}{
+				"phase":   "init_preference_store",
+				"db_path": b.cfg.SQLiteDBPath,
+			})
 			return fmt.Errorf("failed to initialize preference store: %w", err)
 		}
 		if closer, ok := prefStore.(interface{ Close() error }); ok {
@@ -119,13 +117,11 @@ func (b *BotRunner) Run(ctx context.Context) error {
 		var err error
 		tgBot, err = newTelegramNotifier(token, chatID, whitelist)
 		if err != nil {
-			if b.sentryClient != nil {
-				b.sentryClient.CaptureError(err, map[string]interface{}{
-					"phase":     "create_notifier",
-					"chat_id":   chatID,
-					"has_token": token != "",
-				})
-			}
+			b.sentryClient.CaptureError(err, map[string]interface{}{
+				"phase":     "create_notifier",
+				"chat_id":   chatID,
+				"has_token": token != "",
+			})
 			return fmt.Errorf("failed to create telegram notifier: %w", err)
 		}
 		b.notifier = tgBot
@@ -139,11 +135,9 @@ func (b *BotRunner) Run(ctx context.Context) error {
 	logger.Info("starting telegram bot")
 
 	if err := tgBot.StartBot(ctx, prefManager); err != nil {
-		if b.sentryClient != nil {
-			b.sentryClient.CaptureError(err, map[string]interface{}{
-				"phase": "start_bot",
-			})
-		}
+		b.sentryClient.CaptureError(err, map[string]interface{}{
+			"phase": "start_bot",
+		})
 		return fmt.Errorf("failed to start bot: %w", err)
 	}
 
@@ -153,11 +147,9 @@ func (b *BotRunner) Run(ctx context.Context) error {
 
 	if err := tgBot.StopBot(); err != nil {
 		logger.Error("error stopping bot", "error", err)
-		if b.sentryClient != nil {
-			b.sentryClient.CaptureError(err, map[string]interface{}{
-				"phase": "stop_bot",
-			})
-		}
+		b.sentryClient.CaptureError(err, map[string]interface{}{
+			"phase": "stop_bot",
+		})
 	}
 
 	logger.Info("bot stopped")
@@ -171,12 +163,10 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 	pref, err := prefManager.Get(targetChatID)
 	if err != nil {
 		logger.Error("failed to get user preferences", "chat_id", targetChatID, "error", err)
-		if b.sentryClient != nil {
-			b.sentryClient.CaptureError(err, map[string]interface{}{
-				"phase":   "get_user_preferences",
-				"chat_id": targetChatID,
-			})
-		}
+		b.sentryClient.CaptureError(err, map[string]interface{}{
+			"phase":   "get_user_preferences",
+			"chat_id": targetChatID,
+		})
 		return fmt.Errorf("failed to get user preferences: %w", err)
 	}
 
@@ -224,15 +214,13 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 
 		if result.Error != nil {
 			logger.Error("analysis returned error", "section", section, "error", result.Error, "duration", time.Since(sectionStart))
-			if b.sentryClient != nil {
-				b.sentryClient.CaptureError(result.Error, map[string]interface{}{
-					"section":  section,
-					"phase":    "analysis_result_for_user",
-					"chat_id":  targetChatID,
-					"total":    result.Total,
-					"duration": time.Since(sectionStart).String(),
-				})
-			}
+			b.sentryClient.CaptureError(result.Error, map[string]interface{}{
+				"section":  section,
+				"phase":    "analysis_result_for_user",
+				"chat_id":  targetChatID,
+				"total":    result.Total,
+				"duration": time.Since(sectionStart).String(),
+			})
 			continue
 		}
 
@@ -276,12 +264,10 @@ func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error 
 	tgBot, err := newTelegramNotifier(token, chatID, whitelist)
 	if err != nil {
 		logger.Error("failed to create telegram notifier", "error", err)
-		if b.sentryClient != nil {
-			b.sentryClient.CaptureError(err, map[string]interface{}{
-				"phase":   "create_temp_notifier",
-				"chat_id": chatID,
-			})
-		}
+		b.sentryClient.CaptureError(err, map[string]interface{}{
+			"phase":   "create_temp_notifier",
+			"chat_id": chatID,
+		})
 		return fmt.Errorf("failed to create telegram notifier: %w", err)
 	}
 

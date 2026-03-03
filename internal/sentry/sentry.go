@@ -39,7 +39,7 @@ func New(cfg Config) (*Client, error) {
 
 // CaptureError captures an error to Sentry.
 func (c *Client) CaptureError(err error, extras map[string]interface{}) {
-	if !c.enabled || err == nil {
+	if c == nil || !c.enabled || err == nil {
 		return
 	}
 

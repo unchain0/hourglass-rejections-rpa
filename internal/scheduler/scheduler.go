@@ -73,11 +73,9 @@ func (s *Scheduler) runWithTicker(ctx context.Context, ticker *time.Ticker) erro
 			}
 			if err := analysisFn(ctx); err != nil {
 				logger.Error("scheduled analysis failed", "error", err)
-				if s.sentryClient != nil {
-					s.sentryClient.CaptureError(err, map[string]interface{}{
-						"phase": "scheduled_analysis",
-					})
-				}
+				s.sentryClient.CaptureError(err, map[string]interface{}{
+					"phase": "scheduled_analysis",
+				})
 			}
 
 			nextRun = now.Add(interval)
@@ -102,12 +100,11 @@ func (s *Scheduler) calculateInterval(now time.Time) time.Duration {
 }
 
 func (s *Scheduler) runAnalysis(ctx context.Context) error {
-	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
 	var allRejections []domain.Rejeicao
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	for _, section := range sections {
+	for _, section := range domain.AllSections {
 		wg.Add(1)
 		go func(sec string) {
 			defer wg.Done()
@@ -117,24 +114,20 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 			result, err := s.analyzer.AnalyzeSection(sec)
 			if err != nil {
 				slog.Error("failed to analyze section", "section", sec, "error", err)
-				if s.sentryClient != nil {
-					s.sentryClient.CaptureError(err, map[string]interface{}{
-						"section": sec,
-						"phase":   "analysis",
-					})
-				}
+				s.sentryClient.CaptureError(err, map[string]interface{}{
+					"section": sec,
+					"phase":   "analysis",
+				})
 				return
 			}
 
 			if result.Error != nil {
 				slog.Error("analysis returned error", "section", sec, "error", result.Error)
-				if s.sentryClient != nil {
-					s.sentryClient.CaptureError(result.Error, map[string]interface{}{
-						"section": sec,
-						"phase":   "analysis_result",
-						"total":   result.Total,
-					})
-				}
+				s.sentryClient.CaptureError(result.Error, map[string]interface{}{
+					"section": sec,
+					"phase":   "analysis_result",
+					"total":   result.Total,
+				})
 				return
 			}
 
@@ -147,13 +140,11 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 
 				if err := s.store.Save(ctx, result.Rejeicoes); err != nil {
 					slog.Error("failed to save rejections", "section", sec, "error", err)
-					if s.sentryClient != nil {
-						s.sentryClient.CaptureError(err, map[string]interface{}{
-							"section": sec,
-							"phase":   "save_rejections",
-							"count":   len(result.Rejeicoes),
-						})
-					}
+					s.sentryClient.CaptureError(err, map[string]interface{}{
+						"section": sec,
+						"phase":   "save_rejections",
+						"count":   len(result.Rejeicoes),
+					})
 				}
 			}
 		}(section)

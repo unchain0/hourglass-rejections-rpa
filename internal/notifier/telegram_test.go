@@ -107,7 +107,7 @@ func TestAllSections(t *testing.T) {
 		"Testemunho Público",
 		"Reunião Meio de Semana",
 	}
-	assert.Equal(t, expected, AllSections)
+	assert.Equal(t, expected, domain.AllSections)
 }
 
 // --- NewTelegramNotifier ---

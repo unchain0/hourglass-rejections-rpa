@@ -15,14 +15,7 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-// AllSections lists all configurable sections for notifications.
-var AllSections = []string{
-	"Partes Mecânicas",
-	"Campo",
-	"Testemunho Público",
-	"Reunião Meio de Semana",
-}
-
+// CheckNowCallback is a callback function for triggering immediate checks.
 type CheckNowCallback func(ctx context.Context, chatID int64) error
 
 // botNewFunc is a package-level variable to allow testing the constructor.
@@ -72,6 +65,11 @@ type TelegramNotifier struct {
 	mu               sync.Mutex
 	checkNowCallback CheckNowCallback
 	rateLimiter      *rateLimiter
+}
+
+// formatTelegramField formats a field for Telegram HTML messages with proper escaping.
+func formatTelegramField(emoji, label, value string) string {
+	return fmt.Sprintf("%s <b>%s:</b> %s\n", emoji, label, html.EscapeString(value))
 }
 
 // NewTelegramNotifier creates a new Telegram notifier.
@@ -146,10 +144,11 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 
 	for i, r := range rejections {
 		msg.WriteString(fmt.Sprintf("<b>Rejection #%d:</b>\n", i+1))
-		msg.WriteString(fmt.Sprintf("👤 <b>Who:</b> %s\n", html.EscapeString(r.Quem)))
-		msg.WriteString(fmt.Sprintf("📋 <b>Section:</b> %s\n", html.EscapeString(r.Secao)))
-		msg.WriteString(fmt.Sprintf("📝 <b>Assignment:</b> %s\n", html.EscapeString(r.OQue)))
-		msg.WriteString(fmt.Sprintf("📅 <b>Date:</b> %s\n\n", html.EscapeString(r.PraQuando)))
+		msg.WriteString(formatTelegramField("👤", "Who", r.Quem))
+		msg.WriteString(formatTelegramField("📋", "Section", r.Secao))
+		msg.WriteString(formatTelegramField("📝", "Assignment", r.OQue))
+		msg.WriteString(formatTelegramField("📅", "Date", r.PraQuando))
+		msg.WriteString("\n")
 	}
 
 	// Send message
@@ -389,7 +388,7 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 	var msg strings.Builder
 	msg.WriteString("📊 <b>Your preferences:</b>\n\n")
 
-	for _, section := range AllSections {
+	for _, section := range domain.AllSections {
 		if containsSection(pref.Sections(), section) {
 			msg.WriteString(fmt.Sprintf("✅ %s\n", section))
 		} else {
@@ -649,7 +648,7 @@ func (t *TelegramNotifier) handleCancel(ctx context.Context, b *bot.Bot, update 
 func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference) models.ReplyMarkup {
 	var rows [][]models.InlineKeyboardButton
 
-	for _, section := range AllSections {
+	for _, section := range domain.AllSections {
 		var label string
 		if containsSection(pref.Sections(), section) {
 			label = "✅ " + section

@@ -265,10 +265,9 @@ func getMidweekFlagName(flag int) string {
 
 // AnalyzeAllSections analyzes all sections.
 func (a *APIAnalyzer) AnalyzeAllSections() ([]domain.JobResult, error) {
-	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
 	var results []domain.JobResult
 
-	for _, section := range sections {
+	for _, section := range domain.AllSections {
 		result, _ := a.AnalyzeSection(section)
 		results = append(results, *result)
 	}
