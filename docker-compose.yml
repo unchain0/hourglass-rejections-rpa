@@ -9,6 +9,7 @@ services:
       - .env
     environment:
       - TZ=America/Sao_Paulo
+      - CHROME_BIN=/usr/bin/chromium-browser
       # HOURGLASS_XSRF_TOKEN must be set in .env file
       # Get it from: Hourglass → DevTools → Network → X-Hourglass-XSRF-Token header
     volumes:
@@ -22,7 +23,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "rpa"]
+      test: ["CMD-SHELL", "pgrep -x rpa >/dev/null && command -v chromium-browser >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3

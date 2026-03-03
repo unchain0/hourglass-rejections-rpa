@@ -1,10 +1,11 @@
-# Hourglass Rejeições RPA Makefile
-.PHONY: all build test clean lint fmt vet coverage docker-build docker-run help
+# Hourglass Rejections RPA Makefile
+.PHONY: all build build-rpa build-save-tokens test clean lint fmt vet coverage docker-build docker-run help run run-once save-tokens copy-to-vps copy-to-vps-password
 
 # Variables
 BINARY_NAME=rpa
-BUILD_DIR=./build
-DOCKER_IMAGE=hourglass-rejeicoes-rpa
+SAVE_TOKENS_NAME=save-tokens
+BUILD_DIR=.
+DOCKER_IMAGE=hourglass-rejections-rpa
 GO=go
 GOFLAGS=-v
 
@@ -16,11 +17,18 @@ help:
 	@echo "Available targets:"
 	@grep -E '^##' $(MAKEFILE_LIST) | sed 's/## //'
 
-## build: Build the binary
-build:
+## build: Build all binaries
+build: build-rpa build-save-tokens
+
+## build-rpa: Build the main rpa binary
+build-rpa:
 	@echo "Building $(BINARY_NAME)..."
-	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/rpa
+
+## build-save-tokens: Build the save-tokens utility
+build-save-tokens:
+	@echo "Building $(SAVE_TOKENS_NAME)..."
+	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(SAVE_TOKENS_NAME) ./cmd/save-tokens
 
 ## test: Run all tests
 test:
@@ -71,23 +79,66 @@ tidy:
 ## clean: Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -rf $(BUILD_DIR)
+	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME)
 	@rm -f coverage.out coverage.html
 
 ## run: Run the application (requires .env)
-run: build
+run: build-rpa
 	@echo "Running $(BINARY_NAME)..."
-	./$(BUILD_DIR)/$(BINARY_NAME)
+	./$(BINARY_NAME)
 
 ## run-once: Run once mode
-run-once: build
+run-once: build-rpa
 	@echo "Running once mode..."
-	./$(BUILD_DIR)/$(BINARY_NAME) -once
+	./$(BINARY_NAME) -once
 
-## run-setup: Run setup mode
-run-setup: build
-	@echo "Running setup mode..."
-	./$(BUILD_DIR)/$(BINARY_NAME) -setup
+## save-tokens: Authenticate and save tokens for VPS
+save-tokens: build-save-tokens
+	@echo "Running save-tokens..."
+	./$(SAVE_TOKENS_NAME)
+
+## copy-to-vps: Copy saved tokens to VPS using SSH keys
+## Usage: make copy-to-vps VPS=user@your-vps.com
+copy-to-vps:
+	@if [ -z "$(VPS)" ]; then \
+		echo "Usage: make copy-to-vps VPS=user@your-vps.com"; \
+		echo ""; \
+		echo "If your VPS uses password authentication, use: make copy-to-vps-password"; \
+		exit 1; \
+	fi
+	@echo "Copying tokens to $(VPS)..."
+	@scp ~/.hourglass-rpa/auth-tokens.json $(VPS):~/.hourglass-rpa/ 2>/dev/null || (echo "❌ scp failed!" && echo "For password auth, use: make copy-to-vps-password VPS=$(VPS)")
+
+## copy-to-vps-password: Copy tokens to VPS with password (interactive)
+## Usage: make copy-to-vps-password VPS=user@your-vps.com
+copy-to-vps-password:
+	@if [ -z "$(VPS)" ]; then \
+		echo "=== VPS with Password Authentication ==="; \
+		echo ""; \
+		echo "Usage: make copy-to-vps-password VPS=user@your-vps.com"; \
+		echo ""; \
+		echo "Options for VPS with password auth:"; \
+		echo ""; \
+		echo "1. METHOD: SSH key setup (RECOMMENDED - do once)"; \
+		echo "   ssh-copy-id user@your-vps.com"; \
+		echo "   # Then use: make copy-to-vps VPS=user@your-vps.com"; \
+		echo ""; \
+		echo "2. METHOD: scp with password prompt"; \
+		echo "   scp ~/.hourglass-rpa/auth-tokens.json user@your-vps.com:~/.hourglass-rpa/"; \
+		echo ""; \
+		echo "3. METHOD: Manual copy (copy-paste)"; \
+		echo "   a. Show tokens: cat ~/.hourglass-rpa/auth-tokens.json"; \
+		echo "   b. Copy the output"; \
+		echo "   c. On VPS: mkdir -p ~/.hourglass-rpa"; \
+		echo "   d. On VPS: nano ~/.hourglass-rpa/auth-tokens.json"; \
+		echo "   e. Paste and save"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@echo "=== Copying to $(VPS) with password auth ==="
+	@echo "You will be prompted for your VPS password..."
+	@echo ""
+	@scp ~/.hourglass-rpa/auth-tokens.json $(VPS):~/.hourglass-rpa/
 
 ## docker-build: Build Docker image
 docker-build:

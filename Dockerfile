@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install ca-certificates for HTTPS requests
 RUN apk add --no-cache ca-certificates
@@ -26,6 +26,11 @@ FROM alpine:latest
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont \
     procps \
     && rm -rf /var/cache/apk/*
 
@@ -48,6 +53,7 @@ USER rpa
 
 # Set environment variables
 ENV TZ=America/Sao_Paulo
+ENV CHROME_BIN=/usr/bin/chromium-browser
 
 # Expose volumes for persistent data
 VOLUME ["/app/outputs", "/app/data"]

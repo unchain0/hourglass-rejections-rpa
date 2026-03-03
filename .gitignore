@@ -38,6 +38,9 @@ cookies.json
 !package.json
 !tsconfig.json
 
+# WebAuthn credentials directory
+.hourglass-rpa/
+
 # Output directories
 outputs/
 build/

@@ -12,3 +12,6 @@
 - Refactored saveCSV into writeCSV to allow testing with a custom io.Writer.
 - Used csv.Writer.Error() to detect errors during Flush and Write.
 - Achieved 98% coverage in internal/storage.
+
+- 2026-03-03: TokenManager now supports native WebAuthn first with optional BrowserAuth fallback via WithBrowserAuth; fallback is used in Start and EnsureValidTokens through authenticateWithFallback.
+- 2026-03-03: Alpine runtime supports chromedp by installing `chromium`, `nss`, `freetype`, `harfbuzz`, and `ttf-freefont`; setting `CHROME_BIN=/usr/bin/chromium-browser` keeps binary resolution explicit across local and container runs.

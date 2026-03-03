@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"time"
+
+	"hourglass-rejections-rpa/internal/auth/webauthn"
 )
 
 const (
@@ -16,10 +18,12 @@ const (
 
 // Client is an HTTP client for the Hourglass API.
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
-	xsrfToken  string
-	hgLogin    string
+	httpClient   *http.Client
+	baseURL      string
+	xsrfToken    string
+	hgLogin      string
+	tokenManager *webauthn.TokenManager
+	useWebAuthn  bool
 }
 
 // NewClient creates a new Hourglass API client.
@@ -30,8 +34,59 @@ func NewClient() *Client {
 			Timeout: 30 * time.Second,
 			Jar:     jar,
 		},
-		baseURL: defaultBaseURL,
+		baseURL:     defaultBaseURL,
+		useWebAuthn: false,
 	}
+}
+
+// NewClientWithWebAuthn creates a new Hourglass API client with WebAuthn authentication.
+func NewClientWithWebAuthn(credentialsPath string) (*Client, error) {
+	jar, _ := cookiejar.New(nil)
+	client := &Client{
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Jar:     jar,
+		},
+		baseURL:     defaultBaseURL,
+		useWebAuthn: true,
+	}
+
+	tokenManager, err := webauthn.NewTokenManager(credentialsPath, defaultBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token manager: %w", err)
+	}
+
+	client.tokenManager = tokenManager
+	return client, nil
+}
+
+// EnableWebAuthn enables WebAuthn authentication with auto-renewal.
+func (c *Client) EnableWebAuthn(credentialsPath string) error {
+	tokenManager, err := webauthn.NewTokenManager(credentialsPath, c.baseURL)
+	if err != nil {
+		return fmt.Errorf("failed to create token manager: %w", err)
+	}
+
+	tokenManager.Start(nil)
+	c.tokenManager = tokenManager
+	c.useWebAuthn = true
+	return nil
+}
+
+// ensureAuth ensures valid authentication tokens are available.
+func (c *Client) ensureAuth() error {
+	if !c.useWebAuthn || c.tokenManager == nil {
+		return nil
+	}
+
+	tokens, err := c.tokenManager.EnsureValidTokens()
+	if err != nil {
+		return fmt.Errorf("failed to ensure authentication: %w", err)
+	}
+
+	c.hgLogin = tokens.HGLogin
+	c.xsrfToken = tokens.XSRFToken
+	return nil
 }
 
 // SetHGLogin sets the hglogin cookie for authenticated requests.
@@ -47,6 +102,10 @@ func (c *Client) SetXSRFToken(token string) {
 // GetUsers retrieves all users from the Hourglass system.
 // Endpoint: GET /api/v0.2/fsreport/users
 func (c *Client) GetUsers() ([]User, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
 	url := fmt.Sprintf("%s/fsreport/users", c.baseURL)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -79,6 +138,10 @@ func (c *Client) GetUsers() ([]User, error) {
 // GetAVAttendants retrieves mechanical assignments for a date range.
 // Endpoint: GET /api/v0.2/scheduling/av_attendant/{start}_{end}
 func (c *Client) GetAVAttendants(start, end string) ([]AVAttendant, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
 	url := fmt.Sprintf("%s/scheduling/av_attendant/%s_%s", c.baseURL, start, end)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -111,6 +174,10 @@ func (c *Client) GetAVAttendants(start, end string) ([]AVAttendant, error) {
 // GetMeetings retrieves meeting schedules for a date range.
 // Endpoint: GET /api/v0.2/scheduling/mm/meeting/{start}_{end}?lgroup={lgroup}&no_subs=true
 func (c *Client) GetMeetings(start, end string, lgroup int) ([]Meeting, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
 	url := fmt.Sprintf("%s/scheduling/mm/meeting/%s_%s?lgroup=%d&no_subs=true", c.baseURL, start, end, lgroup)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -143,6 +210,10 @@ func (c *Client) GetMeetings(start, end string, lgroup int) ([]Meeting, error) {
 // GetNotifications retrieves notifications for a date range and type.
 // Endpoint: GET /api/v0.2/scheduling/notifications/{start}_{end}/{type}
 func (c *Client) GetNotifications(start, end, notificationType string) ([]Notification, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
 	url := fmt.Sprintf("%s/scheduling/notifications/%s_%s/%s", c.baseURL, start, end, notificationType)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
