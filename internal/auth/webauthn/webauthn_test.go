@@ -171,7 +171,7 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 	// Create mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/auth/webauthn/login/start":
+		case "/auth/webauthn/login/begin":
 			response := BeginAuthenticationResponse{
 				PublicKey: struct {
 					Challenge string `json:"challenge"`
@@ -253,7 +253,7 @@ func TestTokenManager(t *testing.T) {
 	authCallCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/auth/webauthn/login/start":
+		case "/auth/webauthn/login/begin":
 			response := BeginAuthenticationResponse{
 				PublicKey: struct {
 					Challenge string `json:"challenge"`
