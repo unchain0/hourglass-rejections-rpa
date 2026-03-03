@@ -12,32 +12,79 @@ import (
 	"hourglass-rejections-rpa/internal/auth/webauthn"
 )
 
-const (
-	baseURL = "https://app.hourglass-app.com"
-)
+type FileSystem interface {
+	UserHomeDir() (string, error)
+	ReadFile(path string) ([]byte, error)
+	WriteFile(path string, data []byte, perm os.FileMode) error
+	MkdirAll(path string, perm os.FileMode) error
+}
+
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+type osFileSystem struct{}
+
+func (osFileSystem) UserHomeDir() (string, error) {
+	return os.UserHomeDir()
+}
+
+func (osFileSystem) ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+func (osFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(path, data, perm)
+}
+
+func (osFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+
+type tokenRefresher struct {
+	fs         FileSystem
+	httpClient HTTPClient
+	baseURL    string
+	osExit     func(int)
+}
+
+func newTokenRefresher() *tokenRefresher {
+	return &tokenRefresher{
+		fs:         &osFileSystem{},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:    "https://app.hourglass-app.com",
+		osExit:     os.Exit,
+	}
+}
 
 func main() {
+	tr := newTokenRefresher()
+	if err := tr.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		tr.osExit(1)
+	}
+}
+
+func (tr *tokenRefresher) Run() error {
 	fmt.Println("🔄 Token Refresh - Tentando renovar tokens automaticamente")
 	fmt.Println()
 
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := tr.fs.UserHomeDir()
 	if err != nil {
-		fmt.Printf("❌ Erro ao obter diretório home: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("erro ao obter diretório home: %w", err)
 	}
 
 	tokensPath := filepath.Join(homeDir, ".hourglass-rpa", "auth-tokens.json")
 
-	tokens, err := loadTokens(tokensPath)
+	tokens, err := tr.loadTokens(tokensPath)
 	if err != nil {
-		fmt.Printf("❌ Erro ao carregar tokens: %v\n", err)
 		fmt.Println("💡 Execute: make save-tokens")
-		os.Exit(1)
+		return fmt.Errorf("erro ao carregar tokens: %w", err)
 	}
 
 	fmt.Printf("📅 Tokens atuais válidos até: %s\n", tokens.ExpiresAt.Format("02/01/2006 15:04:05"))
 
-	newTokens, err := tryRefresh(tokens)
+	newTokens, err := tr.tryRefresh(tokens)
 	if err != nil {
 		fmt.Printf("\n❌ Refresh automático falhou: %v\n", err)
 		fmt.Println()
@@ -49,13 +96,12 @@ func main() {
 		fmt.Println("📝 Próximo passo:")
 		fmt.Println("   make save-tokens")
 		fmt.Println("   # Autentique manualmente no navegador")
-		os.Exit(1)
+		return fmt.Errorf("refresh automático falhou: %w", err)
 	}
 
-	err = saveTokens(tokensPath, newTokens)
+	err = tr.saveTokens(tokensPath, newTokens)
 	if err != nil {
-		fmt.Printf("❌ Erro ao salvar tokens: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("erro ao salvar tokens: %w", err)
 	}
 
 	fmt.Println()
@@ -64,10 +110,12 @@ func main() {
 	fmt.Println()
 	fmt.Println("🚀 Você pode copiar para a VPS:")
 	fmt.Printf("   make copy-to-vps VPS=seu-usuario@ sua-vps.com\n")
+
+	return nil
 }
 
-func loadTokens(path string) (*webauthn.AuthTokens, error) {
-	data, err := os.ReadFile(path)
+func (tr *tokenRefresher) loadTokens(path string) (*webauthn.AuthTokens, error) {
+	data, err := tr.fs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("arquivo de tokens não encontrado")
 	}
@@ -80,15 +128,9 @@ func loadTokens(path string) (*webauthn.AuthTokens, error) {
 	return &tokens, nil
 }
 
-func tryRefresh(tokens *webauthn.AuthTokens) (*webauthn.AuthTokens, error) {
+func (tr *tokenRefresher) tryRefresh(tokens *webauthn.AuthTokens) (*webauthn.AuthTokens, error) {
 	fmt.Println("🌐 Tentando refresh na API do Hourglass...")
-
-	// Criar cliente HTTP
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	req, err := http.NewRequest("GET", baseURL+"/api/v0.2/fsreport/users", nil)
+	req, err := http.NewRequest("GET", tr.baseURL+"/api/v0.2/fsreport/users", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -97,11 +139,11 @@ func tryRefresh(tokens *webauthn.AuthTokens) (*webauthn.AuthTokens, error) {
 	req.Header.Add("X-Hourglass-XSRF-Token", tokens.XSRFToken)
 	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 
-	resp, err := client.Do(req)
+	resp, err := tr.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("erro na requisição: %w", err)
 	}
-	defer resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Ler resposta
 	body, _ := io.ReadAll(resp.Body)
@@ -133,16 +175,16 @@ func tryRefresh(tokens *webauthn.AuthTokens) (*webauthn.AuthTokens, error) {
 	return newTokens, nil
 }
 
-func saveTokens(path string, tokens *webauthn.AuthTokens) error {
+func (tr *tokenRefresher) saveTokens(path string, tokens *webauthn.AuthTokens) error {
 	data, err := json.Marshal(tokens)
 	if err != nil {
 		return err
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := tr.fs.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	return tr.fs.WriteFile(path, data, 0600)
 }

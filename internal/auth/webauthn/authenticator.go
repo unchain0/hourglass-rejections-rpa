@@ -16,6 +16,8 @@ import (
 	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
 )
 
+var execCommand = exec.Command
+
 type Authenticator struct {
 	storage    *Storage
 	baseURL    string
@@ -173,7 +175,7 @@ func (a *Authenticator) curlGet(url string) ([]byte, error) {
 		url,
 	}
 
-	cmd := exec.Command("curl", args...)
+	cmd := execCommand("curl", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("curl failed: %w, output: %s", err, string(output))
@@ -382,7 +384,7 @@ func (a *Authenticator) curlPost(url string, data []byte) ([]byte, error) {
 		url,
 	}
 
-	cmd := exec.Command("curl", args...)
+	cmd := execCommand("curl", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("curl failed: %w, output: %s", err, string(output))
