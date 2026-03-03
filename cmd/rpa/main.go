@@ -169,6 +169,10 @@ func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.C
 func runFullMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
 	slog.Info("starting full mode (scheduler + bot)")
 
+	if os.Getenv("AUTO_REFRESH_TOKENS") == "true" {
+		go startAutoTokenRefresh(ctx)
+	}
+
 	go func() {
 		botRunner := bot.New(cfg, sentryClient, analyzer, store)
 		if err := botRunner.Run(ctx); err != nil {
@@ -185,6 +189,52 @@ func runFullMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.C
 			"phase": "scheduler_run",
 		})
 		return fmt.Errorf("scheduler failed: %w", err)
+	}
+
+	return nil
+}
+
+func startAutoTokenRefresh(ctx context.Context) {
+	intervalStr := os.Getenv("REFRESH_INTERVAL")
+	interval, err := time.ParseDuration(intervalStr)
+	if err != nil {
+		interval = 6 * time.Hour
+	}
+
+	slog.Info("starting automatic token refresh", "interval", interval)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("stopping automatic token refresh")
+			return
+		case <-ticker.C:
+			slog.Info("running automatic token refresh")
+			if err := runTokenRefresh(); err != nil {
+				slog.Error("token refresh failed", "error", err)
+			} else {
+				slog.Info("token refresh completed successfully")
+			}
+		}
+	}
+}
+
+func runTokenRefresh() error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	tokensPath := os.Getenv("TOKENS_PATH")
+	if tokensPath == "" {
+		tokensPath = filepath.Join(homeDir, ".hourglass-rpa", "auth-tokens.json")
+	}
+
+	if _, err := os.Stat(tokensPath); os.IsNotExist(err) {
+		return fmt.Errorf("tokens file not found at %s", tokensPath)
 	}
 
 	return nil

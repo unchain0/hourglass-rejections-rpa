@@ -10,11 +10,13 @@ services:
     environment:
       - TZ=America/Sao_Paulo
       - CHROME_BIN=/usr/bin/chromium-browser
-      # HOURGLASS_XSRF_TOKEN must be set in .env file
-      # Get it from: Hourglass → DevTools → Network → X-Hourglass-XSRF-Token header
+      - TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
+      - AUTO_REFRESH_TOKENS=true
+      - REFRESH_INTERVAL=6h
     volumes:
       - outputs:/app/outputs
       - data:/app/data
+      - tokens:/home/rpa/.hourglass-rpa
     networks:
       - rpa-network
     logging:
@@ -23,13 +25,39 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -x rpa >/dev/null && command -v chromium-browser >/dev/null"]
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q rpa && test -f /home/rpa/.hourglass-rpa/auth-tokens.json"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  # Optional: Grafana Agent for metrics shipping
+  token-refresh:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hourglass-token-refresh
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          echo "[$$(date)] Running token refresh..."
+          /app/token-refresh || echo "[$$(date)] Token refresh failed, will retry in 6 hours"
+          echo "[$$(date)] Sleeping for 6 hours..."
+          sleep 21600
+        done
+    environment:
+      - TZ=America/Sao_Paulo
+      - TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
+    volumes:
+      - tokens:/home/rpa/.hourglass-rpa
+    networks:
+      - rpa-network
+    depends_on:
+      - rpa
+    profiles:
+      - autorefresh
+
   grafana-agent:
     image: grafana/agent:latest
     container_name: grafana-agent
@@ -50,4 +78,6 @@ volumes:
   outputs:
     driver: local
   data:
+    driver: local
+  tokens:
     driver: local
