@@ -1,9 +1,10 @@
 # Hourglass Rejections RPA Makefile
-.PHONY: all build build-rpa build-save-tokens test clean lint fmt vet coverage docker-build docker-run help run run-once save-tokens copy-to-vps copy-to-vps-password
+.PHONY: all build build-rpa build-save-tokens build-token-refresh test clean lint fmt vet coverage docker-build docker-run help run run-once save-tokens token-refresh copy-to-vps copy-to-vps-password
 
 # Variables
 BINARY_NAME=rpa
 SAVE_TOKENS_NAME=save-tokens
+TOKEN_REFRESH_NAME=token-refresh
 BUILD_DIR=.
 DOCKER_IMAGE=hourglass-rejections-rpa
 GO=go
@@ -18,7 +19,7 @@ help:
 	@grep -E '^##' $(MAKEFILE_LIST) | sed 's/## //'
 
 ## build: Build all binaries
-build: build-rpa build-save-tokens
+build: build-rpa build-save-tokens build-token-refresh
 
 ## build-rpa: Build the main rpa binary
 build-rpa:
@@ -29,6 +30,11 @@ build-rpa:
 build-save-tokens:
 	@echo "Building $(SAVE_TOKENS_NAME)..."
 	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(SAVE_TOKENS_NAME) ./cmd/save-tokens
+
+## build-token-refresh: Build the token-refresh utility
+build-token-refresh:
+	@echo "Building $(TOKEN_REFRESH_NAME)..."
+	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(TOKEN_REFRESH_NAME) ./cmd/token-refresh
 
 ## test: Run all tests
 test:
@@ -79,7 +85,7 @@ tidy:
 ## clean: Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME)
+	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME) $(TOKEN_REFRESH_NAME)
 	@rm -f coverage.out coverage.html
 
 ## run: Run the application (requires .env)
@@ -96,6 +102,12 @@ run-once: build-rpa
 save-tokens: build-save-tokens
 	@echo "Running save-tokens..."
 	./$(SAVE_TOKENS_NAME)
+
+## token-refresh: Try to refresh tokens automatically without WebAuthn
+## Usage: make token-refresh
+token-refresh: build-token-refresh
+	@echo "Running token-refresh..."
+	./$(TOKEN_REFRESH_NAME)
 
 ## copy-to-vps: Copy saved tokens to VPS using SSH keys
 ## Usage: make copy-to-vps VPS=user@your-vps.com
