@@ -25,7 +25,7 @@ func (m *mockBrowserAuth) Authenticate() (*webauthn.AuthTokens, error) {
 	return m.tokens, m.err
 }
 
-func (m *mockBrowserAuth) WithHeadless(headless bool) browserAuth {
+func (m *mockBrowserAuth) WithHeadless(_ bool) browserAuth {
 	return m
 }
 
@@ -240,19 +240,19 @@ func TestRun(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdin = r
 		defer func() {
-			w.Close()
+			_ = w.Close()
 			os.Stdin = oldStdin
 		}()
 
 		go func() {
-			fmt.Fprintln(w, "no")
+			_, _ = fmt.Fprintln(w, "no")
 		}()
 
 		oldStdout := os.Stdout
 		pr, pw, _ := os.Pipe()
 		os.Stdout = pw
 		defer func() {
-			pw.Close()
+			_ = pw.Close()
 			os.Stdout = oldStdout
 		}()
 
@@ -285,19 +285,19 @@ func TestRunWithValidTokens(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdin = r
 	defer func() {
-		w.Close()
+		_ = w.Close()
 		os.Stdin = oldStdin
 	}()
 
 	go func() {
-		fmt.Fprintln(w, "no")
+		_, _ = fmt.Fprintln(w, "no")
 	}()
 
 	oldStdout := os.Stdout
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() {
-		pw.Close()
+		_ = pw.Close()
 		os.Stdout = oldStdout
 	}()
 
@@ -311,7 +311,7 @@ func TestRunWithValidTokens(t *testing.T) {
 
 	assert.NoError(t, err)
 
-	pw.Close()
+	_ = pw.Close()
 	output, _ := io.ReadAll(pr)
 	assert.Contains(t, string(output), "Valid tokens found")
 	assert.Contains(t, string(output), "Using existing tokens")
@@ -354,19 +354,19 @@ func TestRunWithExpiredTokens(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdin = r
 	defer func() {
-		w.Close()
+		_ = w.Close()
 		os.Stdin = oldStdin
 	}()
 
 	go func() {
-		fmt.Fprintln(w, "no")
+		_, _ = fmt.Fprintln(w, "no")
 	}()
 
 	oldStdout := os.Stdout
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() {
-		pw.Close()
+		_ = pw.Close()
 		os.Stdout = oldStdout
 	}()
 
@@ -380,7 +380,7 @@ func TestRunWithExpiredTokens(t *testing.T) {
 
 	assert.NoError(t, err)
 
-	pw.Close()
+	_ = pw.Close()
 	output, _ := io.ReadAll(pr)
 	assert.Contains(t, string(output), "Existing tokens have expired")
 	assert.Contains(t, string(output), "Authentication successful")
@@ -413,19 +413,19 @@ func TestRunWithNewAuthentication(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdin = r
 	defer func() {
-		w.Close()
+		_ = w.Close()
 		os.Stdin = oldStdin
 	}()
 
 	go func() {
-		fmt.Fprintln(w, "no")
+		_, _ = fmt.Fprintln(w, "no")
 	}()
 
 	oldStdout := os.Stdout
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() {
-		pw.Close()
+		_ = pw.Close()
 		os.Stdout = oldStdout
 	}()
 
@@ -439,7 +439,7 @@ func TestRunWithNewAuthentication(t *testing.T) {
 
 	assert.NoError(t, err)
 
-	pw.Close()
+	_ = pw.Close()
 	output, _ := io.ReadAll(pr)
 	assert.Contains(t, string(output), "Starting browser authentication")
 	assert.Contains(t, string(output), "Authentication successful")
@@ -516,19 +516,19 @@ func TestAskVPSUpload(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdin = r
 		defer func() {
-			w.Close()
+			_ = w.Close()
 			os.Stdin = oldStdin
 		}()
 
 		go func() {
-			fmt.Fprintln(w, "no")
+			_, _ = fmt.Fprintln(w, "no")
 		}()
 
 		oldStdout := os.Stdout
 		pr, pw, _ := os.Pipe()
 		os.Stdout = pw
 		defer func() {
-			pw.Close()
+			_ = pw.Close()
 			os.Stdout = oldStdout
 		}()
 
@@ -537,7 +537,7 @@ func TestAskVPSUpload(t *testing.T) {
 
 		assert.NoError(t, err)
 
-		pw.Close()
+		_ = pw.Close()
 		output, _ := io.ReadAll(pr)
 		assert.Contains(t, string(output), "VPS Deployment")
 		assert.Contains(t, string(output), "Setup complete")
@@ -548,20 +548,20 @@ func TestAskVPSUpload(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdin = r
 		defer func() {
-			w.Close()
+			_ = w.Close()
 			os.Stdin = oldStdin
 		}()
 
 		go func() {
-			fmt.Fprintln(w, "yes")
-			fmt.Fprintln(w, "")
+			_, _ = fmt.Fprintln(w, "yes")
+			_, _ = fmt.Fprintln(w, "")
 		}()
 
 		oldStdout := os.Stdout
 		pr, pw, _ := os.Pipe()
 		os.Stdout = pw
 		defer func() {
-			pw.Close()
+			_ = pw.Close()
 			os.Stdout = oldStdout
 		}()
 
@@ -570,7 +570,7 @@ func TestAskVPSUpload(t *testing.T) {
 
 		assert.NoError(t, err)
 
-		pw.Close()
+		_ = pw.Close()
 		output, _ := io.ReadAll(pr)
 		assert.Contains(t, string(output), "VPS host cannot be empty")
 	})
@@ -580,21 +580,21 @@ func TestAskVPSUpload(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdin = r
 		defer func() {
-			w.Close()
+			_ = w.Close()
 			os.Stdin = oldStdin
 		}()
 
 		go func() {
-			fmt.Fprintln(w, "yes")
-			fmt.Fprintln(w, "user@host")
-			fmt.Fprintln(w, "")
+			_, _ = fmt.Fprintln(w, "yes")
+			_, _ = fmt.Fprintln(w, "user@host")
+			_, _ = fmt.Fprintln(w, "")
 		}()
 
 		oldStdout := os.Stdout
 		pr, pw, _ := os.Pipe()
 		os.Stdout = pw
 		defer func() {
-			pw.Close()
+			_ = pw.Close()
 			os.Stdout = oldStdout
 		}()
 
@@ -604,7 +604,7 @@ func TestAskVPSUpload(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")
 
-		pw.Close()
+		_ = pw.Close()
 		output, _ := io.ReadAll(pr)
 		assert.Contains(t, string(output), "Transferring tokens to VPS")
 	})
@@ -614,21 +614,21 @@ func TestAskVPSUpload(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdin = r
 		defer func() {
-			w.Close()
+			_ = w.Close()
 			os.Stdin = oldStdin
 		}()
 
 		go func() {
-			fmt.Fprintln(w, "yes")
-			fmt.Fprintln(w, "user@host")
-			fmt.Fprintln(w, "/custom/path/tokens.json")
+			_, _ = fmt.Fprintln(w, "yes")
+			_, _ = fmt.Fprintln(w, "user@host")
+			_, _ = fmt.Fprintln(w, "/custom/path/tokens.json")
 		}()
 
 		oldStdout := os.Stdout
 		pr, pw, _ := os.Pipe()
 		os.Stdout = pw
 		defer func() {
-			pw.Close()
+			_ = pw.Close()
 			os.Stdout = oldStdout
 		}()
 
@@ -638,7 +638,7 @@ func TestAskVPSUpload(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")
 
-		pw.Close()
+		_ = pw.Close()
 		output, _ := io.ReadAll(pr)
 		assert.Contains(t, string(output), "Transferring tokens to VPS")
 	})
@@ -648,21 +648,21 @@ func TestAskVPSUpload(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdin = r
 		defer func() {
-			w.Close()
+			_ = w.Close()
 			os.Stdin = oldStdin
 		}()
 
 		go func() {
-			fmt.Fprintln(w, "YES")
-			fmt.Fprintln(w, "user@host")
-			fmt.Fprintln(w, "")
+			_, _ = fmt.Fprintln(w, "YES")
+			_, _ = fmt.Fprintln(w, "user@host")
+			_, _ = fmt.Fprintln(w, "")
 		}()
 
 		oldStdout := os.Stdout
 		pr, pw, _ := os.Pipe()
 		os.Stdout = pw
 		defer func() {
-			pw.Close()
+			_ = pw.Close()
 			os.Stdout = oldStdout
 		}()
 
@@ -679,19 +679,19 @@ func TestAskVPSUpload(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdin = r
 		defer func() {
-			w.Close()
+			_ = w.Close()
 			os.Stdin = oldStdin
 		}()
 
 		go func() {
-			fmt.Fprintln(w, "NO")
+			_, _ = fmt.Fprintln(w, "NO")
 		}()
 
 		oldStdout := os.Stdout
 		pr, pw, _ := os.Pipe()
 		os.Stdout = pw
 		defer func() {
-			pw.Close()
+			_ = pw.Close()
 			os.Stdout = oldStdout
 		}()
 
@@ -700,7 +700,7 @@ func TestAskVPSUpload(t *testing.T) {
 
 		assert.NoError(t, err)
 
-		pw.Close()
+		_ = pw.Close()
 		output, _ := io.ReadAll(pr)
 		assert.Contains(t, string(output), "Setup complete")
 	})
@@ -743,20 +743,20 @@ func TestRunWithReAuthAndVPSUpload(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdin = r
 	defer func() {
-		w.Close()
+		_ = w.Close()
 		os.Stdin = oldStdin
 	}()
 
 	go func() {
-		fmt.Fprintln(w, "yes")
-		fmt.Fprintln(w, "no")
+		_, _ = fmt.Fprintln(w, "yes")
+		_, _ = fmt.Fprintln(w, "no")
 	}()
 
 	oldStdout := os.Stdout
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() {
-		pw.Close()
+		_ = pw.Close()
 		os.Stdout = oldStdout
 	}()
 
@@ -770,7 +770,7 @@ func TestRunWithReAuthAndVPSUpload(t *testing.T) {
 
 	assert.NoError(t, err)
 
-	pw.Close()
+	_ = pw.Close()
 	output, _ := io.ReadAll(pr)
 	assert.Contains(t, string(output), "Valid tokens found")
 	assert.Contains(t, string(output), "Authentication successful")
@@ -871,7 +871,7 @@ func TestConsoleUserInput(t *testing.T) {
 
 type errorReader struct{}
 
-func (e *errorReader) Read(p []byte) (n int, err error) {
+func (e *errorReader) Read(_ []byte) (n int, err error) {
 	return 0, errors.New("read error")
 }
 
@@ -883,7 +883,7 @@ func TestExecSCPClient(t *testing.T) {
 		}
 		tempDir := t.TempDir()
 		testFile := filepath.Join(tempDir, "test.txt")
-		err := os.WriteFile(testFile, []byte("test"), 0644)
+		err := os.WriteFile(testFile, []byte("test"), 0600)
 		require.NoError(t, err)
 
 		err = client.CopyFile(testFile, "invalid-host-test", "/tmp/test.txt")
@@ -901,8 +901,10 @@ func TestAskVPSUploadWithReadErrors(t *testing.T) {
 			XSRFToken: "test",
 			ExpiresAt: time.Now().Add(time.Hour),
 		}
-		data, _ := json.Marshal(tokens)
-		os.WriteFile(tokensPath, data, 0600)
+		data, err := json.Marshal(tokens)
+		require.NoError(t, err)
+		err = os.WriteFile(tokensPath, data, 0600)
+		require.NoError(t, err)
 
 		runner := newSetupRunner()
 		runner.userInput = &mockUserInput{
@@ -912,7 +914,7 @@ func TestAskVPSUploadWithReadErrors(t *testing.T) {
 			readLineError:  errors.New("read error"),
 		}
 
-		err := runner.askVPSUpload(tokensPath)
+		err = runner.askVPSUpload(tokensPath)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read VPS host")
 	})
@@ -925,8 +927,10 @@ func TestAskVPSUploadWithReadErrors(t *testing.T) {
 			XSRFToken: "test",
 			ExpiresAt: time.Now().Add(time.Hour),
 		}
-		data, _ := json.Marshal(tokens)
-		os.WriteFile(tokensPath, data, 0600)
+		data, err := json.Marshal(tokens)
+		require.NoError(t, err)
+		err = os.WriteFile(tokensPath, data, 0600)
+		require.NoError(t, err)
 
 		runner := newSetupRunner()
 		runner.userInput = &mockUserInputV2{
@@ -935,7 +939,7 @@ func TestAskVPSUploadWithReadErrors(t *testing.T) {
 		}
 		runner.scpClient = &mockSCPClient{}
 
-		err := runner.askVPSUpload(tokensPath)
+		err = runner.askVPSUpload(tokensPath)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read VPS target path")
 	})
@@ -947,7 +951,7 @@ type mockUserInputV2 struct {
 	errors  []error
 }
 
-func (m *mockUserInputV2) Confirm(prompt string) (bool, error) {
+func (m *mockUserInputV2) Confirm(_ string) (bool, error) {
 	return true, nil
 }
 
@@ -963,7 +967,8 @@ func (m *mockUserInputV2) ReadLine() (string, error) {
 
 type mockSCPClient struct{}
 
-func (m *mockSCPClient) CopyFile(localPath, remoteHost, remotePath string) error {
+func (m *mockSCPClient) CopyFile(_, remoteHost, _ string) error {
+	_ = remoteHost
 	return nil
 }
 
@@ -975,7 +980,7 @@ type mockUserInput struct {
 	readLineCalls  int
 }
 
-func (m *mockUserInput) Confirm(prompt string) (bool, error) {
+func (m *mockUserInput) Confirm(_ string) (bool, error) {
 	return m.confirmResult, m.confirmError
 }
 
@@ -1077,17 +1082,18 @@ func (m *mockFileSystem) UserHomeDir() (string, error) {
 	return m.userHomeDir, m.userHomeError
 }
 
-func (m *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
+func (m *mockFileSystem) MkdirAll(_ string, _ os.FileMode) error {
 	return m.mkdirError
 }
 
-func (m *mockFileSystem) ReadFile(path string) ([]byte, error) {
+func (m *mockFileSystem) ReadFile(_ string) ([]byte, error) {
 	return m.readFileData, m.readFileError
 }
 
-func (m *mockFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error {
+func (m *mockFileSystem) WriteFile(_ string, data []byte, _ os.FileMode) error {
 	if m.writeFileFunc != nil {
-		return m.writeFileFunc(path, data, perm)
+		_ = data
+		return nil
 	}
 	return m.writeFileError
 }
