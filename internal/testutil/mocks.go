@@ -15,6 +15,7 @@ type MockFileSystem struct {
 	Files    map[string][]byte
 	ReadErr  error
 	WriteErr error
+	MkdirErr error
 
 	Calls struct {
 		ReadFile  []string
@@ -64,7 +65,7 @@ func (m *MockFileSystem) WriteFile(filename string, data []byte, perm os.FileMod
 
 func (m *MockFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	m.Calls.MkdirAll = append(m.Calls.MkdirAll, path)
-	return nil
+	return m.MkdirErr
 }
 
 // MockHTTPClient is a mock implementation of HTTP client.

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"hourglass-rejections-rpa/internal/api"
 	"hourglass-rejections-rpa/internal/config"
 	"hourglass-rejections-rpa/internal/sentry"
@@ -514,4 +515,71 @@ func TestRunFullMode_SchedulerError(t *testing.T) {
 	if !strings.Contains(err.Error(), "scheduler failed") {
 		t.Errorf("expected 'scheduler failed' in error, got: %v", err)
 	}
+}
+
+func TestCaptureError(t *testing.T) {
+	t.Run("with nil sentry client", func(t *testing.T) {
+		sentryClientGlobal = nil
+		assert.NotPanics(t, func() {
+			captureError(fmt.Errorf("test error"), nil)
+		})
+	})
+
+	t.Run("with disabled sentry client", func(t *testing.T) {
+		sentryClientGlobal = &sentry.Client{}
+		assert.NotPanics(t, func() {
+			captureError(fmt.Errorf("test error"), nil)
+		})
+	})
+}
+
+func TestRunTokenRefresh(t *testing.T) {
+	t.Run("tokens file not found", func(t *testing.T) {
+		// Set HOME to a temp directory where the tokens file won't exist
+		origHome := os.Getenv("HOME")
+		defer os.Setenv("HOME", origHome)
+		os.Setenv("HOME", t.TempDir())
+
+		err := runTokenRefresh()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "tokens file not found")
+	})
+
+	t.Run("tokens file exists", func(t *testing.T) {
+		tempDir := t.TempDir()
+		tokensDir := filepath.Join(tempDir, ".hourglass-rpa")
+		os.MkdirAll(tokensDir, 0755)
+		os.WriteFile(filepath.Join(tokensDir, "auth-tokens.json"), []byte("{}"), 0644)
+
+		origHome := os.Getenv("HOME")
+		defer os.Setenv("HOME", origHome)
+		os.Setenv("HOME", tempDir)
+
+		err := runTokenRefresh()
+		assert.NoError(t, err)
+	})
+
+	t.Run("with custom tokens path", func(t *testing.T) {
+		tempDir := t.TempDir()
+		customPath := filepath.Join(tempDir, "custom-tokens.json")
+		os.WriteFile(customPath, []byte("{}"), 0644)
+
+		origPath := os.Getenv("TOKENS_PATH")
+		defer os.Setenv("TOKENS_PATH", origPath)
+		os.Setenv("TOKENS_PATH", customPath)
+
+		err := runTokenRefresh()
+		assert.NoError(t, err)
+	})
+}
+
+func TestStartAutoTokenRefresh(t *testing.T) {
+	t.Run("cancels immediately", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		assert.NotPanics(t, func() {
+			startAutoTokenRefresh(ctx)
+		})
+	})
 }

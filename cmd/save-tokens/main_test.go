@@ -709,6 +709,41 @@ func TestBrowserAuthAdapter_AuthenticateCalled(t *testing.T) {
 	assert.NotNil(t, adapter.BrowserAuth)
 }
 
+func TestTokenSaverImpl_newTokenSaver_RealFactories(t *testing.T) {
+	ts := newTokenSaver()
+
+	// Test that real factories work correctly
+	t.Run("tokenManagerFactory creates real manager", func(t *testing.T) {
+		tempDir := t.TempDir()
+		credsPath := filepath.Join(tempDir, "creds.json")
+		baseURL := "https://app.hourglass-app.com"
+
+		mgr, err := ts.tokenManagerFactory(credsPath, baseURL)
+		assert.NoError(t, err)
+		assert.NotNil(t, mgr)
+	})
+
+	t.Run("browserAuthFactory creates real browser auth", func(t *testing.T) {
+		baseURL := "https://app.hourglass-app.com"
+		auth := ts.browserAuthFactory(baseURL)
+		assert.NotNil(t, auth)
+	})
+
+	t.Run("userHomeDir returns real home directory", func(t *testing.T) {
+		home, err := ts.userHomeDir()
+		assert.NoError(t, err)
+		assert.NotEmpty(t, home)
+	})
+
+	t.Run("mkdirAll creates real directories", func(t *testing.T) {
+		tempDir := t.TempDir()
+		testDir := filepath.Join(tempDir, "test", "nested")
+		err := ts.mkdirAll(testDir, 0755)
+		assert.NoError(t, err)
+		assert.DirExists(t, testDir)
+	})
+}
+
 func TestTokenSaver_Run_CompleteFlow(t *testing.T) {
 	testTokens := createTestTokens()
 	mockTokenMgr := new(mockTokenSaver)

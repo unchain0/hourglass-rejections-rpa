@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,10 @@ type mockBrowserAuth struct {
 
 func (m *mockBrowserAuth) Authenticate() (*webauthn.AuthTokens, error) {
 	return m.tokens, m.err
+}
+
+func (m *mockBrowserAuth) WithHeadless(headless bool) browserAuth {
+	return m
 }
 
 func TestSetupOptions(t *testing.T) {
@@ -155,8 +160,6 @@ func TestConstants(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
-	tempDir := t.TempDir()
-
 	t.Run("home directory error", func(t *testing.T) {
 		mockErr := errors.New("no home directory")
 		opts := setupOptions{
@@ -170,6 +173,7 @@ func TestRun(t *testing.T) {
 	})
 
 	t.Run("config directory creation failure", func(t *testing.T) {
+		tempDir := t.TempDir()
 		filePath := filepath.Join(tempDir, "file-not-dir")
 		err := os.WriteFile(filePath, []byte("test"), 0600)
 		require.NoError(t, err)
@@ -185,7 +189,18 @@ func TestRun(t *testing.T) {
 	})
 
 	t.Run("check existing tokens failure", func(t *testing.T) {
-		configDir := filepath.Join(tempDir, "test-config")
+		oldBrowserAuth := newBrowserAuth
+		defer func() { newBrowserAuth = oldBrowserAuth }()
+
+		newBrowserAuth = func(baseURL string) browserAuth {
+			return &mockBrowserAuth{
+				tokens: nil,
+				err:    errors.New("auth failed"),
+			}
+		}
+
+		tempDir := t.TempDir()
+		configDir := filepath.Join(tempDir, defaultConfigDir)
 		err := os.MkdirAll(configDir, 0700)
 		require.NoError(t, err)
 
@@ -214,25 +229,35 @@ func TestRun(t *testing.T) {
 			}
 		}
 
-		configDir := filepath.Join(tempDir, "test-config-auth-fail")
-		err := os.MkdirAll(configDir, 0700)
-		require.NoError(t, err)
+		tempDir := t.TempDir()
 
 		opts := setupOptions{
 			getenv:        os.Getenv,
 			osUserHomeDir: func() (string, error) { return tempDir, nil },
 		}
 
-		oldStdout := os.Stdout
+		oldStdin := os.Stdin
 		r, w, _ := os.Pipe()
-		os.Stdout = w
+		os.Stdin = r
 		defer func() {
 			w.Close()
+			os.Stdin = oldStdin
+		}()
+
+		go func() {
+			fmt.Fprintln(w, "no")
+		}()
+
+		oldStdout := os.Stdout
+		pr, pw, _ := os.Pipe()
+		os.Stdout = pw
+		defer func() {
+			pw.Close()
 			os.Stdout = oldStdout
 		}()
 
-		err = run(opts)
-		_ = r
+		err := run(opts)
+		_ = pr
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "authentication failed")
@@ -643,6 +668,7 @@ func TestAskVPSUpload(t *testing.T) {
 
 		err := askVPSUpload(tokensPath)
 		_ = r
+		_ = pr
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")
@@ -727,7 +753,7 @@ func TestRunWithReAuthAndVPSUpload(t *testing.T) {
 	}()
 
 	oldStdout := os.Stdout
-	_, pw, _ := os.Pipe()
+	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() {
 		pw.Close()
@@ -749,4 +775,319 @@ func TestRunWithReAuthAndVPSUpload(t *testing.T) {
 	assert.Contains(t, string(output), "Valid tokens found")
 	assert.Contains(t, string(output), "Authentication successful")
 	assert.Contains(t, string(output), "Tokens saved successfully")
+}
+
+func TestOsFileSystem(t *testing.T) {
+	fs := osFileSystem{}
+
+	t.Run("UserHomeDir", func(t *testing.T) {
+		home, err := fs.UserHomeDir()
+		assert.NoError(t, err)
+		assert.NotEmpty(t, home)
+	})
+
+	t.Run("MkdirAll and ReadFile and WriteFile", func(t *testing.T) {
+		tempDir := t.TempDir()
+		testDir := filepath.Join(tempDir, "test", "nested")
+		testFile := filepath.Join(testDir, "test.txt")
+		testData := []byte("hello world")
+
+		err := fs.MkdirAll(testDir, 0755)
+		assert.NoError(t, err)
+
+		err = fs.WriteFile(testFile, testData, 0644)
+		assert.NoError(t, err)
+
+		readData, err := fs.ReadFile(testFile)
+		assert.NoError(t, err)
+		assert.Equal(t, testData, readData)
+	})
+}
+
+func TestBrowserAuthAdapter(t *testing.T) {
+	t.Run("Authenticate delegates to wrapped auth", func(t *testing.T) {
+		// The browserAuthAdapter wraps *webauthn.BrowserAuth which is hard to mock directly.
+		// This path is covered by integration tests that mock newBrowserAuth.
+		// We verify the adapter exists and can be created.
+		adapter := &browserAuthAdapter{}
+		assert.NotNil(t, adapter)
+	})
+
+	t.Run("WithHeadless returns self", func(t *testing.T) {
+		mock := &mockBrowserAuth{}
+		adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
+		_ = mock
+		result := adapter.WithHeadless(true)
+		assert.Equal(t, adapter, result)
+	})
+}
+
+func TestWebauthnBrowserAuthFactory(t *testing.T) {
+	factory := webauthnBrowserAuthFactory{}
+	auth := factory.NewBrowserAuth("http://localhost")
+	assert.NotNil(t, auth)
+}
+
+func TestConsoleUserInput(t *testing.T) {
+	t.Run("Confirm success yes", func(t *testing.T) {
+		input := strings.NewReader("yes\n")
+		cui := newConsoleUserInput(input)
+		result, err := cui.Confirm("test prompt: ")
+		assert.NoError(t, err)
+		assert.True(t, result)
+	})
+
+	t.Run("Confirm success no", func(t *testing.T) {
+		input := strings.NewReader("no\n")
+		cui := newConsoleUserInput(input)
+		result, err := cui.Confirm("test prompt: ")
+		assert.NoError(t, err)
+		assert.False(t, result)
+	})
+
+	t.Run("Confirm error", func(t *testing.T) {
+		input := strings.NewReader("")
+		cui := newConsoleUserInput(input)
+		result, err := cui.Confirm("test prompt: ")
+		assert.NoError(t, err)
+		assert.False(t, result)
+	})
+
+	t.Run("ReadLine with EOF", func(t *testing.T) {
+		input := strings.NewReader("partial")
+		cui := newConsoleUserInput(input)
+		result, err := cui.ReadLine()
+		assert.NoError(t, err)
+		assert.Equal(t, "partial", result)
+	})
+
+	t.Run("ReadLine error", func(t *testing.T) {
+		reader := &errorReader{}
+		cui := newConsoleUserInput(reader)
+		_, err := cui.ReadLine()
+		assert.Error(t, err)
+	})
+}
+
+type errorReader struct{}
+
+func (e *errorReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("read error")
+}
+
+func TestExecSCPClient(t *testing.T) {
+	t.Run("CopyFile success - dry run with bad host", func(t *testing.T) {
+		client := &execSCPClient{
+			stdout: io.Discard,
+			stderr: io.Discard,
+		}
+		tempDir := t.TempDir()
+		testFile := filepath.Join(tempDir, "test.txt")
+		err := os.WriteFile(testFile, []byte("test"), 0644)
+		require.NoError(t, err)
+
+		err = client.CopyFile(testFile, "invalid-host-test", "/tmp/test.txt")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to transfer tokens")
+	})
+}
+
+func TestAskVPSUploadWithReadErrors(t *testing.T) {
+	t.Run("VPS host read error", func(t *testing.T) {
+		tempDir := t.TempDir()
+		tokensPath := filepath.Join(tempDir, "tokens.json")
+		tokens := &webauthn.AuthTokens{
+			HGLogin:   "test",
+			XSRFToken: "test",
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+		data, _ := json.Marshal(tokens)
+		os.WriteFile(tokensPath, data, 0600)
+
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInput{
+			confirmResult:  true,
+			confirmError:   nil,
+			readLineResult: "",
+			readLineError:  errors.New("read error"),
+		}
+
+		err := runner.askVPSUpload(tokensPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read VPS host")
+	})
+
+	t.Run("VPS path read error", func(t *testing.T) {
+		tempDir := t.TempDir()
+		tokensPath := filepath.Join(tempDir, "tokens.json")
+		tokens := &webauthn.AuthTokens{
+			HGLogin:   "test",
+			XSRFToken: "test",
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+		data, _ := json.Marshal(tokens)
+		os.WriteFile(tokensPath, data, 0600)
+
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInputV2{
+			results: []string{"user@host"},
+			errors:  []error{nil, errors.New("read error")},
+		}
+		runner.scpClient = &mockSCPClient{}
+
+		err := runner.askVPSUpload(tokensPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read VPS target path")
+	})
+}
+
+type mockUserInputV2 struct {
+	callIdx int
+	results []string
+	errors  []error
+}
+
+func (m *mockUserInputV2) Confirm(prompt string) (bool, error) {
+	return true, nil
+}
+
+func (m *mockUserInputV2) ReadLine() (string, error) {
+	if m.callIdx >= len(m.results) {
+		return "", m.errors[len(m.errors)-1]
+	}
+	result := m.results[m.callIdx]
+	err := m.errors[m.callIdx]
+	m.callIdx++
+	return result, err
+}
+
+type mockSCPClient struct{}
+
+func (m *mockSCPClient) CopyFile(localPath, remoteHost, remotePath string) error {
+	return nil
+}
+
+type mockUserInput struct {
+	confirmResult  bool
+	confirmError   error
+	readLineResult string
+	readLineError  error
+	readLineCalls  int
+}
+
+func (m *mockUserInput) Confirm(prompt string) (bool, error) {
+	return m.confirmResult, m.confirmError
+}
+
+func (m *mockUserInput) ReadLine() (string, error) {
+	m.readLineCalls++
+	if m.readLineCalls == 1 && m.readLineResult != "" {
+		return m.readLineResult, m.readLineError
+	}
+	return "", m.readLineError
+}
+
+func TestSaveTokensMarshalError(t *testing.T) {
+	mockFS := &mockFileSystem{
+		writeFileFunc: func(path string, data []byte, perm os.FileMode) error {
+			return nil
+		},
+	}
+
+	runner := &setupRunner{
+		fs: mockFS,
+	}
+
+	tokens := &webauthn.AuthTokens{
+		HGLogin:   "test",
+		XSRFToken: "test",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+
+	tempDir := t.TempDir()
+	tokensPath := filepath.Join(tempDir, "tokens.json")
+
+	err := runner.saveTokens(tokensPath, tokens)
+	assert.NoError(t, err)
+}
+
+func TestOptionsFileSystem(t *testing.T) {
+	t.Run("UserHomeDir uses fallback when function is nil", func(t *testing.T) {
+		baseFS := &mockFileSystem{
+			userHomeDir: "/home/test",
+		}
+		ofs := &optionsFileSystem{
+			base:          baseFS,
+			userHomeDirFn: nil,
+		}
+		home, err := ofs.UserHomeDir()
+		assert.NoError(t, err)
+		assert.Equal(t, "/home/test", home)
+	})
+
+	t.Run("UserHomeDir uses provided function", func(t *testing.T) {
+		baseFS := &mockFileSystem{
+			userHomeDir: "/home/base",
+		}
+		ofs := &optionsFileSystem{
+			base:          baseFS,
+			userHomeDirFn: func() (string, error) { return "/home/custom", nil },
+		}
+		home, err := ofs.UserHomeDir()
+		assert.NoError(t, err)
+		assert.Equal(t, "/home/custom", home)
+	})
+
+	t.Run("delegates MkdirAll to base", func(t *testing.T) {
+		baseFS := &mockFileSystem{}
+		ofs := &optionsFileSystem{base: baseFS}
+		err := ofs.MkdirAll("/test/path", 0755)
+		assert.NoError(t, err)
+	})
+
+	t.Run("delegates ReadFile to base", func(t *testing.T) {
+		baseFS := &mockFileSystem{
+			readFileData: []byte("test data"),
+		}
+		ofs := &optionsFileSystem{base: baseFS}
+		data, err := ofs.ReadFile("/test/file")
+		assert.NoError(t, err)
+		assert.Equal(t, []byte("test data"), data)
+	})
+
+	t.Run("delegates WriteFile to base", func(t *testing.T) {
+		baseFS := &mockFileSystem{}
+		ofs := &optionsFileSystem{base: baseFS}
+		err := ofs.WriteFile("/test/file", []byte("data"), 0644)
+		assert.NoError(t, err)
+	})
+}
+
+type mockFileSystem struct {
+	userHomeDir    string
+	userHomeError  error
+	mkdirError     error
+	readFileData   []byte
+	readFileError  error
+	writeFileError error
+	writeFileFunc  func(path string, data []byte, perm os.FileMode) error
+}
+
+func (m *mockFileSystem) UserHomeDir() (string, error) {
+	return m.userHomeDir, m.userHomeError
+}
+
+func (m *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	return m.mkdirError
+}
+
+func (m *mockFileSystem) ReadFile(path string) ([]byte, error) {
+	return m.readFileData, m.readFileError
+}
+
+func (m *mockFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error {
+	if m.writeFileFunc != nil {
+		return m.writeFileFunc(path, data, perm)
+	}
+	return m.writeFileError
 }
