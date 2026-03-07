@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -499,4 +500,66 @@ func TestClient_setCookies_Empty(t *testing.T) {
 
 	_, err := client.GetUsers()
 	require.NoError(t, err)
+}
+
+func TestClient_LoadTokensFromFile(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tokensFile := tmpDir + "/auth-tokens.json"
+		tokens := map[string]interface{}{
+			"hg_login":   "test-hg-login",
+			"xsrf_token": "test-xsrf-token",
+			"expires_at": time.Now().Add(8 * time.Hour).Format(time.RFC3339),
+		}
+		data, _ := json.Marshal(tokens)
+		err := os.WriteFile(tokensFile, data, 0600)
+		require.NoError(t, err)
+
+		client := NewClient()
+		err = client.LoadTokensFromFile(tokensFile)
+
+		require.NoError(t, err)
+		assert.Equal(t, "test-hg-login", client.hgLogin)
+		assert.Equal(t, "test-xsrf-token", client.xsrfToken)
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		client := NewClient()
+		err := client.LoadTokensFromFile("/nonexistent/path/tokens.json")
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read tokens file")
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tokensFile := tmpDir + "/auth-tokens.json"
+		err := os.WriteFile(tokensFile, []byte("invalid json"), 0600)
+		require.NoError(t, err)
+
+		client := NewClient()
+		err = client.LoadTokensFromFile(tokensFile)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse tokens")
+	})
+
+	t.Run("expired tokens", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tokensFile := tmpDir + "/auth-tokens.json"
+		tokens := map[string]interface{}{
+			"hg_login":   "test-hg-login",
+			"xsrf_token": "test-xsrf-token",
+			"expires_at": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+		}
+		data, _ := json.Marshal(tokens)
+		err := os.WriteFile(tokensFile, data, 0600)
+		require.NoError(t, err)
+
+		client := NewClient()
+		err = client.LoadTokensFromFile(tokensFile)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "tokens have expired")
+	})
 }

@@ -17,6 +17,7 @@ type Config struct {
 	// Hourglass API Authentication
 	HourglassXSRFToken string `env:"HOURGLASS_XSRF_TOKEN"`
 	HourglassHGLogin   string `env:"HOURGLASS_HGLOGIN_COOKIE"`
+	TokensPath         string `env:"TOKENS_PATH"`
 	// Playwright Authentication
 	HourglassEmail    string `env:"HOURGLASS_EMAIL"`
 	HourglassPassword string `env:"HOURGLASS_PASSWORD"`

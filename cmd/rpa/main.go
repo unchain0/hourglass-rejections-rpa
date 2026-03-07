@@ -132,11 +132,29 @@ func setupSentry(cfg *config.Config) *sentry.Client {
 
 func setupDependencies(cfg *config.Config) (*api.Client, *api.APIAnalyzer, *storage.FileStorage) {
 	apiClient := api.NewClient()
-	if cfg.HourglassXSRFToken != "" {
+
+	if cfg.HourglassXSRFToken != "" && cfg.HourglassHGLogin != "" {
 		apiClient.SetXSRFToken(cfg.HourglassXSRFToken)
-	}
-	if cfg.HourglassHGLogin != "" {
 		apiClient.SetHGLogin(cfg.HourglassHGLogin)
+		slog.Info("using tokens from environment variables")
+	} else {
+		tokensPath := cfg.TokensPath
+		if tokensPath == "" {
+			tokensPath = os.Getenv("TOKENS_PATH")
+		}
+		if tokensPath == "" {
+			if homeDir, err := os.UserHomeDir(); err == nil {
+				tokensPath = filepath.Join(homeDir, ".hourglass-rpa", "auth-tokens.json")
+			}
+		}
+
+		if tokensPath != "" {
+			if err := apiClient.LoadTokensFromFile(tokensPath); err != nil {
+				slog.Warn("failed to load tokens from file", "path", tokensPath, "error", err)
+			} else {
+				slog.Info("loaded tokens from file", "path", tokensPath)
+			}
+		}
 	}
 
 	analyzer := api.NewAPIAnalyzer(apiClient)

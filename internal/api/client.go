@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"os"
 	"time"
 
 	"hourglass-rejections-rpa/internal/auth/webauthn"
@@ -38,6 +39,27 @@ func NewClient() *Client {
 		baseURL:     defaultBaseURL,
 		useWebAuthn: false,
 	}
+}
+
+// LoadTokensFromFile loads authentication tokens from a JSON file.
+func (c *Client) LoadTokensFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read tokens file: %w", err)
+	}
+
+	var tokens webauthn.AuthTokens
+	if err := json.Unmarshal(data, &tokens); err != nil {
+		return fmt.Errorf("failed to parse tokens: %w", err)
+	}
+
+	if tokens.IsExpired() {
+		return fmt.Errorf("tokens have expired")
+	}
+
+	c.hgLogin = tokens.HGLogin
+	c.xsrfToken = tokens.XSRFToken
+	return nil
 }
 
 // NewClientWithWebAuthn creates a new Hourglass API client with WebAuthn authentication.
