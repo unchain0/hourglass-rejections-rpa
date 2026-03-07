@@ -45,7 +45,6 @@ type tokenRefresher struct {
 	fs         FileSystem
 	httpClient HTTPClient
 	baseURL    string
-	osExit     func(int)
 }
 
 func newTokenRefresher() *tokenRefresher {
@@ -53,15 +52,16 @@ func newTokenRefresher() *tokenRefresher {
 		fs:         &osFileSystem{},
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		baseURL:    "https://app.hourglass-app.com",
-		osExit:     os.Exit,
 	}
 }
+
+var osExit = os.Exit
 
 func main() {
 	tr := newTokenRefresher()
 	if err := tr.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-		tr.osExit(1)
+		osExit(1)
 	}
 }
 

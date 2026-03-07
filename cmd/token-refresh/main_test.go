@@ -33,7 +33,6 @@ func TestTokenRefresher_Run_Success(t *testing.T) {
 		fs:         mockFS,
 		httpClient: mockHTTP,
 		baseURL:    "https://app.hourglass-app.com",
-		osExit:     func(int) {},
 	}
 
 	err := tr.Run()
@@ -46,8 +45,7 @@ func TestTokenRefresher_Run_HomeDirError(t *testing.T) {
 	mockFS.HomeDirErr = errors.New("home dir error")
 
 	tr := &tokenRefresher{
-		fs:     mockFS,
-		osExit: func(int) {},
+		fs: mockFS,
 	}
 
 	err := tr.Run()
@@ -159,7 +157,6 @@ func TestNewTokenRefresher_Defaults(t *testing.T) {
 	assert.NotNil(t, tr.fs)
 	assert.NotNil(t, tr.httpClient)
 	assert.Equal(t, "https://app.hourglass-app.com", tr.baseURL)
-	assert.NotNil(t, tr.osExit)
 }
 
 func TestTokenRefresher_loadTokens(t *testing.T) {
@@ -286,8 +283,7 @@ func TestTokenRefresher_Run_InvalidJSON(t *testing.T) {
 	mockFS.Files["/home/test/.hourglass-rpa/auth-tokens.json"] = []byte(`invalid json`)
 
 	tr := &tokenRefresher{
-		fs:     mockFS,
-		osExit: func(int) {},
+		fs: mockFS,
 	}
 
 	err := tr.Run()
@@ -309,7 +305,6 @@ func TestTokenRefresher_Run_HTTPError(t *testing.T) {
 	tr := &tokenRefresher{
 		fs:         mockFS,
 		httpClient: mockHTTP,
-		osExit:     func(int) {},
 	}
 
 	err := tr.Run()
@@ -331,7 +326,6 @@ func TestTokenRefresher_Run_Non200Status(t *testing.T) {
 	tr := &tokenRefresher{
 		fs:         mockFS,
 		httpClient: mockHTTP,
-		osExit:     func(int) {},
 	}
 
 	err := tr.Run()
@@ -358,7 +352,6 @@ func TestTokenRefresher_Run_SaveError(t *testing.T) {
 	tr := &tokenRefresher{
 		fs:         mockFS,
 		httpClient: mockHTTP,
-		osExit:     func(int) {},
 	}
 
 	err := tr.Run()

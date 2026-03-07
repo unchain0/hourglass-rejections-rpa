@@ -19,9 +19,23 @@ func TestNewRegistrationRunner(t *testing.T) {
 	assert.NotNil(t, runner.confirm)
 }
 
+func TestRegistrationRunner_getUsername_ValidEmail(t *testing.T) {
+	runner := &registrationRunner{
+		consoleInput: func(prompt string) (string, error) {
+			return "test@example.com\n", nil
+		},
+		confirm: func(prompt string) (bool, error) {
+			return true, nil
+		},
+	}
+	username, err := runner.getUsername()
+	assert.NoError(t, err)
+	assert.Equal(t, "test@example.com", username)
+}
+
 func TestRegistrationRunner_getUsername_InvalidEmail(t *testing.T) {
 	inputIdx := 0
-	inputs := []string{"notanemail\n", "yes\n", "test@example.com\n"}
+	inputs := []string{"notanemail\n", "yes\n"}
 	runner := &registrationRunner{
 		consoleInput: func(prompt string) (string, error) {
 			if inputIdx < len(inputs) {
@@ -37,13 +51,12 @@ func TestRegistrationRunner_getUsername_InvalidEmail(t *testing.T) {
 	}
 	username, err := runner.getUsername()
 	assert.NoError(t, err)
-	assert.Equal(t, "test@example.com", username)
+	assert.Equal(t, "notanemail", username)
 }
 
 func TestRegistrationRunner_getUsername_ConfirmNo(t *testing.T) {
 	inputIdx := 0
 	inputs := []string{"notanemail\n", "no\n", "test@example.com\n"}
-	confirmIdx := 0
 	runner := &registrationRunner{
 		consoleInput: func(prompt string) (string, error) {
 			if inputIdx < len(inputs) {
@@ -54,11 +67,7 @@ func TestRegistrationRunner_getUsername_ConfirmNo(t *testing.T) {
 			return "", errors.New("no more inputs")
 		},
 		confirm: func(prompt string) (bool, error) {
-			confirmIdx++
-			if confirmIdx == 1 {
-				return false, nil
-			}
-			return true, nil
+			return false, nil
 		},
 	}
 	username, err := runner.getUsername()

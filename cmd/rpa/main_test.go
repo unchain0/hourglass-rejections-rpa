@@ -537,4 +537,12 @@ func TestCaptureError(t *testing.T) {
 			captureError(fmt.Errorf("test error"), nil)
 		})
 	})
+
+	t.Run("with enabled sentry client", func(t *testing.T) {
+		mockClient := &sentry.Client{}
+		sentryClientGlobal = mockClient
+		assert.NotPanics(t, func() {
+			captureError(fmt.Errorf("test error"), map[string]interface{}{"key": "value"})
+		})
+	})
 }
