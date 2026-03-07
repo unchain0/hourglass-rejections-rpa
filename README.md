@@ -232,26 +232,11 @@ When deploying to Coolify:
 
 **Note:** With this method, you'll need to manually update tokens when they expire (every ~8 hours).
 
-### WebAuthn Configuration
-
-Environment variables for WebAuthn mode:
-
-```bash
-# Path to credentials file (optional, has default)
-WEBAUTHN_CREDENTIALS_PATH=/home/user/.hourglass-rpa/webauthn-credentials.json
-
-# Path to tokens file (optional, has default)
-WEBAUTHN_TOKENS_PATH=/home/user/.hourglass-rpa/auth-tokens.json
-
-# Chrome binary path (optional, auto-detected)
-CHROME_BIN=/usr/bin/chromium-browser
-```
-
 ### Security Notes
 
-- Credentials are stored with `0600` permissions (owner-only)
-- Each environment needs its own registration
-- Back up your credentials file - losing it requires re-registration
+- Tokens are stored with `0600` permissions (owner-only)
+- Each environment needs its own token file
+- Back up your tokens file - losing it requires re-authentication
 - Tokens are renewed automatically before expiry (1-hour threshold)
 
 ## 🎮 Usage
