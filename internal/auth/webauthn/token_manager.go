@@ -95,6 +95,7 @@ func NewTokenManager(storagePath, baseURL string, opts ...TokenManagerOption) (*
 
 	tm := &TokenManager{
 		authenticator:    authenticator,
+		browserAuth:      NewBrowserAuth(baseURL),
 		storagePath:      storagePath,
 		tokensPath:       tokensPath,
 		baseURL:          baseURL,
@@ -246,20 +247,18 @@ func (tm *TokenManager) LoadTokens() (*AuthTokens, error) {
 }
 
 func (tm *TokenManager) authenticateWithFallback() (*AuthTokens, error) {
+	if tm.browserAuth != nil {
+		slog.Info("using browser authentication")
+		tokens, err := tm.browserAuth.Authenticate()
+		if err == nil {
+			return tokens, nil
+		}
+		slog.Error("browser authentication failed", "error", err)
+	}
+
 	tokens, err := tm.authenticator.Authenticate()
-	if err == nil {
-		return tokens, nil
-	}
-
-	nativeErr := err
-	if tm.browserAuth == nil {
-		return nil, fmt.Errorf("native authentication failed: %w", nativeErr)
-	}
-
-	slog.Info("native authentication failed, trying browser auth fallback", "error", nativeErr)
-	tokens, err = tm.browserAuth.Authenticate()
 	if err != nil {
-		return nil, fmt.Errorf("browser auth fallback failed after native authentication error (%v): %w", nativeErr, err)
+		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
 	return tokens, nil

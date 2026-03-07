@@ -258,17 +258,17 @@ func TestAPIAnalyzer_AnalyzeAllSections(t *testing.T) {
 	pathAva := fmt.Sprintf("/scheduling/notifications/%s_%s/ava", startRange, endRange)
 	pathFm := fmt.Sprintf("/scheduling/notifications/%s_%s/fm", startRange, endRange)
 	pathPubwit := fmt.Sprintf("/scheduling/notifications/%s_%s/pubwit", startRange, endRange)
- pathMm := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
- meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
+	pathMm := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
+	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
- case pathAva, pathFm, pathPubwit, pathMm:
- json.NewEncoder(w).Encode([]Notification{})
- case meetingPath:
- json.NewEncoder(w).Encode([]Meeting{})
+		case pathAva, pathFm, pathPubwit, pathMm:
+			json.NewEncoder(w).Encode([]Notification{})
+		case meetingPath:
+			json.NewEncoder(w).Encode([]Meeting{})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -281,11 +281,11 @@ func TestAPIAnalyzer_AnalyzeAllSections(t *testing.T) {
 
 	results, err := analyzer.AnalyzeAllSections()
 	require.NoError(t, err)
- assert.Len(t, results, 4)
- assert.Equal(t, "Partes Mecânicas", results[0].Secao)
- assert.Equal(t, "Campo", results[1].Secao)
- assert.Equal(t, "Testemunho Público", results[2].Secao)
- assert.Equal(t, "Reunião Meio de Semana", results[3].Secao)
+	assert.Len(t, results, 4)
+	assert.Equal(t, "Partes Mecânicas", results[0].Secao)
+	assert.Equal(t, "Campo", results[1].Secao)
+	assert.Equal(t, "Testemunho Público", results[2].Secao)
+	assert.Equal(t, "Reunião Meio de Semana", results[3].Secao)
 }
 
 func TestAPIAnalyzer_GetUserName(t *testing.T) {
@@ -487,7 +487,7 @@ func TestAPIAnalyzer_AnalyzeAllSections_WithError(t *testing.T) {
 
 	results, err := analyzer.AnalyzeAllSections()
 	require.NoError(t, err)
- assert.Len(t, results, 4)
+	assert.Len(t, results, 4)
 	// All sections should have errors
 	for _, result := range results {
 		assert.Error(t, result.Error)
@@ -529,7 +529,7 @@ func TestGetMidweekFlagName(t *testing.T) {
 func TestGetFriendlyTypeName(t *testing.T) {
 	tests := []struct {
 		typeName string
-		expected  string
+		expected string
 	}{
 		{"video", "Vídeo"},
 		{"console", "Console"},

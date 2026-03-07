@@ -215,4 +215,3 @@ func TestParseLevel_EmptyString(t *testing.T) {
 		t.Errorf("parseLevel(\"\") = %v, want info", got)
 	}
 }
-

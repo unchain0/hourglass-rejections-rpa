@@ -137,6 +137,123 @@ OUTPUT_DIR=./outputs
 5. Access: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
 6. Look for your `chat.id` in the response
 
+## 🔐 VPS Setup (Automatic Token Renewal)
+
+For **VPS/Server deployment**, the system can automatically manage authentication tokens without manual intervention.
+
+### How It Works
+
+1. You authenticate **once** on your local machine using the browser
+2. Tokens are saved and copied to your VPS
+3. The system automatically renews tokens before they expire (8-hour lifetime)
+4. No manual intervention needed on the VPS
+
+### Quick Setup
+
+#### 1. On Your Local Machine (with browser)
+
+Install Chrome/Chromium if not already installed, then run:
+
+```bash
+make save-tokens
+```
+
+This will:
+- Open a Chrome window
+- Navigate to Hourglass login page
+- Extract authentication tokens after you log in
+- Save tokens to `~/.hourglass-rpa/auth-tokens.json`
+
+#### 2. Copy Tokens to Your VPS
+
+**Option A - If your VPS uses SSH keys:**
+```bash
+make copy-to-vps VPS=user@your-vps.com
+```
+
+**Option B - If your VPS uses password authentication:**
+```bash
+make copy-to-vps-password VPS=user@your-vps.com
+```
+
+**Option C - Manual copy:**
+```bash
+# Show token content
+cat ~/.hourglass-rpa/auth-tokens.json
+
+# Copy the output, then on your VPS:
+mkdir -p ~/.hourglass-rpa
+nano ~/.hourglass-rpa/auth-tokens.json
+# Paste and save (Ctrl+X, Y, Enter)
+```
+
+#### 3. Configure Environment Variables
+
+On your VPS, create/edit the `.env` file:
+
+```bash
+# Required - Telegram
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_WHITELIST=your_chat_id
+
+# Optional - Token paths (defaults work fine)
+TOKENS_PATH=/home/user/.hourglass-rpa/auth-tokens.json
+AUTO_REFRESH_TOKENS=true
+REFRESH_INTERVAL=6h
+```
+
+#### 4. Run the Application
+
+```bash
+./rpa
+```
+
+The application will automatically load tokens and refresh them as needed.
+
+### Coolify Deployment
+
+When deploying to Coolify:
+
+1. **Set Environment Variables** in Coolify dashboard:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_WHITELIST`
+   - `TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json`
+
+2. **Mount Volume**:
+   - Host: `/home/user/.hourglass-rpa`
+   - Container: `/home/rpa/.hourglass-rpa`
+
+3. **Copy tokens to server** before deploying:
+   ```bash
+   scp ~/.hourglass-rpa/auth-tokens.json user@coolify-server:/home/user/.hourglass-rpa/
+   ```
+
+4. Deploy normally through Coolify dashboard
+
+**Note:** With this method, you'll need to manually update tokens when they expire (every ~8 hours).
+
+### WebAuthn Configuration
+
+Environment variables for WebAuthn mode:
+
+```bash
+# Path to credentials file (optional, has default)
+WEBAUTHN_CREDENTIALS_PATH=/home/user/.hourglass-rpa/webauthn-credentials.json
+
+# Path to tokens file (optional, has default)
+WEBAUTHN_TOKENS_PATH=/home/user/.hourglass-rpa/auth-tokens.json
+
+# Chrome binary path (optional, auto-detected)
+CHROME_BIN=/usr/bin/chromium-browser
+```
+
+### Security Notes
+
+- Credentials are stored with `0600` permissions (owner-only)
+- Each environment needs its own registration
+- Back up your credentials file - losing it requires re-registration
+- Tokens are renewed automatically before expiry (1-hour threshold)
+
 ## 🎮 Usage
 
 ### Single Run Mode

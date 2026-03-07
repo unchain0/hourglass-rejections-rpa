@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,17 +61,32 @@ func NewClientWithWebAuthn(credentialsPath string) (*Client, error) {
 	return client, nil
 }
 
-// EnableWebAuthn enables WebAuthn authentication with auto-renewal.
 func (c *Client) EnableWebAuthn(credentialsPath string) error {
-	tokenManager, err := webauthn.NewTokenManager(credentialsPath, c.baseURL)
+	tokenManager, err := webauthn.NewTokenManager(credentialsPath, c.baseURL,
+		webauthn.WithOnTokenRenewed(func(tokens *webauthn.AuthTokens) {
+			c.UpdateTokensFromManager(tokens)
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create token manager: %w", err)
 	}
 
-	tokenManager.Start(nil)
 	c.tokenManager = tokenManager
 	c.useWebAuthn = true
 	return nil
+}
+
+func (c *Client) StartTokenManager(ctx context.Context) error {
+	if c.tokenManager == nil {
+		return nil
+	}
+	return c.tokenManager.Start(ctx)
+}
+
+func (c *Client) StopTokenManager() {
+	if c.tokenManager != nil {
+		c.tokenManager.Stop()
+	}
 }
 
 // ensureAuth ensures valid authentication tokens are available.
@@ -84,9 +100,17 @@ func (c *Client) ensureAuth() error {
 		return fmt.Errorf("failed to ensure authentication: %w", err)
 	}
 
+	c.updateTokens(tokens)
+	return nil
+}
+
+func (c *Client) updateTokens(tokens *webauthn.AuthTokens) {
 	c.hgLogin = tokens.HGLogin
 	c.xsrfToken = tokens.XSRFToken
-	return nil
+}
+
+func (c *Client) UpdateTokensFromManager(tokens *webauthn.AuthTokens) {
+	c.updateTokens(tokens)
 }
 
 // SetHGLogin sets the hglogin cookie for authenticated requests.

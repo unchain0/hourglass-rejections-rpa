@@ -85,7 +85,7 @@ tidy:
 ## clean: Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME) $(TOKEN_REFRESH_NAME)
+	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME) $(TOKEN_REFRESH_NAME) register-webauthn
 	@rm -f coverage.out coverage.html
 
 ## run: Run the application (requires .env)
@@ -103,7 +103,7 @@ save-tokens: build-save-tokens
 	@echo "Running save-tokens..."
 	./$(SAVE_TOKENS_NAME)
 
-## token-refresh: Try to refresh tokens automatically without WebAuthn
+## token-refresh: Try to refresh tokens automatically
 ## Usage: make token-refresh
 token-refresh: build-token-refresh
 	@echo "Running token-refresh..."

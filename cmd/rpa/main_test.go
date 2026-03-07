@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"hourglass-rejections-rpa/internal/api"
 	"hourglass-rejections-rpa/internal/config"
 	"hourglass-rejections-rpa/internal/sentry"
@@ -357,7 +356,10 @@ func TestSetupDependencies(t *testing.T) {
 		HourglassHGLogin:   "test-login",
 	}
 
-	analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store := setupDependencies(cfg)
+	if apiClient == nil {
+		t.Error("setupDependencies should return an apiClient")
+	}
 	if analyzer == nil {
 		t.Error("setupDependencies should return an analyzer")
 	}
@@ -369,7 +371,10 @@ func TestSetupDependencies(t *testing.T) {
 func TestSetupDependencies_NoTokens(t *testing.T) {
 	cfg := &config.Config{}
 
-	analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store := setupDependencies(cfg)
+	if apiClient == nil {
+		t.Error("setupDependencies should return an apiClient")
+	}
 	if analyzer == nil {
 		t.Error("setupDependencies should return an analyzer")
 	}
@@ -530,56 +535,6 @@ func TestCaptureError(t *testing.T) {
 		sentryClientGlobal = &sentry.Client{}
 		assert.NotPanics(t, func() {
 			captureError(fmt.Errorf("test error"), nil)
-		})
-	})
-}
-
-func TestRunTokenRefresh(t *testing.T) {
-	t.Run("tokens file not found", func(t *testing.T) {
-		origHome := os.Getenv("HOME")
-		defer func() { _ = os.Setenv("HOME", origHome) }()
-		_ = os.Setenv("HOME", t.TempDir())
-
-		err := runTokenRefresh()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "tokens file not found")
-	})
-
-	t.Run("tokens file exists", func(t *testing.T) {
-		tempDir := t.TempDir()
-		tokensDir := filepath.Join(tempDir, ".hourglass-rpa")
-		require.NoError(t, os.MkdirAll(tokensDir, 0750))
-		require.NoError(t, os.WriteFile(filepath.Join(tokensDir, "auth-tokens.json"), []byte("{}"), 0600))
-
-		origHome := os.Getenv("HOME")
-		defer func() { _ = os.Setenv("HOME", origHome) }()
-		_ = os.Setenv("HOME", tempDir)
-
-		err := runTokenRefresh()
-		assert.NoError(t, err)
-	})
-
-	t.Run("with custom tokens path", func(t *testing.T) {
-		tempDir := t.TempDir()
-		customPath := filepath.Join(tempDir, "custom-tokens.json")
-		require.NoError(t, os.WriteFile(customPath, []byte("{}"), 0600))
-
-		origPath := os.Getenv("TOKENS_PATH")
-		defer func() { _ = os.Setenv("TOKENS_PATH", origPath) }()
-		_ = os.Setenv("TOKENS_PATH", customPath)
-
-		err := runTokenRefresh()
-		assert.NoError(t, err)
-	})
-}
-
-func TestStartAutoTokenRefresh(t *testing.T) {
-	t.Run("cancels immediately", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		assert.NotPanics(t, func() {
-			startAutoTokenRefresh(ctx)
 		})
 	})
 }

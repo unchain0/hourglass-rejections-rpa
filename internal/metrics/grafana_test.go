@@ -111,7 +111,6 @@ func TestClient_IsEnabled(t *testing.T) {
 	}
 }
 
-
 func TestClient_RecordJobCompletion_Enabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-api-key" {
@@ -147,7 +146,6 @@ func TestClient_RecordJobCompletion_Enabled(t *testing.T) {
 	}
 }
 
-
 func TestClient_RecordDailyStats_Enabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-api-key" {
@@ -173,7 +171,7 @@ func TestClient_RecordDailyStats_Enabled(t *testing.T) {
 	stats := &domain.DailyStats{
 		Date:      time.Now(),
 		TotalJobs: 6,
-		TotalRej: 42,
+		TotalRej:  42,
 		Sections: map[string]int{
 			"Section1": 20,
 			"Section2": 22,
@@ -185,7 +183,6 @@ func TestClient_RecordDailyStats_Enabled(t *testing.T) {
 		t.Errorf("RecordDailyStats() error = %v", err)
 	}
 }
-
 
 func TestClient_pushMetrics_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +268,6 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
-
 
 func TestClient_pushMetrics_CreateRequestError(t *testing.T) {
 	// Use an invalid URL that causes NewRequestWithContext to fail
