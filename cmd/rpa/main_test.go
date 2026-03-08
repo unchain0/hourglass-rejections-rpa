@@ -383,6 +383,96 @@ func TestSetupDependencies_NoTokens(t *testing.T) {
 	}
 }
 
+func TestSetupDependencies_WithTokensPathEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	tokensPath := filepath.Join(tmpDir, "auth-tokens.json")
+
+	// Create a valid tokens file
+	tokens := `{"xsrf_token":"test-token","hg_login":"test-login","expires_at":"2099-01-01T00:00:00Z"}`
+	if err := os.WriteFile(tokensPath, []byte(tokens), 0644); err != nil {
+		t.Fatalf("failed to create tokens file: %v", err)
+	}
+
+	origEnv := os.Getenv("TOKENS_PATH")
+	os.Setenv("TOKENS_PATH", tokensPath)
+	defer os.Setenv("TOKENS_PATH", origEnv)
+
+	cfg := &config.Config{}
+
+	apiClient, analyzer, store := setupDependencies(cfg)
+	if apiClient == nil {
+		t.Error("setupDependencies should return an apiClient")
+	}
+	if analyzer == nil {
+		t.Error("setupDependencies should return an analyzer")
+	}
+	if store == nil {
+		t.Error("setupDependencies should return a store")
+	}
+}
+
+func TestSetupDependencies_NoHomeDir(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	os.Unsetenv("HOME")
+	defer os.Setenv("HOME", origHome)
+
+	origUserProfile := os.Getenv("USERPROFILE")
+	os.Unsetenv("USERPROFILE")
+	defer os.Setenv("USERPROFILE", origUserProfile)
+
+	origHomeDrive := os.Getenv("HOMEDRIVE")
+	origHomePath := os.Getenv("HOMEPATH")
+	os.Unsetenv("HOMEDRIVE")
+	os.Unsetenv("HOMEPATH")
+	defer func() {
+		if origHomeDrive != "" {
+			os.Setenv("HOMEDRIVE", origHomeDrive)
+		}
+		if origHomePath != "" {
+			os.Setenv("HOMEPATH", origHomePath)
+		}
+	}()
+
+	cfg := &config.Config{}
+
+	apiClient, analyzer, store := setupDependencies(cfg)
+	if apiClient == nil {
+		t.Error("setupDependencies should return an apiClient even without home dir")
+	}
+	if analyzer == nil {
+		t.Error("setupDependencies should return an analyzer")
+	}
+	if store == nil {
+		t.Error("setupDependencies should return a store")
+	}
+}
+
+func TestSetupDependencies_InvalidTokensFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	invalidTokensPath := filepath.Join(tmpDir, "invalid-tokens.json")
+
+	if err := os.WriteFile(invalidTokensPath, []byte("invalid json"), 0644); err != nil {
+		t.Fatalf("failed to create invalid tokens file: %v", err)
+	}
+
+	origEnv := os.Getenv("TOKENS_PATH")
+	os.Setenv("TOKENS_PATH", invalidTokensPath)
+	defer os.Setenv("TOKENS_PATH", origEnv)
+
+	cfg := &config.Config{}
+
+	apiClient, analyzer, store := setupDependencies(cfg)
+	if apiClient == nil {
+		t.Error("setupDependencies should return an apiClient even with invalid tokens file")
+	}
+	if analyzer == nil {
+		t.Error("setupDependencies should return an analyzer")
+	}
+	if store == nil {
+		t.Error("setupDependencies should return a store")
+	}
+}
+
 func TestRunOnceMode(t *testing.T) {
 	cfg := &config.Config{}
 	sentryClient := &sentry.Client{}
@@ -543,6 +633,25 @@ func TestCaptureError(t *testing.T) {
 		sentryClientGlobal = mockClient
 		assert.NotPanics(t, func() {
 			captureError(fmt.Errorf("test error"), map[string]interface{}{"key": "value"})
+		})
+	})
+
+	// Test with actually enabled sentry client (requires valid DSN format)
+	t.Run("with truly enabled sentry client", func(t *testing.T) {
+		// Create a client with a valid-looking DSN to enable it
+		enabledClient, err := sentry.New(sentry.Config{
+			DSN:         "https://abc123@test.sentry.io/123456",
+			Environment: "test",
+			Release:     "1.0.0",
+		})
+		if err != nil {
+			t.Skipf("Skipping test: could not create enabled sentry client: %v", err)
+		}
+		defer enabledClient.Close()
+
+		sentryClientGlobal = enabledClient
+		assert.NotPanics(t, func() {
+			captureError(fmt.Errorf("test error with enabled sentry"), map[string]interface{}{"test": "data"})
 		})
 	})
 }

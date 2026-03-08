@@ -52,6 +52,18 @@ func TestRejectionCache_HasChanges_FirstCheckEmpty(t *testing.T) {
 	}
 }
 
+func TestRejectionCache_HasChanges_FirstCheckNilSlice(t *testing.T) {
+	c := New()
+
+	if c.HasChanges(nil) {
+		t.Error("first check with nil rejections should return false")
+	}
+
+	if c.lastCheck.IsZero() {
+		t.Error("lastCheck should be set for nil input")
+	}
+}
+
 func TestRejectionCache_HasChanges_SameResults(t *testing.T) {
 	c := New()
 	rejections := []domain.Rejeicao{

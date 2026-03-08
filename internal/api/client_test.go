@@ -618,3 +618,202 @@ func TestClient_EnableWebAuthn_InvalidCredentialsPath(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create token manager")
 }
+
+func TestNewClientWithWebAuthn_Success(t *testing.T) {
+	credentialsPath := t.TempDir() + "/webauthn-credentials.json"
+
+	client, err := NewClientWithWebAuthn(credentialsPath)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.True(t, client.useWebAuthn)
+	assert.NotNil(t, client.tokenManager)
+	assert.Equal(t, defaultBaseURL, client.baseURL)
+}
+
+func TestClient_EnableWebAuthn_Success(t *testing.T) {
+	client := NewClient()
+	credentialsPath := t.TempDir() + "/webauthn-credentials.json"
+
+	err := client.EnableWebAuthn(credentialsPath)
+
+	require.NoError(t, err)
+	assert.True(t, client.useWebAuthn)
+	assert.NotNil(t, client.tokenManager)
+}
+
+func TestClient_EnableWebAuthn_CallbackUpdatesTokensOnStart(t *testing.T) {
+	tmpDir := t.TempDir()
+	credentialsPath := tmpDir + "/webauthn-credentials.json"
+	tokensPath := tmpDir + "/auth-tokens.json"
+	tokens := &webauthn.AuthTokens{
+		HGLogin:   "callback-hg-login",
+		XSRFToken: "callback-xsrf-token",
+		ExpiresAt: time.Now().Add(2 * time.Hour),
+	}
+	data, err := json.Marshal(tokens)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(tokensPath, data, 0o600))
+
+	client := NewClient()
+	err = client.EnableWebAuthn(credentialsPath)
+	require.NoError(t, err)
+
+	err = client.StartTokenManager(t.Context())
+	require.NoError(t, err)
+
+	assert.Equal(t, "callback-hg-login", client.hgLogin)
+	assert.Equal(t, "callback-xsrf-token", client.xsrfToken)
+}
+
+func TestClient_StartTokenManager_Success(t *testing.T) {
+	client := NewClient()
+	tm := newTokenManagerWithPersistedTokens(t, &webauthn.AuthTokens{
+		HGLogin:   "persisted-hg-login",
+		XSRFToken: "persisted-xsrf-token",
+		ExpiresAt: time.Now().Add(2 * time.Hour),
+	})
+	client.tokenManager = tm
+
+	err := client.StartTokenManager(t.Context())
+
+	require.NoError(t, err)
+	stored := tm.GetTokens()
+	require.NotNil(t, stored)
+	assert.Equal(t, "persisted-hg-login", stored.HGLogin)
+}
+
+func TestClient_StartTokenManager_ErrorFromManager(t *testing.T) {
+	client := NewClient()
+	tmpDir := t.TempDir()
+	credentialsPath := tmpDir + "/webauthn-credentials.json"
+	tokensDir := tmpDir + "/tokens-dir"
+	require.NoError(t, os.Mkdir(tokensDir, 0o700))
+
+	tm, err := webauthn.NewTokenManager(credentialsPath, defaultBaseURL,
+		webauthn.WithBrowserAuth(nil),
+		webauthn.WithTokensPath(tokensDir),
+	)
+	require.NoError(t, err)
+	client.tokenManager = tm
+
+	err = client.StartTokenManager(t.Context())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load persisted tokens")
+}
+
+func TestClient_StopTokenManager_WithManager(t *testing.T) {
+	client := NewClient()
+	tm := newTokenManagerWithPersistedTokens(t, nil)
+	client.tokenManager = tm
+
+	client.StopTokenManager()
+}
+
+func TestClient_EnsureAuth_ErrorWhenTokenRenewalFails(t *testing.T) {
+	client := newWebAuthnClientWithoutPersistedTokens(t)
+
+	err := client.ensureAuth()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to ensure authentication")
+}
+
+func TestClient_EnsureAuth_UpdatesTokensFromManager(t *testing.T) {
+	client := NewClient()
+	tm := newTokenManagerWithPersistedTokens(t, &webauthn.AuthTokens{
+		HGLogin:   "manager-hg-login",
+		XSRFToken: "manager-xsrf-token",
+		ExpiresAt: time.Now().Add(2 * time.Hour),
+	})
+	client.tokenManager = tm
+	client.useWebAuthn = true
+
+	require.NoError(t, client.StartTokenManager(t.Context()))
+
+	err := client.ensureAuth()
+
+	require.NoError(t, err)
+	assert.Equal(t, "manager-hg-login", client.hgLogin)
+	assert.Equal(t, "manager-xsrf-token", client.xsrfToken)
+}
+
+func TestClient_GetUsers_EnsureAuthError(t *testing.T) {
+	client := newWebAuthnClientWithoutPersistedTokens(t)
+
+	users, err := client.GetUsers()
+
+	assert.Error(t, err)
+	assert.Nil(t, users)
+	assert.Contains(t, err.Error(), "failed to ensure authentication")
+}
+
+func TestClient_GetAVAttendants_EnsureAuthError(t *testing.T) {
+	client := newWebAuthnClientWithoutPersistedTokens(t)
+
+	attendants, err := client.GetAVAttendants("2026-03-01", "2026-03-07")
+
+	assert.Error(t, err)
+	assert.Nil(t, attendants)
+	assert.Contains(t, err.Error(), "failed to ensure authentication")
+}
+
+func TestClient_GetMeetings_EnsureAuthError(t *testing.T) {
+	client := newWebAuthnClientWithoutPersistedTokens(t)
+
+	meetings, err := client.GetMeetings("2026-03-01", "2026-03-07", 48092)
+
+	assert.Error(t, err)
+	assert.Nil(t, meetings)
+	assert.Contains(t, err.Error(), "failed to ensure authentication")
+}
+
+func TestClient_GetNotifications_EnsureAuthError(t *testing.T) {
+	client := newWebAuthnClientWithoutPersistedTokens(t)
+
+	notifications, err := client.GetNotifications("2026-03-01", "2026-03-31", "pubwit")
+
+	assert.Error(t, err)
+	assert.Nil(t, notifications)
+	assert.Contains(t, err.Error(), "failed to ensure authentication")
+}
+
+func newWebAuthnClientWithoutPersistedTokens(t *testing.T) *Client {
+	t.Helper()
+	client := NewClient()
+	tmpDir := t.TempDir()
+	credentialsPath := tmpDir + "/webauthn-credentials.json"
+	tokensPath := tmpDir + "/auth-tokens.json"
+
+	tm, err := webauthn.NewTokenManager(credentialsPath, defaultBaseURL,
+		webauthn.WithBrowserAuth(nil),
+		webauthn.WithTokensPath(tokensPath),
+	)
+	require.NoError(t, err)
+
+	client.tokenManager = tm
+	client.useWebAuthn = true
+	return client
+}
+
+func newTokenManagerWithPersistedTokens(t *testing.T, tokens *webauthn.AuthTokens) *webauthn.TokenManager {
+	t.Helper()
+	tmpDir := t.TempDir()
+	credentialsPath := tmpDir + "/webauthn-credentials.json"
+	tokensPath := tmpDir + "/auth-tokens.json"
+
+	if tokens != nil {
+		data, err := json.Marshal(tokens)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(tokensPath, data, 0o600))
+	}
+
+	tm, err := webauthn.NewTokenManager(credentialsPath, defaultBaseURL,
+		webauthn.WithBrowserAuth(nil),
+		webauthn.WithTokensPath(tokensPath),
+	)
+	require.NoError(t, err)
+
+	return tm
+}

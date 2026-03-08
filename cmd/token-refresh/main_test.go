@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +14,12 @@ import (
 	"hourglass-rejections-rpa/internal/auth/webauthn"
 	"hourglass-rejections-rpa/internal/testutil"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestTokenRefresher_Run_Success(t *testing.T) {
 	mockFS := testutil.NewMockFileSystem()
@@ -247,6 +255,47 @@ func TestTokenRefresher_tryRefresh(t *testing.T) {
 
 		assert.Error(t, err)
 	})
+
+	t.Run("request creation error", func(t *testing.T) {
+		tr := &tokenRefresher{
+			httpClient: testutil.NewMockHTTPClient(),
+			baseURL:    "http://bad\nurl",
+		}
+
+		tokens := &webauthn.AuthTokens{}
+		_, err := tr.tryRefresh(tokens)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("ignores empty cookie values", func(t *testing.T) {
+		mockHTTP := testutil.NewMockHTTPClient()
+		mockHTTP.Response = &http.Response{
+			StatusCode: 200,
+			Body:       http.NoBody,
+			Header: http.Header{
+				"Set-Cookie": []string{
+					"hglogin=; Path=/",
+					"X-Hourglass-XSRF-Token=; Path=/",
+				},
+			},
+		}
+
+		tr := &tokenRefresher{
+			httpClient: mockHTTP,
+			baseURL:    "https://app.hourglass-app.com",
+		}
+
+		tokens := &webauthn.AuthTokens{
+			HGLogin:   "old-hglogin",
+			XSRFToken: "old-xsrf",
+		}
+
+		newTokens, err := tr.tryRefresh(tokens)
+		require.NoError(t, err)
+		assert.Equal(t, "old-hglogin", newTokens.HGLogin)
+		assert.Equal(t, "old-xsrf", newTokens.XSRFToken)
+	})
 }
 
 func TestTokenRefresher_saveTokens(t *testing.T) {
@@ -274,6 +323,22 @@ func TestTokenRefresher_saveTokens(t *testing.T) {
 
 		err := tr.saveTokens("/tmp/test/tokens.json", tokens)
 		assert.Error(t, err)
+	})
+
+	t.Run("marshal error", func(t *testing.T) {
+		oldMarshal := jsonMarshal
+		jsonMarshal = func(v any) ([]byte, error) {
+			return nil, errors.New("marshal error")
+		}
+		t.Cleanup(func() {
+			jsonMarshal = oldMarshal
+		})
+
+		tr := &tokenRefresher{fs: testutil.NewMockFileSystem()}
+		tokens := &webauthn.AuthTokens{}
+
+		err := tr.saveTokens("/tmp/test/tokens.json", tokens)
+		assert.EqualError(t, err, "marshal error")
 	})
 }
 
@@ -356,4 +421,63 @@ func TestTokenRefresher_Run_SaveError(t *testing.T) {
 
 	err := tr.Run()
 	assert.Error(t, err)
+}
+
+func TestMain(t *testing.T) {
+	t.Run("successful run", func(t *testing.T) {
+		tempHome := t.TempDir()
+		t.Setenv("HOME", tempHome)
+
+		tokensPath := filepath.Join(tempHome, ".hourglass-rpa", "auth-tokens.json")
+		err := os.MkdirAll(filepath.Dir(tokensPath), 0700)
+		require.NoError(t, err)
+		err = os.WriteFile(tokensPath, []byte(`{
+			"hg_login": "test-token",
+			"xsrf_token": "test-xsrf",
+			"expires_at": "2026-03-04T00:00:00Z"
+		}`), 0600)
+		require.NoError(t, err)
+
+		oldTransport := http.DefaultTransport
+		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     http.Header{},
+			}, nil
+		})
+		t.Cleanup(func() {
+			http.DefaultTransport = oldTransport
+		})
+
+		oldExit := osExit
+		osExit = func(code int) {
+			t.Fatalf("osExit should not be called, got code %d", code)
+		}
+		t.Cleanup(func() {
+			osExit = oldExit
+		})
+
+		main()
+	})
+
+	t.Run("exit on run error", func(t *testing.T) {
+		tempHome := t.TempDir()
+		t.Setenv("HOME", tempHome)
+
+		oldExit := osExit
+		osExit = func(code int) {
+			panic(code)
+		}
+		t.Cleanup(func() {
+			osExit = oldExit
+		})
+
+		defer func() {
+			r := recover()
+			require.Equal(t, 1, r)
+		}()
+
+		main()
+	})
 }

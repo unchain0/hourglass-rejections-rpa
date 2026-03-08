@@ -1560,3 +1560,114 @@ func TestHandleWhoAmI_WithPreferences(t *testing.T) {
 
 	tn.handleWhoAmI(context.Background(), b, update)
 }
+
+func TestSendNoRejectionsMessage_RecordsStatsWhenEnabled(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.stats = newBotStats()
+
+	err := tn.SendNoRejectionsMessage(12345, "No rejections found")
+	require.NoError(t, err)
+
+	totalChecks, rejectionsToday := tn.stats.snapshot()
+	assert.Equal(t, 1, totalChecks)
+	assert.Equal(t, 0, rejectionsToday)
+}
+
+func TestSendRejectionsNotification_RecordsStatsWhenEnabled(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.stats = newBotStats()
+
+	rejections := []domain.Rejeicao{{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"}}
+	err := tn.SendRejectionsNotification(12345, rejections)
+	require.NoError(t, err)
+
+	totalChecks, rejectionsToday := tn.stats.snapshot()
+	assert.Equal(t, 1, totalChecks)
+	assert.Equal(t, 1, rejectionsToday)
+}
+
+func TestCheckRateLimit_Allowed(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.rateLimiter = newRateLimiter()
+	b := newTestBotWithServer(t, srv)
+
+	allowed := tn.checkRateLimit(context.Background(), b, 12345)
+	assert.True(t, allowed)
+}
+
+func TestHandlers_ReturnEarlyWhenRateLimited(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.prefManager = newTestPrefManager(t)
+	tn.rateLimiter = newRateLimiter()
+	b := newTestBotWithServer(t, srv)
+	chatID := int64(12345)
+
+	now := time.Now()
+	for i := 0; i < 10; i++ {
+		tn.rateLimiter.attempts[chatID] = append(tn.rateLimiter.attempts[chatID], now)
+	}
+
+	msgUpdate := &models.Update{Message: &models.Message{Chat: models.Chat{ID: chatID}, From: &models.User{ID: chatID, Username: "user"}}}
+	tn.handleStart(context.Background(), b, msgUpdate)
+	tn.handleConfig(context.Background(), b, msgUpdate)
+	tn.handleStatus(context.Background(), b, msgUpdate)
+	tn.handleHelp(context.Background(), b, msgUpdate)
+	tn.handleStats(context.Background(), b, msgUpdate)
+	tn.handleWhoAmI(context.Background(), b, msgUpdate)
+	tn.handleCheckNow(context.Background(), b, msgUpdate)
+	tn.handleLanguage(context.Background(), b, msgUpdate)
+
+	cbUpdate := &models.Update{CallbackQuery: &models.CallbackQuery{ID: "cb", From: models.User{ID: chatID, Username: "user"}, Data: "section_Campo"}}
+	tn.handleSectionToggle(context.Background(), b, cbUpdate)
+	tn.handleSave(context.Background(), b, cbUpdate)
+	tn.handleCancel(context.Background(), b, cbUpdate)
+	cbUpdate.CallbackQuery.Data = "lang_en"
+	tn.handleLanguageSelect(context.Background(), b, cbUpdate)
+}
+
+func TestHandleLanguage_NilMessage(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	tn.handleLanguage(context.Background(), b, &models.Update{Message: nil})
+}
+
+func TestHandleLanguageSelect_NilCallbackQuery(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	tn.handleLanguageSelect(context.Background(), b, &models.Update{CallbackQuery: nil})
+}
+
+func TestHandleCheckNow_WithFailingCallback_RecordsStats(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.stats = newBotStats()
+	b := newTestBotWithServer(t, srv)
+
+	tn.SetCheckNowCallback(func(_ context.Context, _ int64) error {
+		return errors.New("check failed")
+	})
+
+	update := &models.Update{Message: &models.Message{Chat: models.Chat{ID: 12345}}}
+	tn.handleCheckNow(context.Background(), b, update)
+
+	assert.Eventually(t, func() bool {
+		totalChecks, rejectionsToday := tn.stats.snapshot()
+		return totalChecks == 1 && rejectionsToday == 0
+	}, 2*time.Second, 50*time.Millisecond)
+}

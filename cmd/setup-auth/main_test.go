@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -876,6 +877,24 @@ func (e *errorReader) Read(_ []byte) (n int, err error) {
 }
 
 func TestExecSCPClient(t *testing.T) {
+	t.Run("CopyFile success with stubbed scp", func(t *testing.T) {
+		tempDir := t.TempDir()
+		scpPath := filepath.Join(tempDir, "scp")
+		err := os.WriteFile(scpPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
+		require.NoError(t, err)
+
+		oldPath := os.Getenv("PATH")
+		t.Setenv("PATH", tempDir+string(os.PathListSeparator)+oldPath)
+
+		testFile := filepath.Join(tempDir, "test.txt")
+		err = os.WriteFile(testFile, []byte("test"), 0600)
+		require.NoError(t, err)
+
+		client := &execSCPClient{stdout: io.Discard, stderr: io.Discard}
+		err = client.CopyFile(testFile, "user@host", "/tmp/test.txt")
+		assert.NoError(t, err)
+	})
+
 	t.Run("CopyFile success - dry run with bad host", func(t *testing.T) {
 		client := &execSCPClient{
 			stdout: io.Discard,
@@ -943,6 +962,218 @@ func TestAskVPSUploadWithReadErrors(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read VPS target path")
 	})
+}
+
+func TestConsoleUserInputConfirmReadError(t *testing.T) {
+	cui := newConsoleUserInput(&errorReader{})
+	result, err := cui.Confirm("test prompt: ")
+	assert.Error(t, err)
+	assert.False(t, result)
+}
+
+func TestSetupRunnerRunErrorBranches(t *testing.T) {
+	t.Run("re-auth confirmation read error", func(t *testing.T) {
+		validTokens := &webauthn.AuthTokens{
+			HGLogin:   "test",
+			XSRFToken: "test",
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+		data, err := json.Marshal(validTokens)
+		require.NoError(t, err)
+
+		runner := &setupRunner{
+			fs: &mockFileSystem{
+				userHomeDir:  "/home/test",
+				readFileData: data,
+			},
+			userInput: &mockUserInput{
+				confirmError: errors.New("boom"),
+			},
+			browserAuthFact: functionBrowserAuthFactory{newFn: func(_ string) browserAuth {
+				return &mockBrowserAuth{}
+			}},
+			scpClient:  &mockSCPClient{},
+			baseURL:    defaultBaseURL,
+			configDir:  defaultConfigDir,
+			tokensFile: defaultTokensFile,
+		}
+
+		err = runner.run()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read re-authentication confirmation")
+	})
+
+	t.Run("save tokens failure", func(t *testing.T) {
+		runner := &setupRunner{
+			fs: &mockFileSystem{
+				userHomeDir:    "/home/test",
+				readFileError:  os.ErrNotExist,
+				writeFileError: errors.New("write failed"),
+			},
+			userInput: &mockUserInput{confirmResult: false},
+			browserAuthFact: functionBrowserAuthFactory{newFn: func(_ string) browserAuth {
+				return &mockBrowserAuth{tokens: &webauthn.AuthTokens{
+					HGLogin:   "new",
+					XSRFToken: "new",
+					ExpiresAt: time.Now().Add(time.Hour),
+				}}
+			}},
+			scpClient:  &mockSCPClient{},
+			baseURL:    defaultBaseURL,
+			configDir:  defaultConfigDir,
+			tokensFile: defaultTokensFile,
+		}
+
+		err := runner.run()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to save tokens")
+	})
+
+	t.Run("ask VPS upload confirmation read error", func(t *testing.T) {
+		runner := &setupRunner{
+			fs: &mockFileSystem{
+				userHomeDir:   "/home/test",
+				readFileError: os.ErrNotExist,
+			},
+			userInput: &mockUserInput{
+				confirmError: errors.New("confirm error"),
+			},
+			browserAuthFact: functionBrowserAuthFactory{newFn: func(_ string) browserAuth {
+				return &mockBrowserAuth{tokens: &webauthn.AuthTokens{
+					HGLogin:   "new",
+					XSRFToken: "new",
+					ExpiresAt: time.Now().Add(time.Hour),
+				}}
+			}},
+			scpClient:  &mockSCPClient{},
+			baseURL:    defaultBaseURL,
+			configDir:  defaultConfigDir,
+			tokensFile: defaultTokensFile,
+		}
+
+		err := runner.run()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read transfer confirmation")
+	})
+}
+
+func TestSaveTokensMarshalErrorBranch(t *testing.T) {
+	runner := &setupRunner{fs: &mockFileSystem{}}
+	tokens := &webauthn.AuthTokens{
+		HGLogin:   "test",
+		XSRFToken: "test",
+		ExpiresAt: time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	err := runner.saveTokens("/tmp/tokens.json", tokens)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal tokens")
+}
+
+func TestSetupRunnerAskVPSUploadSuccessDefaultPath(t *testing.T) {
+	runner := newSetupRunner()
+	runner.userInput = &mockUserInputV2{
+		results: []string{"user@host", ""},
+		errors:  []error{nil, nil},
+	}
+	runner.scpClient = &mockSCPClient{}
+
+	oldStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() {
+		_ = pw.Close()
+		os.Stdout = oldStdout
+	}()
+
+	err := runner.askVPSUpload("/tmp/tokens.json")
+	assert.NoError(t, err)
+
+	_ = pw.Close()
+	output, _ := io.ReadAll(pr)
+	assert.Contains(t, string(output), "Tokens transferred successfully")
+	assert.Contains(t, string(output), "~/.hourglass-rpa/auth-tokens.json")
+}
+
+func TestBrowserAuthAdapterAuthenticate(t *testing.T) {
+	oldChromeBin := os.Getenv("CHROME_BIN")
+	t.Setenv("CHROME_BIN", "/path/that/does/not/exist/chrome")
+
+	adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
+	tokens, err := adapter.Authenticate()
+
+	if oldChromeBin != "" {
+		t.Setenv("CHROME_BIN", oldChromeBin)
+	}
+
+	assert.Nil(t, tokens)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "browser authentication failed")
+}
+
+func TestMainSuccessAndFailurePaths(t *testing.T) {
+	t.Run("success path", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv("HOME", tempDir)
+
+		configDir := filepath.Join(tempDir, defaultConfigDir)
+		err := os.MkdirAll(configDir, 0700)
+		require.NoError(t, err)
+
+		tokensPath := filepath.Join(configDir, defaultTokensFile)
+		validTokens := &webauthn.AuthTokens{
+			HGLogin:   "valid",
+			XSRFToken: "valid",
+			ExpiresAt: time.Now().Add(2 * time.Hour),
+		}
+		data, err := json.Marshal(validTokens)
+		require.NoError(t, err)
+		err = os.WriteFile(tokensPath, data, 0600)
+		require.NoError(t, err)
+
+		oldStdin := os.Stdin
+		r, w, _ := os.Pipe()
+		os.Stdin = r
+		defer func() {
+			_ = w.Close()
+			os.Stdin = oldStdin
+		}()
+
+		go func() {
+			_, _ = fmt.Fprintln(w, "no")
+		}()
+
+		main()
+	})
+
+	t.Run("failure path exits with code 1", func(t *testing.T) {
+		tempDir := t.TempDir()
+		homeAsFile := filepath.Join(tempDir, "home-file")
+		err := os.WriteFile(homeAsFile, []byte("not a dir"), 0600)
+		require.NoError(t, err)
+
+		cmd := exec.Command(os.Args[0], "-test.run=TestMainFailureHelperProcess")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"HOME="+homeAsFile,
+		)
+
+		output, err := cmd.CombinedOutput()
+		require.Error(t, err)
+
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, 1, exitErr.ExitCode())
+		assert.Contains(t, string(output), "Setup failed")
+	})
+}
+
+func TestMainFailureHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		t.Skip("helper process test")
+	}
+
+	main()
 }
 
 type mockUserInputV2 struct {

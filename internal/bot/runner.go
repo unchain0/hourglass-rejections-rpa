@@ -77,10 +77,12 @@ var newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (N
 	return notifier.NewTelegramNotifier(token, chatID, whitelist)
 }
 
+var i18nInit = i18n.Init
+
 func (b *BotRunner) Run(ctx context.Context) error {
 	logger := slog.Default()
 
-	if err := i18n.Init(); err != nil {
+	if err := i18nInit(); err != nil {
 		b.sentryClient.CaptureError(err, map[string]interface{}{
 			"phase": "init_i18n",
 		})

@@ -1,11 +1,44 @@
 package i18n
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestInit_LoadErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		failPath    string
+		errorPrefix string
+	}{
+		{name: "english load failure", failPath: "locales/en.toml", errorPrefix: "failed to load English translations"},
+		{name: "portuguese load failure", failPath: "locales/pt-BR.toml", errorPrefix: "failed to load Portuguese translations"},
+		{name: "spanish load failure", failPath: "locales/es.toml", errorPrefix: "failed to load Spanish translations"},
+		{name: "french load failure", failPath: "locales/fr.toml", errorPrefix: "failed to load French translations"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalLoader := loadMessageFile
+			t.Cleanup(func() { loadMessageFile = originalLoader })
+
+			loadMessageFile = func(path string) error {
+				if path == tt.failPath {
+					return errors.New("boom")
+				}
+				return originalLoader(path)
+			}
+
+			err := Init()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorPrefix)
+			assert.Contains(t, err.Error(), "boom")
+		})
+	}
+}
 
 func TestInit(t *testing.T) {
 	t.Run("successful initialization", func(t *testing.T) {

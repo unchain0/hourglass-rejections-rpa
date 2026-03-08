@@ -11,6 +11,36 @@ import (
 
 var osExit = os.Exit
 
+type tokenLoader interface {
+	LoadTokens() (*webauthn.AuthTokens, error)
+}
+
+var newTokenSaverForMain = newTokenSaver
+
+var userHomeDirForMain = os.UserHomeDir
+
+func defaultNewTokenLoader(configDir, tokensPath string) (tokenLoader, error) {
+	return webauthn.NewTokenManager(
+		filepath.Join(configDir, "webauthn-credentials.json"),
+		"https://app.hourglass-app.com",
+		webauthn.WithTokensPath(tokensPath),
+	)
+}
+
+var newTokenLoader = defaultNewTokenLoader
+
+var logFatal = log.Fatal
+
+var printSuccessFn = printSuccess
+
+func printTokenRenewedMessage() {
+	fmt.Println("🔄 Tokens renovados!")
+}
+
+func onTokenRenewed(_ *webauthn.AuthTokens) {
+	printTokenRenewedMessage()
+}
+
 type tokenSaver interface {
 	SaveTokens(tokens *webauthn.AuthTokens) error
 }
@@ -33,7 +63,7 @@ func newTokenSaver() *tokenSaverImpl {
 			return webauthn.NewTokenManager(credsPath, baseURL, opts...)
 		},
 		browserAuthFactory: func(baseURL string) browserAuthenticator {
-			return &browserAuthAdapter{webauthn.NewBrowserAuth(baseURL)}
+			return &browserAuthAdapter{BrowserAuth: webauthn.NewBrowserAuth(baseURL)}
 		},
 		userHomeDir: os.UserHomeDir,
 		mkdirAll:    os.MkdirAll,
@@ -42,14 +72,22 @@ func newTokenSaver() *tokenSaverImpl {
 
 type browserAuthAdapter struct {
 	*webauthn.BrowserAuth
+	authenticateFunc func() (*webauthn.AuthTokens, error)
+	withHeadlessFunc func(headless bool) *webauthn.BrowserAuth
 }
 
 func (a *browserAuthAdapter) Authenticate() (*webauthn.AuthTokens, error) {
+	if a.authenticateFunc != nil {
+		return a.authenticateFunc()
+	}
 	return a.BrowserAuth.Authenticate()
 }
 
 func (a *browserAuthAdapter) WithHeadless(headless bool) browserAuthenticator {
-	return &browserAuthAdapter{a.BrowserAuth.WithHeadless(headless)}
+	if a.withHeadlessFunc != nil {
+		return &browserAuthAdapter{BrowserAuth: a.withHeadlessFunc(headless)}
+	}
+	return &browserAuthAdapter{BrowserAuth: a.BrowserAuth.WithHeadless(headless)}
 }
 
 func (ts *tokenSaverImpl) run() error {
@@ -77,9 +115,7 @@ func (ts *tokenSaverImpl) run() error {
 		filepath.Join(configDir, "webauthn-credentials.json"),
 		"https://app.hourglass-app.com",
 		webauthn.WithTokensPath(tokensPath),
-		webauthn.WithOnTokenRenewed(func(tokens *webauthn.AuthTokens) {
-			fmt.Println("🔄 Tokens renovados!")
-		}),
+		webauthn.WithOnTokenRenewed(onTokenRenewed),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create TokenManager: %w", err)
@@ -118,28 +154,23 @@ func printSuccess(tokensPath string, tokens *webauthn.AuthTokens) {
 }
 
 func main() {
-	ts := newTokenSaver()
-	if err := ts.run(); err != nil {
-		log.Fatal(err)
+	if err := newTokenSaverForMain().run(); err != nil {
+		logFatal(err)
 	}
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, _ := userHomeDirForMain()
 	configDir := filepath.Join(homeDir, ".hourglass-rpa")
 	tokensPath := filepath.Join(configDir, "auth-tokens.json")
 
-	tm, err := webauthn.NewTokenManager(
-		filepath.Join(configDir, "webauthn-credentials.json"),
-		"https://app.hourglass-app.com",
-		webauthn.WithTokensPath(tokensPath),
-	)
+	tm, err := newTokenLoader(configDir, tokensPath)
 	if err != nil {
-		log.Fatal("Failed to load tokens for display:", err)
+		logFatal("Failed to load tokens for display:", err)
 	}
 
 	tokens, err := tm.LoadTokens()
 	if err != nil {
-		log.Fatal("Failed to load saved tokens:", err)
+		logFatal("Failed to load saved tokens:", err)
 	}
 
-	printSuccess(tokensPath, tokens)
+	printSuccessFn(tokensPath, tokens)
 }

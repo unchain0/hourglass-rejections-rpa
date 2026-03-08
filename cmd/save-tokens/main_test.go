@@ -27,6 +27,18 @@ type mockBrowserAuthenticator struct {
 	mock.Mock
 }
 
+type mockTokenLoader struct {
+	mock.Mock
+}
+
+func (m *mockTokenLoader) LoadTokens() (*webauthn.AuthTokens, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*webauthn.AuthTokens), args.Error(1)
+}
+
 func (m *mockBrowserAuthenticator) Authenticate() (*webauthn.AuthTokens, error) {
 	args := m.Called()
 	if args.Get(0) == nil {
@@ -707,6 +719,326 @@ func TestBrowserAuthAdapter_AuthenticateCalled(t *testing.T) {
 
 	assert.NotNil(t, adapter)
 	assert.NotNil(t, adapter.BrowserAuth)
+}
+
+func TestBrowserAuthAdapter_Authenticate_UsesWrapperFunction(t *testing.T) {
+	expected := createTestTokens()
+	called := false
+
+	adapter := &browserAuthAdapter{
+		authenticateFunc: func() (*webauthn.AuthTokens, error) {
+			called = true
+			return expected, nil
+		},
+	}
+
+	tokens, err := adapter.Authenticate()
+
+	assert.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, expected, tokens)
+}
+
+func TestBrowserAuthAdapter_Authenticate_PanicsWithNilBrowserAuth(t *testing.T) {
+	adapter := &browserAuthAdapter{}
+
+	assert.Panics(t, func() {
+		_, _ = adapter.Authenticate()
+	})
+}
+
+func TestBrowserAuthAdapter_WithHeadless_UsesWrapperFunction(t *testing.T) {
+	called := false
+	adapter := &browserAuthAdapter{
+		withHeadlessFunc: func(headless bool) *webauthn.BrowserAuth {
+			called = true
+			assert.True(t, headless)
+			return webauthn.NewBrowserAuth("https://app.hourglass-app.com")
+		},
+	}
+
+	headlessAdapter := adapter.WithHeadless(true)
+
+	assert.True(t, called)
+	assert.NotNil(t, headlessAdapter)
+}
+
+func TestDefaultNewTokenLoader(t *testing.T) {
+	tempDir := t.TempDir()
+	configDir := filepath.Join(tempDir, "config")
+	err := os.MkdirAll(configDir, 0700)
+	assert.NoError(t, err)
+
+	tokensPath := filepath.Join(configDir, "auth-tokens.json")
+	loader, err := defaultNewTokenLoader(configDir, tokensPath)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, loader)
+}
+
+func TestPrintTokenRenewedMessage(t *testing.T) {
+	assert.NotPanics(t, func() {
+		printTokenRenewedMessage()
+	})
+}
+
+func TestOnTokenRenewed(t *testing.T) {
+	assert.NotPanics(t, func() {
+		onTokenRenewed(createTestTokens())
+	})
+}
+
+func TestMain_Success(t *testing.T) {
+	originalNewTokenSaverForMain := newTokenSaverForMain
+	originalUserHomeDirForMain := userHomeDirForMain
+	originalNewTokenLoader := newTokenLoader
+	originalLogFatal := logFatal
+	originalPrintSuccessFn := printSuccessFn
+	defer func() {
+		newTokenSaverForMain = originalNewTokenSaverForMain
+		userHomeDirForMain = originalUserHomeDirForMain
+		newTokenLoader = originalNewTokenLoader
+		logFatal = originalLogFatal
+		printSuccessFn = originalPrintSuccessFn
+	}()
+
+	testTokens := createTestTokens()
+	loader := new(mockTokenLoader)
+	loader.On("LoadTokens").Return(testTokens, nil)
+	runTokens := createTestTokens()
+	runTokenMgr := new(mockTokenSaver)
+	runTokenMgr.On("SaveTokens", runTokens).Return(nil)
+	runBrowser := new(mockBrowserAuthenticator)
+	runBrowser.On("Authenticate").Return(runTokens, nil)
+	runBrowser.On("WithHeadless", false).Return(runBrowser)
+
+	newTokenSaverForMain = func() *tokenSaverImpl {
+		return &tokenSaverImpl{
+			tokenManagerFactory: func(credsPath, baseURL string, opts ...webauthn.TokenManagerOption) (tokenSaver, error) {
+				return runTokenMgr, nil
+			},
+			browserAuthFactory: func(baseURL string) browserAuthenticator {
+				return runBrowser
+			},
+			userHomeDir: func() (string, error) {
+				return "/home/main-test", nil
+			},
+			mkdirAll: func(path string, perm os.FileMode) error {
+				return nil
+			},
+		}
+	}
+
+	userHomeDirForMain = func() (string, error) {
+		return "/home/main-test", nil
+	}
+
+	loaderCalled := false
+	newTokenLoader = func(configDir, tokensPath string) (tokenLoader, error) {
+		loaderCalled = true
+		assert.Equal(t, "/home/main-test/.hourglass-rpa", configDir)
+		assert.Equal(t, "/home/main-test/.hourglass-rpa/auth-tokens.json", tokensPath)
+		return loader, nil
+	}
+
+	fatalCalled := false
+	logFatal = func(v ...any) {
+		fatalCalled = true
+	}
+
+	printCalled := false
+	printSuccessFn = func(tokensPath string, tokens *webauthn.AuthTokens) {
+		printCalled = true
+		assert.Equal(t, "/home/main-test/.hourglass-rpa/auth-tokens.json", tokensPath)
+		assert.Equal(t, testTokens, tokens)
+	}
+
+	main()
+
+	assert.True(t, loaderCalled)
+	assert.False(t, fatalCalled)
+	assert.True(t, printCalled)
+	loader.AssertExpectations(t)
+	runTokenMgr.AssertExpectations(t)
+	runBrowser.AssertExpectations(t)
+}
+
+func TestMain_RunTokenSaverError(t *testing.T) {
+	originalNewTokenSaverForMain := newTokenSaverForMain
+	originalUserHomeDirForMain := userHomeDirForMain
+	originalNewTokenLoader := newTokenLoader
+	originalLogFatal := logFatal
+	originalPrintSuccessFn := printSuccessFn
+	defer func() {
+		newTokenSaverForMain = originalNewTokenSaverForMain
+		userHomeDirForMain = originalUserHomeDirForMain
+		newTokenLoader = originalNewTokenLoader
+		logFatal = originalLogFatal
+		printSuccessFn = originalPrintSuccessFn
+	}()
+
+	newTokenSaverForMain = func() *tokenSaverImpl {
+		return &tokenSaverImpl{
+			userHomeDir: func() (string, error) {
+				return "", errors.New("run failed")
+			},
+		}
+	}
+	userHomeDirForMain = func() (string, error) {
+		return "/home/main-test", nil
+	}
+	newTokenLoader = func(configDir, tokensPath string) (tokenLoader, error) {
+		loader := new(mockTokenLoader)
+		loader.On("LoadTokens").Return(createTestTokens(), nil)
+		return loader, nil
+	}
+
+	type fatalPanic struct{}
+	fatalCalls := 0
+	logFatal = func(v ...any) {
+		fatalCalls++
+		panic(fatalPanic{})
+	}
+	printSuccessFn = func(tokensPath string, tokens *webauthn.AuthTokens) {}
+
+	assert.PanicsWithValue(t, fatalPanic{}, func() {
+		main()
+	})
+
+	assert.Equal(t, 1, fatalCalls)
+}
+
+func TestMain_NewTokenLoaderError(t *testing.T) {
+	originalNewTokenSaverForMain := newTokenSaverForMain
+	originalUserHomeDirForMain := userHomeDirForMain
+	originalNewTokenLoader := newTokenLoader
+	originalLogFatal := logFatal
+	originalPrintSuccessFn := printSuccessFn
+	defer func() {
+		newTokenSaverForMain = originalNewTokenSaverForMain
+		userHomeDirForMain = originalUserHomeDirForMain
+		newTokenLoader = originalNewTokenLoader
+		logFatal = originalLogFatal
+		printSuccessFn = originalPrintSuccessFn
+	}()
+
+	runTokens := createTestTokens()
+	runTokenMgr := new(mockTokenSaver)
+	runTokenMgr.On("SaveTokens", runTokens).Return(nil)
+	runBrowser := new(mockBrowserAuthenticator)
+	runBrowser.On("Authenticate").Return(runTokens, nil)
+	runBrowser.On("WithHeadless", false).Return(runBrowser)
+
+	newTokenSaverForMain = func() *tokenSaverImpl {
+		return &tokenSaverImpl{
+			tokenManagerFactory: func(credsPath, baseURL string, opts ...webauthn.TokenManagerOption) (tokenSaver, error) {
+				return runTokenMgr, nil
+			},
+			browserAuthFactory: func(baseURL string) browserAuthenticator {
+				return runBrowser
+			},
+			userHomeDir: func() (string, error) {
+				return "/home/main-test", nil
+			},
+			mkdirAll: func(path string, perm os.FileMode) error {
+				return nil
+			},
+		}
+	}
+	userHomeDirForMain = func() (string, error) {
+		return "/home/main-test", nil
+	}
+	newTokenLoader = func(configDir, tokensPath string) (tokenLoader, error) {
+		return nil, errors.New("loader failed")
+	}
+
+	type fatalPanic struct{}
+	fatalCalls := 0
+	logFatal = func(v ...any) {
+		fatalCalls++
+		panic(fatalPanic{})
+	}
+	printCalled := false
+	printSuccessFn = func(tokensPath string, tokens *webauthn.AuthTokens) {
+		printCalled = true
+	}
+
+	assert.PanicsWithValue(t, fatalPanic{}, func() {
+		main()
+	})
+
+	assert.Equal(t, 1, fatalCalls)
+	assert.False(t, printCalled)
+	runTokenMgr.AssertExpectations(t)
+	runBrowser.AssertExpectations(t)
+}
+
+func TestMain_LoadTokensError(t *testing.T) {
+	originalNewTokenSaverForMain := newTokenSaverForMain
+	originalUserHomeDirForMain := userHomeDirForMain
+	originalNewTokenLoader := newTokenLoader
+	originalLogFatal := logFatal
+	originalPrintSuccessFn := printSuccessFn
+	defer func() {
+		newTokenSaverForMain = originalNewTokenSaverForMain
+		userHomeDirForMain = originalUserHomeDirForMain
+		newTokenLoader = originalNewTokenLoader
+		logFatal = originalLogFatal
+		printSuccessFn = originalPrintSuccessFn
+	}()
+
+	loader := new(mockTokenLoader)
+	loader.On("LoadTokens").Return(nil, errors.New("load tokens failed"))
+	runTokens := createTestTokens()
+	runTokenMgr := new(mockTokenSaver)
+	runTokenMgr.On("SaveTokens", runTokens).Return(nil)
+	runBrowser := new(mockBrowserAuthenticator)
+	runBrowser.On("Authenticate").Return(runTokens, nil)
+	runBrowser.On("WithHeadless", false).Return(runBrowser)
+
+	newTokenSaverForMain = func() *tokenSaverImpl {
+		return &tokenSaverImpl{
+			tokenManagerFactory: func(credsPath, baseURL string, opts ...webauthn.TokenManagerOption) (tokenSaver, error) {
+				return runTokenMgr, nil
+			},
+			browserAuthFactory: func(baseURL string) browserAuthenticator {
+				return runBrowser
+			},
+			userHomeDir: func() (string, error) {
+				return "/home/main-test", nil
+			},
+			mkdirAll: func(path string, perm os.FileMode) error {
+				return nil
+			},
+		}
+	}
+	userHomeDirForMain = func() (string, error) {
+		return "/home/main-test", nil
+	}
+	newTokenLoader = func(configDir, tokensPath string) (tokenLoader, error) {
+		return loader, nil
+	}
+
+	type fatalPanic struct{}
+	fatalCalls := 0
+	logFatal = func(v ...any) {
+		fatalCalls++
+		panic(fatalPanic{})
+	}
+	printCalled := false
+	printSuccessFn = func(tokensPath string, tokens *webauthn.AuthTokens) {
+		printCalled = true
+	}
+
+	assert.PanicsWithValue(t, fatalPanic{}, func() {
+		main()
+	})
+
+	assert.Equal(t, 1, fatalCalls)
+	assert.False(t, printCalled)
+	loader.AssertExpectations(t)
+	runTokenMgr.AssertExpectations(t)
+	runBrowser.AssertExpectations(t)
 }
 
 func TestTokenSaverImpl_newTokenSaver_RealFactories(t *testing.T) {

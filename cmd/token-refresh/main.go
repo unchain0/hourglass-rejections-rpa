@@ -56,6 +56,7 @@ func newTokenRefresher() *tokenRefresher {
 }
 
 var osExit = os.Exit
+var jsonMarshal = json.Marshal
 
 func main() {
 	tr := newTokenRefresher()
@@ -176,7 +177,7 @@ func (tr *tokenRefresher) tryRefresh(tokens *webauthn.AuthTokens) (*webauthn.Aut
 }
 
 func (tr *tokenRefresher) saveTokens(path string, tokens *webauthn.AuthTokens) error {
-	data, err := json.Marshal(tokens)
+	data, err := jsonMarshal(tokens)
 	if err != nil {
 		return err
 	}

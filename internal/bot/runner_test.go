@@ -14,6 +14,7 @@ import (
 	"hourglass-rejections-rpa/internal/i18n"
 	"hourglass-rejections-rpa/internal/notifier"
 	"hourglass-rejections-rpa/internal/preferences"
+	"hourglass-rejections-rpa/internal/sentry"
 )
 
 func TestMain(m *testing.M) {
@@ -291,6 +292,21 @@ func TestRun_NoPreferenceStore_Success(t *testing.T) {
 	}
 }
 
+func TestRun_I18nInitError(t *testing.T) {
+	originalI18nInit := i18nInit
+	i18nInit = func() error {
+		return errors.New("i18n init error")
+	}
+	defer func() { i18nInit = originalI18nInit }()
+
+	runner := New(&config.Config{}, &sentry.Client{}, nil, nil)
+
+	err := runner.Run(context.Background())
+	if err == nil || err.Error() != "failed to initialize i18n: i18n init error" {
+		t.Errorf("expected i18n init error, got %v", err)
+	}
+}
+
 func TestRun_CheckNowCallback(t *testing.T) {
 	cfg := &config.Config{}
 	runner := New(cfg, nil, nil, nil)
@@ -371,6 +387,50 @@ func TestRunOnceForUser_NotFound(t *testing.T) {
 	}
 }
 
+func TestRunOnceForUser_NotFound_WithSentryClient(t *testing.T) {
+	runner := &BotRunner{sentryClient: &sentry.Client{}}
+	mockStore := &MockPreferenceStore{
+		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
+			return nil, nil
+		},
+	}
+	prefManager := preferences.NewPreferenceManager(mockStore)
+
+	err := runner.runOnceForUser(context.Background(), prefManager, 123)
+	if err == nil || err.Error() != "user preferences not found" {
+		t.Errorf("expected not found error, got %v", err)
+	}
+}
+
+func TestRunOnceForUser_ContextCanceled(t *testing.T) {
+	runner := &BotRunner{
+		analyzer: &MockAnalyzer{
+			AnalyzeSectionFunc: func(section string) (*domain.JobResult, error) {
+				t.Fatal("analyzer should not be called when context is already canceled")
+				return nil, nil
+			},
+		},
+	}
+
+	pref := &preferences.UserPreference{}
+	pref.SetSections([]string{"Campo"})
+
+	mockStore := &MockPreferenceStore{
+		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
+			return pref, nil
+		},
+	}
+	prefManager := preferences.NewPreferenceManager(mockStore)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := runner.runOnceForUser(ctx, prefManager, 123)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context canceled error, got %v", err)
+	}
+}
+
 func TestRunOnceForUser_NoSections(t *testing.T) {
 	runner := &BotRunner{}
 
@@ -408,6 +468,44 @@ func TestRunOnceForUser_NoSections(t *testing.T) {
 
 func TestRunOnceForUser_AnalyzeError(t *testing.T) {
 	runner := &BotRunner{}
+
+	called := false
+	mockNotifier := &MockNotifier{
+		SendNoRejectionsMessageFunc: func(chatID int64, message string) error {
+			called = true
+			return nil
+		},
+	}
+	runner.WithNotifier(mockNotifier)
+
+	mockAnalyzer := &MockAnalyzer{
+		AnalyzeSectionFunc: func(section string) (*domain.JobResult, error) {
+			return nil, errors.New("analyze error")
+		},
+	}
+	runner.WithAnalyzer(mockAnalyzer)
+
+	pref := &preferences.UserPreference{}
+	pref.SetSections([]string{"Campo"})
+
+	mockStore := &MockPreferenceStore{
+		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
+			return pref, nil
+		},
+	}
+	prefManager := preferences.NewPreferenceManager(mockStore)
+
+	err := runner.runOnceForUser(context.Background(), prefManager, 123)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if !called {
+		t.Errorf("expected SendNoRejectionsMessage to be called")
+	}
+}
+
+func TestRunOnceForUser_AnalyzeError_WithSentryClient(t *testing.T) {
+	runner := &BotRunner{sentryClient: &sentry.Client{}}
 
 	called := false
 	mockNotifier := &MockNotifier{

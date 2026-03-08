@@ -15,21 +15,26 @@ var localeFS embed.FS
 
 var bundle *i18n.Bundle
 
+var loadMessageFile = func(path string) error {
+	_, err := bundle.LoadMessageFileFS(localeFS, path)
+	return err
+}
+
 // Init initializes the i18n bundle with all supported languages.
 func Init() error {
 	bundle = i18n.NewBundle(language.English)
 	bundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
 
-	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/en.toml"); err != nil {
+	if err := loadMessageFile("locales/en.toml"); err != nil {
 		return fmt.Errorf("failed to load English translations: %w", err)
 	}
-	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/pt-BR.toml"); err != nil {
+	if err := loadMessageFile("locales/pt-BR.toml"); err != nil {
 		return fmt.Errorf("failed to load Portuguese translations: %w", err)
 	}
-	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/es.toml"); err != nil {
+	if err := loadMessageFile("locales/es.toml"); err != nil {
 		return fmt.Errorf("failed to load Spanish translations: %w", err)
 	}
-	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/fr.toml"); err != nil {
+	if err := loadMessageFile("locales/fr.toml"); err != nil {
 		return fmt.Errorf("failed to load French translations: %w", err)
 	}
 
