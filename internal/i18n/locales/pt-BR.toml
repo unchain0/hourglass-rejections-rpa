@@ -12,7 +12,12 @@ other = "Escolha as seções para receber notificações:"
 
 [your_preferences]
 description = "Preferências do usuário"
-other = "Suas preferências:"
+other = """<b>Suas preferências:</b>
+
+<b>Notificações:</b>{{if eq .NotificationStatus "enabled"}} Ativado{{else}} Desativado{{end}}
+
+<b>Seções:</b>{{range .Sections}}
+- {{.Name}}: {{if eq .Status "enabled"}}✅ Ativado{{else}}❌ Desativado{{end}}{{end}}"""
 
 [notifications_enabled]
 description = "Notificações estão ativadas"
