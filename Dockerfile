@@ -18,6 +18,6 @@ ENV TZ=America/Sao_Paulo \
     CHROME_BIN=/usr/bin/chromium-browser \
     TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
 VOLUME ["/app/outputs", "/app/data", "/home/rpa/.hourglass-rpa"]
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -x "rpa" > /dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
+    CMD ps aux | grep -v grep | grep -q "./rpa" || exit 1
 ENTRYPOINT ["./rpa"]
