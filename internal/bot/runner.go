@@ -13,6 +13,7 @@ import (
 	"hourglass-rejections-rpa/internal/api"
 	"hourglass-rejections-rpa/internal/config"
 	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/i18n"
 	"hourglass-rejections-rpa/internal/notifier"
 	"hourglass-rejections-rpa/internal/preferences"
 	"hourglass-rejections-rpa/internal/sentry"
@@ -78,6 +79,13 @@ var newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (N
 
 func (b *BotRunner) Run(ctx context.Context) error {
 	logger := slog.Default()
+
+	if err := i18n.Init(); err != nil {
+		b.sentryClient.CaptureError(err, map[string]interface{}{
+			"phase": "init_i18n",
+		})
+		return fmt.Errorf("failed to initialize i18n: %w", err)
+	}
 
 	var prefStore preferences.PreferenceStore
 	if b.prefStore != nil {
@@ -178,12 +186,13 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 		return fmt.Errorf("user preferences not found")
 	}
 
+	lang := prefManager.GetLanguage(targetChatID)
 	userSections := pref.Sections()
 	logger.Info("user preferences loaded", "chat_id", targetChatID, "sections", userSections, "sections_count", len(userSections))
 
 	if len(userSections) == 0 {
 		logger.Info("no sections configured, sending message", "chat_id", targetChatID)
-		return b.sendNoRejectionsMessage(targetChatID, "Você não tem nenhuma seção configurada para monitoramento.")
+		return b.sendNoRejectionsMessage(targetChatID, i18n.Localize(lang, "no_sections_selected", nil))
 	}
 
 	var allRejections []domain.Rejeicao
@@ -235,7 +244,7 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 
 	if len(allRejections) == 0 {
 		logger.Info("no rejections found, sending message", "chat_id", targetChatID)
-		return b.sendNoRejectionsMessage(targetChatID, "✅ Nenhuma rejeição encontrada nas seções configuradas.")
+		return b.sendNoRejectionsMessage(targetChatID, i18n.Localize(lang, "no_rejections_found", nil))
 	}
 
 	logger.Info("sending rejections notification", "chat_id", targetChatID, "count", len(allRejections))

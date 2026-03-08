@@ -1,0 +1,143 @@
+[welcome]
+description = "Mensagem de boas-vindas"
+other = "Bem-vindo ao Bot RPA Hourglass!"
+
+[welcome_instructions]
+description = "Instruções após boas-vindas"
+other = "Use /configure para escolher quais seções você deseja receber notificações.\nUse /status para ver suas preferências atuais.\nUse /help para ver todos os comandos disponíveis.\nUse /language para alterar o idioma do bot."
+
+[choose_sections]
+description = "Escolha seções para receber notificações"
+other = "Escolha as seções para receber notificações:"
+
+[your_preferences]
+description = "Preferências do usuário"
+other = "Suas preferências:"
+
+[notifications_enabled]
+description = "Notificações estão ativadas"
+other = "Notificações: Ativado"
+
+[notifications_disabled]
+description = "Notificações estão desativadas"
+other = "Notificações: Desativado"
+
+[no_sections_selected]
+description = "Nenhuma seção selecionada"
+other = "Nenhuma seção selecionada. Você não receberá notificações."
+
+[selected_sections]
+description = "Cabeçalho da lista de seções selecionadas"
+other = "Seções selecionadas:"
+
+[language_select]
+description = "Prompt de seleção de idioma"
+other = "Selecione seu idioma:"
+
+[language_changed]
+description = "Confirmação de mudança de idioma"
+other = "✅ Idioma alterado com sucesso!"
+
+[help_commands]
+description = "Lista de comandos disponíveis"
+other = "Comandos disponíveis:\n/start - Mensagem de boas-vindas\n/configure - Configurar seções de notificação\n/status - Ver preferências atuais\n/language - Alterar idioma\n/help - Mostrar esta mensagem\n/checknow - Verificação imediata"
+
+[rate_limit_exceeded]
+description = "Aviso de limite de taxa"
+other = "⚠️ Limite de taxa excedido. Aguarde um minuto antes de enviar mais comandos."
+
+[unauthorized]
+description = "Mensagem de usuário não autorizado"
+other = "Você não está autorizado a usar este comando. Entre em contato com o administrador."
+
+[not_authorized_receive]
+description = "Não autorizado a receber notificações"
+other = "Você pode interagir com o bot, mas você não está autorizado a receber notificações. Para receber notificações de rejeições, entre em contato com o administrador e solicite que seu Chat ID seja adicionado à lista branca.\n\nSeu Chat ID: <code>{{.ChatID}}</code>"
+
+[configure_error]
+description = "Erro ao carregar preferências"
+other = "Erro ao carregar preferências. Tente novamente."
+
+[unauthorized_config]
+description = "Tentativa de configuração não autorizada"
+other = "Você não está autorizado a usar este comando. Entre em contato com o administrador."
+
+[preferences_saved]
+description = "Confirmação de preferências salvas"
+other = "Preferências salvas!"
+
+[check_now_requested]
+description = "Solicitação de verificação imediata"
+other = "Verificação imediata solicitada. Processando..."
+
+[check_now_unavailable]
+description = "Verificação manual indisponível"
+other = "Verificação manual não disponível no modo bot. Use o modo agendador."
+
+[verification_error]
+description = "Erro durante verificação"
+other = "Erro na verificação: {{.Error}}"
+
+[no_rejections_configured]
+description = "Nenhuma rejeição nas seções configuradas"
+other = "Você não tem nenhuma seção configurada para monitoramento."
+
+[no_rejections_found]
+description = "Sucesso sem rejeições encontradas"
+other = "✅ Nenhuma rejeição encontrada nas seções configuradas."
+
+[rejections_detected_header]
+description = "Cabeçalho de rejeições detectadas"
+other = "❌ Rejeições Detectadas no Hourglass"
+
+[assignments_rejected_count]
+description = "Quantidade de atribuições rejeitadas"
+other = "{{.Count}} atribuição(ões) rejeitada(s):"
+
+[rejection_number]
+description = "Índice de rejeição"
+other = "Rejeição #{{.Index}}:"
+
+[who_label]
+description = "Rótulo do campo Quem"
+other = "Quem:"
+
+[section_label]
+description = "Rótulo do campo Seção"
+other = "Seção:"
+
+[assignment_label]
+description = "Rótulo do campo Atribuição"
+other = "Atribuição:"
+
+[date_label]
+description = "Rótulo do campo Data"
+other = "Data:"
+
+[language_english]
+description = "English language option"
+other = "🇺🇸 English"
+
+[language_portuguese]
+description = "Portuguese language option"
+other = "🇧🇷 Português"
+
+[welcome_unauthorized]
+description = "Welcome message for unauthorized users"
+other = "🤖 <b>Bem-vindo ao Bot RPA Hourglass!</b>\n\nVocê pode interagir com o bot, mas <b>você não está autorizado a receber notificações</b>.\n\n📧 Para receber notificações de rejeições, entre em contato com o administrador e solicite que seu Chat ID seja adicionado à lista branca.\n\nSeu Chat ID: <code>{{.ChatID}}</code>"
+
+[btn_save]
+description = "Save button label"
+other = "Salvar"
+
+[btn_cancel]
+description = "Cancel button label"
+other = "Cancelar"
+
+[configuration_cancelled]
+description = "Configuration cancelled message"
+other = "❌ Configuração cancelada."
+
+[rejections_detected]
+description = "Main rejections notification message"
+other = "<b>❌ Rejeições Detectadas no Hourglass</b>\n\n<b>{{.Count}}</b> atribuição(ões) rejeitada(s):\n\n{{range .Rejections}}<b>Rejeição #{{.Number}}:</b>\n👤 <b>Quem:</b> {{.Who}}\n📋 <b>Seção:</b> {{.Section}}\n📝 <b>Atribuição:</b> {{.What}}\n📅 <b>Data:</b> {{.When}}\n\n{{end}}"

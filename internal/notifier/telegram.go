@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/i18n"
 	"hourglass-rejections-rpa/internal/preferences"
 
 	"github.com/go-telegram/bot"
@@ -137,24 +138,27 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 		return fmt.Errorf("unauthorized chat ID: %d", chatID)
 	}
 
-	// Build message (using HTML instead of Markdown to avoid escaping issues)
-	var msg strings.Builder
-	msg.WriteString("<b>❌ Rejections Detected in Hourglass</b>\n\n")
-	msg.WriteString(fmt.Sprintf("<b>%d</b> assignment(s) rejected:\n\n", len(rejections)))
+	lang := t.getUserLanguage(chatID)
 
+	rejectionsList := make([]map[string]interface{}, 0, len(rejections))
 	for i, r := range rejections {
-		msg.WriteString(fmt.Sprintf("<b>Rejection #%d:</b>\n", i+1))
-		msg.WriteString(formatTelegramField("👤", "Who", r.Quem))
-		msg.WriteString(formatTelegramField("📋", "Section", r.Secao))
-		msg.WriteString(formatTelegramField("📝", "Assignment", r.OQue))
-		msg.WriteString(formatTelegramField("📅", "Date", r.PraQuando))
-		msg.WriteString("\n")
+		rejectionsList = append(rejectionsList, map[string]interface{}{
+			"Number":  i + 1,
+			"Who":     r.Quem,
+			"Section": r.Secao,
+			"What":    r.OQue,
+			"When":    r.PraQuando,
+		})
 	}
 
-	// Send message
+	msg := i18n.Localize(lang, "rejections_detected", map[string]interface{}{
+		"Count":      len(rejections),
+		"Rejections": rejectionsList,
+	})
+
 	_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
 		ChatID:    chatID,
-		Text:      msg.String(),
+		Text:      msg,
 		ParseMode: models.ParseModeHTML,
 	})
 
@@ -168,6 +172,14 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 // IsConfigured checks if the notifier is properly configured.
 func (t *TelegramNotifier) IsConfigured() bool {
 	return t != nil && t.bot != nil && t.chatID != 0
+}
+
+// getUserLanguage returns the user's language preference
+func (t *TelegramNotifier) getUserLanguage(chatID int64) string {
+	if t.prefManager == nil {
+		return "en"
+	}
+	return t.prefManager.GetLanguage(chatID)
 }
 
 func (t *TelegramNotifier) SetCheckNowCallback(callback CheckNowCallback) {
@@ -190,6 +202,7 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, t.handleStart)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/configure", bot.MatchTypeExact, t.handleConfig)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/status", bot.MatchTypeExact, t.handleStatus)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/language", bot.MatchTypeExact, t.handleLanguage)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, t.handleHelp)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/checknow", bot.MatchTypeExact, t.handleCheckNow)
 
@@ -197,11 +210,13 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "section_", bot.MatchTypePrefix, t.handleSectionToggle)
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "save_config", bot.MatchTypeExact, t.handleSave)
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "cancel_config", bot.MatchTypeExact, t.handleCancel)
+	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "lang_", bot.MatchTypePrefix, t.handleLanguageSelect)
 
 	commands := []models.BotCommand{
 		{Command: "start", Description: "Welcome message"},
 		{Command: "configure", Description: "Configure notification sections"},
 		{Command: "status", Description: "View current preferences"},
+		{Command: "language", Description: "Change language"},
 		{Command: "help", Description: "Show available commands"},
 		{Command: "checknow", Description: "Immediate check"},
 	}
@@ -242,9 +257,10 @@ func (t *TelegramNotifier) checkRateLimit(ctx context.Context, b *bot.Bot, chatI
 		return true
 	}
 	if !t.rateLimiter.Allow(chatID) {
+		lang := t.getUserLanguage(chatID)
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
-			Text:      "⚠️ <b>Rate limit exceeded</b>. Please wait a minute before sending more commands.",
+			Text:      i18n.Localize(lang, "rate_limit_exceeded", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 		return false
@@ -272,12 +288,12 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 		_ = t.prefManager.RecordDiscoveredChat(chatID, username)
 	}
 
+	lang := t.getUserLanguage(chatID)
+
 	if !t.IsAuthorized(chatID) {
-		text := "🤖 <b>Welcome to Hourglass RPA Bot!</b>\n\n" +
-			"You can interact with the bot, but <b>you are not authorized to receive notifications</b>.\n\n" +
-			"📧 To receive rejection notifications, contact the administrator " +
-			"and request that your Chat ID be added to the whitelist.\n\n" +
-			"Your Chat ID: <code>" + fmt.Sprintf("%d", chatID) + "</code>"
+		text := i18n.Localize(lang, "welcome_unauthorized", map[string]interface{}{
+			"ChatID": fmt.Sprintf("%d", chatID),
+		})
 
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
@@ -292,10 +308,7 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 		_, _ = t.prefManager.GetOrCreate(chatID, username)
 	}
 
-	text := "🤖 <b>Welcome to Hourglass RPA Bot!</b>\n\n" +
-		"Use /configure to choose which sections you want to receive notifications for.\n" +
-		"Use /status to view your current preferences.\n" +
-		"Use /help to see all available commands."
+	text := i18n.Localize(lang, "welcome", nil)
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
@@ -315,12 +328,12 @@ func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update 
 		return
 	}
 	username := update.Message.From.Username
+	lang := t.getUserLanguage(chatID)
 
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			//nolint:misspell // Portuguese text
-			Text:      "❌ You are not authorized to use this command. Contact the administrator.",
+			ChatID:    chatID,
+			Text:      i18n.Localize(lang, "unauthorized_config", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 		return
@@ -334,7 +347,7 @@ func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update 
 	if err != nil {
 		b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
-			Text:      "❌ Error loading preferences. Please try again.",
+			Text:      i18n.Localize(lang, "configure_error", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 		return
@@ -342,9 +355,9 @@ func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update 
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
-		Text:        "⚙️ <b>Choose sections to receive notifications for:</b>",
+		Text:        i18n.Localize(lang, "choose_sections", nil),
 		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: t.buildConfigKeyboard(pref),
+		ReplyMarkup: t.buildConfigKeyboard(pref, lang),
 	})
 }
 
@@ -360,12 +373,12 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 	}
 
 	username := update.Message.From.Username
+	lang := t.getUserLanguage(chatID)
 
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			//nolint:misspell // Portuguese text
-			Text:      "❌ You are not authorized to use this command. Contact the administrator.",
+			ChatID:    chatID,
+			Text:      i18n.Localize(lang, "unauthorized", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 		return
@@ -379,32 +392,38 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 	if err != nil {
 		b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
-			Text:      "❌ Error loading preferences. Please try again.",
+			Text:      i18n.Localize(lang, "configure_error", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 		return
 	}
 
-	var msg strings.Builder
-	msg.WriteString("📊 <b>Your preferences:</b>\n\n")
-
+	sections := pref.Sections()
+	sectionsList := make([]map[string]string, 0, len(domain.AllSections))
 	for _, section := range domain.AllSections {
-		if containsSection(pref.Sections(), section) {
-			msg.WriteString(fmt.Sprintf("✅ %s\n", section))
-		} else {
-			msg.WriteString(fmt.Sprintf("❌ %s\n", section))
+		status := "disabled"
+		if containsSection(sections, section) {
+			status = "enabled"
 		}
+		sectionsList = append(sectionsList, map[string]string{
+			"Name":   section,
+			"Status": status,
+		})
 	}
 
+	notificationStatus := "disabled"
 	if pref.Enabled {
-		msg.WriteString("\n🔔 Notifications: <b>Enabled</b>")
-	} else {
-		msg.WriteString("\n🔕 Notifications: <b>Disabled</b>")
+		notificationStatus = "enabled"
 	}
+
+	msg := i18n.Localize(lang, "your_preferences", map[string]interface{}{
+		"Sections":           sectionsList,
+		"NotificationStatus": notificationStatus,
+	})
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
-		Text:      msg.String(),
+		Text:      msg,
 		ParseMode: models.ParseModeHTML,
 	})
 }
@@ -420,12 +439,8 @@ func (t *TelegramNotifier) handleHelp(ctx context.Context, b *bot.Bot, update *m
 		return
 	}
 
-	text := "📖 <b>Available commands:</b>\n\n" +
-		"/start - Welcome message\n" +
-		"/configure - Configure notification sections\n" +
-		"/status - View current preferences\n" +
-		"/help - Show this message\n" +
-		"/checknow - Immediate check"
+	lang := t.getUserLanguage(chatID)
+	text := i18n.Localize(lang, "help_commands", nil)
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
@@ -440,6 +455,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 	}
 
 	chatID := update.Message.Chat.ID
+	lang := t.getUserLanguage(chatID)
 
 	if !t.checkRateLimit(ctx, b, chatID) {
 		return
@@ -448,7 +464,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 	if !t.IsAuthorized(chatID) {
 		b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
-			Text:      "⛔ You do not have permission to execute this command.",
+			Text:      i18n.Localize(lang, "unauthorized", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 		return
@@ -456,7 +472,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
-		Text:      "🔄 Verificação imediata solicitada. Processando...",
+		Text:      i18n.Localize(lang, "check_now_requested", nil),
 		ParseMode: models.ParseModeHTML,
 	})
 
@@ -467,7 +483,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 	if callback == nil {
 		b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
-			Text:      "⚠️ Manual check not available in bot mode. Use scheduler mode.",
+			Text:      i18n.Localize(lang, "check_now_unavailable", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 		return
@@ -477,7 +493,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 		if err := callback(ctx, chatID); err != nil {
 			b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:    chatID,
-				Text:      fmt.Sprintf("❌ Erro na verificação: %v", err),
+				Text:      i18n.Localize(lang, "verification_error", map[string]interface{}{"Error": err.Error()}),
 				ParseMode: models.ParseModeHTML,
 			})
 		}
@@ -495,11 +511,13 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 		return
 	}
 
+	lang := t.getUserLanguage(chatID)
+
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 			CallbackQueryID: update.CallbackQuery.ID,
 			ShowAlert:       true,
-			Text:            "You are not authorized. Contact the administrator.",
+			Text:            i18n.Localize(lang, "unauthorized", nil),
 		})
 		return
 	}
@@ -541,7 +559,7 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 		b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
 			ChatID:      chatID,
 			MessageID:   update.CallbackQuery.Message.Message.ID,
-			ReplyMarkup: t.buildConfigKeyboard(pref),
+			ReplyMarkup: t.buildConfigKeyboard(pref, lang),
 		})
 	}
 }
@@ -557,11 +575,13 @@ func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *m
 		return
 	}
 
+	lang := t.getUserLanguage(chatID)
+
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 			CallbackQueryID: update.CallbackQuery.ID,
 			ShowAlert:       true,
-			Text:            "You are not authorized. Contact the administrator.",
+			Text:            i18n.Localize(lang, "unauthorized", nil),
 		})
 		return
 	}
@@ -584,24 +604,18 @@ func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *m
 	}
 
 	// Preferences are already saved by toggle handler; confirm to user
-	var msg strings.Builder
-	msg.WriteString("✅ <b>Preferences saved!</b>\n\n")
+	sectionsList := pref.Sections()
 
-	if len(pref.Sections()) == 0 {
-		msg.WriteString("No sections selected. You will not receive notifications.")
-	} else {
-		msg.WriteString("Selected sections:\n")
-		for _, s := range pref.Sections() {
-			msg.WriteString(fmt.Sprintf("• %s\n", s))
-		}
-	}
+	msg := i18n.Localize(lang, "preferences_saved", map[string]interface{}{
+		"Sections": sectionsList,
+	})
 
 	// Replace the keyboard message with confirmation
 	if update.CallbackQuery.Message.Message != nil {
-		b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    chatID,
 			MessageID: update.CallbackQuery.Message.Message.ID,
-			Text:      msg.String(),
+			Text:      msg,
 			ParseMode: models.ParseModeHTML,
 		})
 	}
@@ -618,11 +632,13 @@ func (t *TelegramNotifier) handleCancel(ctx context.Context, b *bot.Bot, update 
 		return
 	}
 
+	lang := t.getUserLanguage(chatID)
+
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 			CallbackQueryID: update.CallbackQuery.ID,
 			ShowAlert:       true,
-			Text:            "You are not authorized. Contact the administrator.",
+			Text:            i18n.Localize(lang, "unauthorized", nil),
 		})
 		return
 	}
@@ -638,14 +654,98 @@ func (t *TelegramNotifier) handleCancel(ctx context.Context, b *bot.Bot, update 
 		b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    chatID,
 			MessageID: update.CallbackQuery.Message.Message.ID,
-			Text:      "❌ Configuration cancelled.",
+			Text:      i18n.Localize(lang, "configuration_cancelled", nil),
+			ParseMode: models.ParseModeHTML,
+		})
+	}
+}
+
+func (t *TelegramNotifier) handleLanguage(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
+
+	lang := t.getUserLanguage(chatID)
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      i18n.Localize(lang, "unauthorized", nil),
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "🇺🇸 " + i18n.Localize(lang, "language_english", nil), CallbackData: "lang_en"},
+			},
+			{
+				{Text: "🇧🇷 " + i18n.Localize(lang, "language_portuguese", nil), CallbackData: "lang_pt-BR"},
+			},
+		},
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      chatID,
+		Text:        i18n.Localize(lang, "language_select", nil),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboard,
+	})
+}
+
+func (t *TelegramNotifier) handleLanguageSelect(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+
+	chatID := update.CallbackQuery.From.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
+
+	lang := t.getUserLanguage(chatID)
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			ShowAlert:       true,
+			Text:            i18n.Localize(lang, "unauthorized", nil),
+		})
+		return
+	}
+
+	selectedLang := strings.TrimPrefix(update.CallbackQuery.Data, "lang_")
+
+	if t.prefManager != nil {
+		_ = t.prefManager.UpdateLanguage(chatID, selectedLang)
+	}
+
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		ShowAlert:       false,
+	})
+
+	if update.CallbackQuery.Message.Message != nil {
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: update.CallbackQuery.Message.Message.ID,
+			Text:      i18n.Localize(selectedLang, "language_changed", nil),
 			ParseMode: models.ParseModeHTML,
 		})
 	}
 }
 
 // buildConfigKeyboard builds an inline keyboard for section configuration.
-func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference) models.ReplyMarkup {
+func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference, lang string) models.ReplyMarkup {
 	var rows [][]models.InlineKeyboardButton
 
 	for _, section := range domain.AllSections {
@@ -663,8 +763,8 @@ func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference)
 
 	// Add Save and Cancel buttons
 	rows = append(rows, []models.InlineKeyboardButton{
-		{Text: "💾 Save", CallbackData: "save_config"},
-		{Text: "🚫 Cancel", CallbackData: "cancel_config"},
+		{Text: "💾 " + i18n.Localize(lang, "btn_save", nil), CallbackData: "save_config"},
+		{Text: "🚫 " + i18n.Localize(lang, "btn_cancel", nil), CallbackData: "cancel_config"},
 	})
 
 	return &models.InlineKeyboardMarkup{

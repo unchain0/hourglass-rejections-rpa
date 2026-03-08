@@ -82,3 +82,30 @@ func (pm *PreferenceManager) RecordDiscoveredChat(chatID int64, username string)
 	}
 	return nil
 }
+
+// GetLanguage returns the user's language preference, defaulting to "en"
+func (pm *PreferenceManager) GetLanguage(chatID int64) string {
+	pref, err := pm.store.Get(chatID)
+	if err != nil || pref == nil {
+		return "en"
+	}
+	if pref.Language == "" {
+		return "en"
+	}
+	return pref.Language
+}
+
+// UpdateLanguage updates the user's language preference
+func (pm *PreferenceManager) UpdateLanguage(chatID int64, language string) error {
+	pref, err := pm.store.Get(chatID)
+	if err != nil {
+		return err
+	}
+	if pref == nil {
+		return nil
+	}
+
+	pref.Language = language
+	pref.UpdatedAt = time.Now().UTC()
+	return pm.store.Save(pref)
+}

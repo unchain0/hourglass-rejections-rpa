@@ -28,6 +28,7 @@ type UserPreference struct {
 	Username     string `gorm:"size:255"`
 	SectionsJSON string `gorm:"column:sections"`
 	Enabled      bool   `gorm:"default:true"`
+	Language     string `gorm:"default:'en'"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	// GDPR compliance field - auto-delete after this date

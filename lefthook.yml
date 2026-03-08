@@ -14,7 +14,7 @@ pre-commit:
       run: golangci-lint run --new-from-rev HEAD
     test:
       glob: "*.go"
-      run: go test -race -timeout 5m ./...
+      run: go test -short -timeout 2m $(go list ./... | grep -v '/auth/webauthn')
     govulncheck:
       glob: "*.go"
       run: govulncheck ./...

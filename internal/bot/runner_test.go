@@ -11,9 +11,17 @@ import (
 
 	"hourglass-rejections-rpa/internal/config"
 	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/i18n"
 	"hourglass-rejections-rpa/internal/notifier"
 	"hourglass-rejections-rpa/internal/preferences"
 )
+
+func TestMain(m *testing.M) {
+	if err := i18n.Init(); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
+}
 
 type MockAnalyzer struct {
 	AnalyzeSectionFunc func(section string) (*domain.JobResult, error)
@@ -370,7 +378,8 @@ func TestRunOnceForUser_NoSections(t *testing.T) {
 	mockNotifier := &MockNotifier{
 		SendNoRejectionsMessageFunc: func(chatID int64, message string) error {
 			called = true
-			if message != "Você não tem nenhuma seção configurada para monitoramento." {
+			// Message should be in English (default language)
+			if message != "No sections selected. You will not receive notifications." {
 				t.Errorf("unexpected message: %s", message)
 			}
 			return nil
@@ -480,7 +489,8 @@ func TestRunOnceForUser_NoRejections(t *testing.T) {
 	mockNotifier := &MockNotifier{
 		SendNoRejectionsMessageFunc: func(chatID int64, message string) error {
 			called = true
-			if message != "✅ Nenhuma rejeição encontrada nas seções configuradas." {
+			// Message should be in English (default language)
+			if message != "✅ No rejections found in configured sections." {
 				t.Errorf("unexpected message: %s", message)
 			}
 			return nil

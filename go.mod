@@ -1,8 +1,9 @@
 module hourglass-rejections-rpa
 
-go 1.25.0
+go 1.26
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/charmbracelet/log v0.4.2
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
@@ -13,7 +14,9 @@ require (
 	github.com/go-telegram/bot v1.19.0
 	github.com/go-webauthn/webauthn v0.16.0
 	github.com/joho/godotenv v1.5.1
+	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/text v0.34.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/gorm v1.31.1
 )
@@ -56,7 +59,6 @@ require (
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.37.6 // indirect
 	modernc.org/mathutil v1.6.0 // indirect

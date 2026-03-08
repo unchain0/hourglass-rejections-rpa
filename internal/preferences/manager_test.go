@@ -380,3 +380,131 @@ func TestPreferenceManager_RecordDiscoveredChat_WithMockStore(t *testing.T) {
 		t.Errorf("expected nil error when store is not *Store, got %v", err)
 	}
 }
+
+func TestPreferenceManager_GetLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		pref     *UserPreference
+		wantLang string
+	}{
+		{
+			name:     "user with English language",
+			pref:     &UserPreference{ChatID: 123, Language: "en"},
+			wantLang: "en",
+		},
+		{
+			name:     "user with Portuguese language",
+			pref:     &UserPreference{ChatID: 123, Language: "pt-BR"},
+			wantLang: "pt-BR",
+		},
+		{
+			name:     "user with empty language defaults to en",
+			pref:     &UserPreference{ChatID: 123, Language: ""},
+			wantLang: "en",
+		},
+		{
+			name:     "user not found defaults to en",
+			pref:     nil,
+			wantLang: "en",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &mockStore{
+				getFunc: func(_ int64) (*UserPreference, error) {
+					return tt.pref, nil
+				},
+			}
+			pm := NewPreferenceManager(store)
+
+			got := pm.GetLanguage(123)
+			if got != tt.wantLang {
+				t.Errorf("GetLanguage() = %v, want %v", got, tt.wantLang)
+			}
+		})
+	}
+}
+
+func TestPreferenceManager_GetLanguage_Error(t *testing.T) {
+	store := &mockStore{
+		getFunc: func(_ int64) (*UserPreference, error) {
+			return nil, errors.New("get error")
+		},
+	}
+	pm := NewPreferenceManager(store)
+
+	got := pm.GetLanguage(123)
+	if got != "en" {
+		t.Errorf("GetLanguage() = %v, want en (default)", got)
+	}
+}
+
+func TestPreferenceManager_UpdateLanguage(t *testing.T) {
+	pref := &UserPreference{ChatID: 123, Language: "en"}
+
+	store := &mockStore{
+		getFunc: func(_ int64) (*UserPreference, error) {
+			return pref, nil
+		},
+		saveFunc: func(_ *UserPreference) error {
+			return nil
+		},
+	}
+	pm := NewPreferenceManager(store)
+
+	err := pm.UpdateLanguage(123, "pt-BR")
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if pref.Language != "pt-BR" {
+		t.Errorf("expected Language to be pt-BR, got %s", pref.Language)
+	}
+}
+
+func TestPreferenceManager_UpdateLanguage_GetError(t *testing.T) {
+	store := &mockStore{
+		getFunc: func(_ int64) (*UserPreference, error) {
+			return nil, errors.New("get error")
+		},
+	}
+	pm := NewPreferenceManager(store)
+
+	err := pm.UpdateLanguage(123, "pt-BR")
+	if err == nil || err.Error() != "get error" {
+		t.Errorf("expected get error, got %v", err)
+	}
+}
+
+func TestPreferenceManager_UpdateLanguage_NotFound(t *testing.T) {
+	store := &mockStore{
+		getFunc: func(_ int64) (*UserPreference, error) {
+			return nil, nil
+		},
+	}
+	pm := NewPreferenceManager(store)
+
+	err := pm.UpdateLanguage(123, "pt-BR")
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+func TestPreferenceManager_UpdateLanguage_SaveError(t *testing.T) {
+	pref := &UserPreference{ChatID: 123, Language: "en"}
+
+	store := &mockStore{
+		getFunc: func(_ int64) (*UserPreference, error) {
+			return pref, nil
+		},
+		saveFunc: func(_ *UserPreference) error {
+			return errors.New("save error")
+		},
+	}
+	pm := NewPreferenceManager(store)
+
+	err := pm.UpdateLanguage(123, "pt-BR")
+	if err == nil || err.Error() != "save error" {
+		t.Errorf("expected save error, got %v", err)
+	}
+}

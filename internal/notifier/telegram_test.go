@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -17,8 +18,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/i18n"
 	"hourglass-rejections-rpa/internal/preferences"
 )
+
+func TestMain(m *testing.M) {
+	if err := i18n.Init(); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
+}
 
 // newTestBot creates a bot that skips the getMe API call for testing.
 func newTestBot(t *testing.T) *bot.Bot {
@@ -302,7 +311,7 @@ func TestBuildConfigKeyboard_NoSections(t *testing.T) {
 		SectionsJSON: "[]",
 	}
 
-	keyboard := tn.buildConfigKeyboard(prefs)
+	keyboard := tn.buildConfigKeyboard(prefs, "en")
 	require.NotNil(t, keyboard)
 
 	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
@@ -318,7 +327,7 @@ func TestBuildConfigKeyboard_SomeSections(t *testing.T) {
 		SectionsJSON: `["Campo","Partes Mecânicas"]`,
 	}
 
-	keyboard := tn.buildConfigKeyboard(prefs)
+	keyboard := tn.buildConfigKeyboard(prefs, "en")
 	require.NotNil(t, keyboard)
 
 	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
@@ -334,7 +343,7 @@ func TestBuildConfigKeyboard_AllSections(t *testing.T) {
 		SectionsJSON: `["Partes Mecânicas","Campo","Testemunho Público","Reunião Meio de Semana"]`,
 	}
 
-	keyboard := tn.buildConfigKeyboard(prefs)
+	keyboard := tn.buildConfigKeyboard(prefs, "en")
 	require.NotNil(t, keyboard)
 
 	inlineKB, ok := keyboard.(*models.InlineKeyboardMarkup)
