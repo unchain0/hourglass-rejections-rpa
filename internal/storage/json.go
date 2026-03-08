@@ -17,6 +17,7 @@ import (
 var (
 	jsonMarshalIndent = json.MarshalIndent
 	newCSVWriter      = func(w io.Writer) *csv.Writer { return csv.NewWriter(w) }
+	saveCSVFn         = (*FileStorage).saveCSV
 )
 
 type FileStorage struct {
@@ -45,7 +46,7 @@ func (fs *FileStorage) Save(ctx context.Context, rejeicoes []domain.Rejeicao) er
 		return err
 	}
 
-	if err := fs.saveCSV(csvFilename, rejeicoes); err != nil {
+	if err := saveCSVFn(fs, csvFilename, rejeicoes); err != nil {
 		return err
 	}
 

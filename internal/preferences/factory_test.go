@@ -2,6 +2,7 @@ package preferences
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -147,4 +148,31 @@ func TestNewStoreFromConfig_Postgres_Coverage(t *testing.T) {
 	store, err := NewStoreFromConfig(cfg)
 	assert.Error(t, err)
 	assert.Nil(t, store)
+}
+
+func TestNewSQLiteStore_InvalidDBPath(t *testing.T) {
+	store, err := newSQLiteStore("/invalid/path/that/cannot/exist/test.db")
+	assert.Error(t, err)
+	assert.Nil(t, store)
+}
+
+func TestNewSQLiteStore_PermissionError(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sqlite_permission_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+
+	store1, err := newSQLiteStore(dbPath)
+	require.NoError(t, err)
+	require.NotNil(t, store1)
+	store1.Close()
+
+	err = os.Chmod(tempDir, 0555)
+	require.NoError(t, err)
+	defer os.Chmod(tempDir, 0755)
+
+	store2, err := newSQLiteStore(filepath.Join(tempDir, "test2.db"))
+	assert.Error(t, err)
+	assert.Nil(t, store2)
 }

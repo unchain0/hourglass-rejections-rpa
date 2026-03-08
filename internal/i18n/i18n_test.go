@@ -22,6 +22,7 @@ func TestInit_LoadErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			resetForTesting()
 			originalLoader := loadMessageFile
 			t.Cleanup(func() { loadMessageFile = originalLoader })
 
@@ -42,22 +43,23 @@ func TestInit_LoadErrors(t *testing.T) {
 
 func TestInit(t *testing.T) {
 	t.Run("successful initialization", func(t *testing.T) {
+		resetForTesting()
 		err := Init()
 		require.NoError(t, err)
 		assert.NotNil(t, bundle)
 	})
 
 	t.Run("idempotent initialization", func(t *testing.T) {
+		resetForTesting()
 		err := Init()
 		require.NoError(t, err)
 	})
 }
 
 func TestGetLocalizer(t *testing.T) {
-	if bundle == nil {
-		err := Init()
-		require.NoError(t, err)
-	}
+	resetForTesting()
+	err := Init()
+	require.NoError(t, err)
 
 	tests := []struct {
 		name     string
@@ -105,10 +107,9 @@ func TestGetLocalizer(t *testing.T) {
 }
 
 func TestLocalize(t *testing.T) {
-	if bundle == nil {
-		err := Init()
-		require.NoError(t, err)
-	}
+	resetForTesting()
+	err := Init()
+	require.NoError(t, err)
 
 	tests := []struct {
 		name         string
@@ -184,10 +185,9 @@ func TestLocalize(t *testing.T) {
 }
 
 func TestLocalize_AllKeys(t *testing.T) {
-	if bundle == nil {
-		err := Init()
-		require.NoError(t, err)
-	}
+	resetForTesting()
+	err := Init()
+	require.NoError(t, err)
 
 	keys := []string{
 		"welcome",
@@ -234,10 +234,9 @@ func TestLocalize_AllKeys(t *testing.T) {
 }
 
 func TestLocalize_RejectionsTemplate(t *testing.T) {
-	if bundle == nil {
-		err := Init()
-		require.NoError(t, err)
-	}
+	resetForTesting()
+	err := Init()
+	require.NoError(t, err)
 
 	rejections := []map[string]interface{}{
 		{

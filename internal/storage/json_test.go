@@ -191,6 +191,31 @@ func TestFileStorage_Save_CSVError_InMainSave(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestFileStorage_Save_CSVErrorViaHook(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "storage_csv_hook")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fs := &FileStorage{
+		outputDir: tempDir,
+	}
+
+	rejeicoes := []domain.Rejeicao{
+		{Secao: "Test", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	}
+
+	originalSaveCSV := saveCSVFn
+	defer func() { saveCSVFn = originalSaveCSV }()
+
+	saveCSVFn = func(fs *FileStorage, filename string, rejeicoes []domain.Rejeicao) error {
+		return fmt.Errorf("mock CSV error")
+	}
+
+	err = fs.Save(context.Background(), rejeicoes)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mock CSV error")
+}
+
 func TestFileStorage_Save_CSVMkdirError(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "storage_csv_mkdir")
 	require.NoError(t, err)
