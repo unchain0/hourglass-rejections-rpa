@@ -174,3 +174,19 @@ other = "Non"
 [rejections_detected]
 description = "Message principal de notification de rejets"
 other = "<b>❌ Rejets détectés dans Hourglass</b>\n\n<b>{{.Count}}</b> affectation(s) rejetée(s) :\n\n{{range .Rejections}}<b>Rejet #{{.Number}} :</b>\n👤 <b>Qui :</b> {{.Who}}\n📋 <b>Section :</b> {{.Section}}\n📝 <b>Affectation :</b> {{.What}}\n📅 <b>Date :</b> {{.When}}\n\n{{end}}"
+
+[section_partes_mecanicas]
+description = "Section des Pièces Mécaniques"
+other = "Pièces Mécaniques"
+
+[section_campo]
+description = "Section du Terrain"
+other = "Terrain"
+
+[section_testemunho_publico]
+description = "Section du Témoignage Public"
+other = "Témoignage Public"
+
+[section_reuniao_meio_semana]
+description = "Section de la Réunion de Semaine"
+other = "Réunion de Semaine"

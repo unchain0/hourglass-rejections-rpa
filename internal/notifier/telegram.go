@@ -551,6 +551,23 @@ func (t *TelegramNotifier) handleStats(ctx context.Context, b *bot.Bot, update *
 	})
 }
 
+func translateSectionName(lang, sectionName string) string {
+	sectionKey := ""
+	switch sectionName {
+	case "Partes Mecânicas":
+		sectionKey = "section_partes_mecanicas"
+	case "Campo":
+		sectionKey = "section_campo"
+	case "Testemunho Público":
+		sectionKey = "section_testemunho_publico"
+	case "Reunião Meio de Semana":
+		sectionKey = "section_reuniao_meio_semana"
+	default:
+		return sectionName
+	}
+	return i18n.Localize(lang, sectionKey, nil)
+}
+
 func (t *TelegramNotifier) handleWhoAmI(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
@@ -579,7 +596,11 @@ func (t *TelegramNotifier) handleWhoAmI(ctx context.Context, b *bot.Bot, update 
 			}
 			sections := pref.Sections()
 			if len(sections) > 0 {
-				sectionsDisplay = strings.Join(sections, ", ")
+				translatedSections := make([]string, len(sections))
+				for i, section := range sections {
+					translatedSections[i] = translateSectionName(lang, section)
+				}
+				sectionsDisplay = strings.Join(translatedSections, ", ")
 			}
 		}
 	}
