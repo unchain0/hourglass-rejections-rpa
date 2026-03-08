@@ -933,11 +933,12 @@ func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference,
 	var rows [][]models.InlineKeyboardButton
 
 	for _, section := range domain.AllSections {
+		translatedSection := translateSectionName(lang, section)
 		var label string
 		if containsSection(pref.Sections(), section) {
-			label = "✅ " + section
+			label = "✅ " + translatedSection
 		} else {
-			label = "❌ " + section
+			label = "❌ " + translatedSection
 		}
 
 		rows = append(rows, []models.InlineKeyboardButton{
