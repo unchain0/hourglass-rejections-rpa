@@ -1,8 +1,8 @@
 # Hourglass Rejections RPA 🤖
 
 [![CI](https://github.com/unchain0/hourglass-rejections-rpa/actions/workflows/ci.yml/badge.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/go-1.24-blue.svg)](https://golang.org)
-[![Coverage](https://img.shields.io/badge/coverage-86.2%25-brightgreen.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions)
+[![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://golang.org)
+[![Coverage](https://img.shields.io/badge/coverage-87.6%25-brightgreen.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.yml)
 
@@ -276,6 +276,7 @@ After sending a message to your bot, you can use these commands:
 | `/status` | Show your current preferences |
 | `/help` | List all available commands |
 | `/checknow` | Trigger immediate check |
+| `/language` | Change bot language (English/Portuguese) |
 
 ### User Preferences
 
@@ -305,6 +306,20 @@ go test -cover ./...
 go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
+
+## 🌐 Internationalization (i18n)
+
+This project supports multi-language functionality with a comprehensive 143-key i18n system supporting `pt-BR` (Portuguese-Brazil) and `en-US` (English-US).
+
+### Changing Language
+
+Users can switch the bot language by sending the `/language` command:
+
+```
+/language
+```
+
+The bot will present a language selection menu allowing you to choose between English and Portuguese. All subsequent bot messages and notifications will be displayed in your selected language.
 
 ## 📊 Project Structure
 

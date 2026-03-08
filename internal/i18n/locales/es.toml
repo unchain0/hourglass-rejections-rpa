@@ -1,0 +1,171 @@
+[welcome]
+description = "Mensaje de bienvenida"
+other = "Bienvenido al Bot RPA Hourglass!"
+
+[welcome_instructions]
+description = "Instrucciones después de la bienvenida"
+other = "Usa /configure para elegir qué secciones deseas recibir notificaciones.\nUsa /status para ver tus preferencias actuales.\nUsa /help para ver todos los comandos disponibles.\nUsa /language para cambiar el idioma del bot."
+
+[choose_sections]
+description = "Elegir secciones para recibir notificaciones"
+other = "Elige las secciones para recibir notificaciones:"
+
+[your_preferences]
+description = "Preferencias actuales del usuario"
+other = "Tus preferencias:"
+
+[notifications_enabled]
+description = "Notificaciones activadas"
+other = "Notificaciones: Activadas"
+
+[notifications_disabled]
+description = "Notificaciones desactivadas"
+other = "Notificaciones: Desactivadas"
+
+[no_sections_selected]
+description = "Mensaje sin secciones seleccionadas"
+other = "No hay secciones seleccionadas. No recibirás notificaciones."
+
+[selected_sections]
+description = "Encabezado para lista de secciones seleccionadas"
+other = "Secciones seleccionadas:"
+
+[language_select]
+description = "Solicitud de selección de idioma"
+other = "Selecciona tu idioma:"
+
+[language_changed]
+description = "Confirmación de cambio de idioma"
+other = "✅ Idioma cambiado con éxito!"
+
+[help_commands]
+description = "Lista de comandos disponibles"
+other = "Comandos disponibles:\n/start - Mensaje de bienvenida\n/configure - Configurar secciones de notificación\n/status - Ver preferencias actuales\n/stats - Ver estadísticas del bot\n/whoami - Ver detalles de tu cuenta\n/language - Cambiar idioma\n/help - Mostrar este mensaje\n/checknow - Verificación inmediata"
+
+[rate_limit_exceeded]
+description = "Advertencia de límite de solicitudes"
+other = "⚠️ Límite de solicitudes excedido. Espera un minuto antes de enviar más comandos."
+
+[unauthorized]
+description = "Mensaje de usuario no autorizado"
+other = "No estás autorizado para usar este comando. Contacta al administrador."
+
+[not_authorized_receive]
+description = "No autorizado para recibir notificaciones"
+other = "Puedes interactuar con el bot, pero no estás autorizado para recibir notificaciones. Para recibir notificaciones de rechazos, contacta al administrador y solicita que tu Chat ID sea agregado a la lista blanca.\n\nTu Chat ID: <code>{{.ChatID}}</code>"
+
+[configure_error]
+description = "Error al cargar preferencias"
+other = "Error al cargar preferencias. Inténtalo de nuevo."
+
+[unauthorized_config]
+description = "Intento de configuración no autorizado"
+other = "No estás autorizado para usar este comando. Contacta al administrador."
+
+[preferences_saved]
+description = "Confirmación de preferencias guardadas"
+other = "Preferencias guardadas!"
+
+[check_now_requested]
+description = "Solicitud de verificación inmediata"
+other = "Verificación inmediata solicitada. Procesando..."
+
+[check_now_unavailable]
+description = "Verificación inmediata no disponible"
+other = "La verificación manual no está disponible en modo bot. Usa el modo programado."
+
+[verification_error]
+description = "Error de verificación"
+other = "Error durante la verificación: {{.Error}}"
+
+[no_rejections_configured]
+description = "Sin rechazos en secciones configuradas"
+other = "No tienes ninguna sección configurada para monitoreo."
+
+[no_rejections_found]
+description = "Sin rechazos encontrados"
+other = "✅ No se encontraron rechazos en las secciones configuradas."
+
+[rejections_detected_header]
+description = "Encabezado de rechazos detectados"
+other = "❌ Rechazos Detectados en Hourglass"
+
+[assignments_rejected_count]
+description = "Cantidad de asignaciones rechazadas"
+other = "{{.Count}} asignación(es) rechazada(s):"
+
+[rejection_number]
+description = "Índice de rechazo"
+other = "Rechazo #{{.Index}}:"
+
+[who_label]
+description = "Etiqueta del campo Quién"
+other = "Quién:"
+
+[section_label]
+description = "Etiqueta del campo Sección"
+other = "Sección:"
+
+[assignment_label]
+description = "Etiqueta del campo Asignación"
+other = "Asignación:"
+
+[date_label]
+description = "Etiqueta del campo Fecha"
+other = "Fecha:"
+
+[language_english]
+description = "Opción de idioma inglés"
+other = "English"
+
+[language_portuguese]
+description = "Opción de idioma portugués"
+other = "Português"
+
+[language_spanish]
+description = "Opción de idioma español"
+other = "Español"
+
+[language_french]
+description = "Opción de idioma francés"
+other = "Français"
+
+[welcome_unauthorized]
+description = "Mensaje de bienvenida para usuarios no autorizados"
+other = "🤖 <b>Bienvenido al Bot RPA Hourglass!</b>\n\nPuedes interactuar con el bot, pero <b>no estás autorizado para recibir notificaciones</b>.\n\n📧 Para recibir notificaciones de rechazos, contacta al administrador y solicita que tu Chat ID sea agregado a la lista blanca.\n\nTu Chat ID: <code>{{.ChatID}}</code>"
+
+[btn_save]
+description = "Etiqueta del botón Guardar"
+other = "Guardar"
+
+[btn_cancel]
+description = "Etiqueta del botón Cancelar"
+other = "Cancelar"
+
+[configuration_cancelled]
+description = "Mensaje de configuración cancelada"
+other = "❌ Configuración cancelada."
+
+[stats_overview]
+description = "Resumen de estadísticas del bot"
+other = "📊 <b>Estadísticas del bot</b>\n\n👥 <b>Total de usuarios:</b> {{.TotalUsers}}\n✅ <b>Total de verificaciones:</b> {{.TotalChecks}}\n❌ <b>Rechazos encontrados hoy:</b> {{.RejectionsToday}}"
+
+[whoami_info]
+description = "Detalles de la cuenta del usuario actual"
+other = "👤 <b>Detalles de tu cuenta</b>\n\n🆔 <b>Chat ID:</b> <code>{{.ChatID}}</code>\n🔐 <b>Autorizado:</b> {{.Authorized}}\n🌐 <b>Idioma:</b> {{.Language}}\n📋 <b>Secciones configuradas:</b> {{.Sections}}"
+
+[whoami_no_sections]
+description = "Sin secciones configuradas para whoami"
+other = "No hay secciones configuradas"
+
+[status_yes]
+description = "Estado afirmativo"
+other = "Sí"
+
+[status_no]
+description = "Estado negativo"
+other = "No"
+
+[rejections_detected]
+description = "Mensaje principal de notificación de rechazos"
+other = "<b>❌ Rechazos Detectados en Hourglass</b>\n\n<b>{{.Count}}</b> asignación(es) rechazada(s):\n\n{{range .Rejections}}<b>Rechazo #{{.Number}}:</b>\n👤 <b>Quién:</b> {{.Who}}\n📋 <b>Sección:</b> {{.Section}}\n📝 <b>Asignación:</b> {{.What}}\n📅 <b>Fecha:</b> {{.When}}\n\n{{end}}"

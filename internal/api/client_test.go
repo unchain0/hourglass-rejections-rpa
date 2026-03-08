@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"hourglass-rejections-rpa/internal/auth/webauthn"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -562,4 +564,57 @@ func TestClient_LoadTokensFromFile(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "tokens have expired")
 	})
+}
+
+func TestClient_UpdateTokensFromManager(t *testing.T) {
+	client := NewClient()
+	tokens := &webauthn.AuthTokens{
+		HGLogin:   "new-hg-login",
+		XSRFToken: "new-xsrf-token",
+	}
+
+	client.UpdateTokensFromManager(tokens)
+
+	assert.Equal(t, "new-hg-login", client.hgLogin)
+	assert.Equal(t, "new-xsrf-token", client.xsrfToken)
+}
+
+func TestClient_StartTokenManager_NilManager(t *testing.T) {
+	client := NewClient()
+
+	err := client.StartTokenManager(t.Context())
+
+	assert.NoError(t, err)
+}
+
+func TestClient_StopTokenManager_NilManager(_ *testing.T) {
+	client := NewClient()
+
+	client.StopTokenManager()
+}
+
+func TestClient_EnsureAuth_WebAuthnEnabledWithoutTokenManager(t *testing.T) {
+	client := NewClient()
+	client.useWebAuthn = true
+
+	err := client.ensureAuth()
+
+	assert.NoError(t, err)
+}
+
+func TestNewClientWithWebAuthn_InvalidCredentialsPath(t *testing.T) {
+	client, err := NewClientWithWebAuthn("/nonexistent/webauthn-credentials.json")
+
+	assert.Error(t, err)
+	assert.Nil(t, client)
+	assert.Contains(t, err.Error(), "failed to create token manager")
+}
+
+func TestClient_EnableWebAuthn_InvalidCredentialsPath(t *testing.T) {
+	client := NewClient()
+
+	err := client.EnableWebAuthn("/nonexistent/webauthn-credentials.json")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create token manager")
 }

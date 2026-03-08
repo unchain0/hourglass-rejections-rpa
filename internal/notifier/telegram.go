@@ -66,6 +66,40 @@ type TelegramNotifier struct {
 	mu               sync.Mutex
 	checkNowCallback CheckNowCallback
 	rateLimiter      *rateLimiter
+	stats            *botStats
+}
+
+type botStats struct {
+	mu              sync.RWMutex
+	totalChecks     int
+	lastResetDate   string
+	rejectionsToday int
+}
+
+func newBotStats() *botStats {
+	return &botStats{lastResetDate: time.Now().Format("2006-01-02")}
+}
+
+func (s *botStats) recordCheck(rejectionsFound int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	today := time.Now().Format("2006-01-02")
+	if s.lastResetDate != today {
+		s.lastResetDate = today
+		s.rejectionsToday = 0
+	}
+
+	s.totalChecks++
+	if rejectionsFound > 0 {
+		s.rejectionsToday += rejectionsFound
+	}
+}
+
+func (s *botStats) snapshot() (int, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.totalChecks, s.rejectionsToday
 }
 
 // formatTelegramField formats a field for Telegram HTML messages with proper escaping.
@@ -94,6 +128,7 @@ func NewTelegramNotifier(token string, chatID int64, whitelist []int64) (*Telegr
 		chatID:      chatID,
 		whitelist:   whitelist,
 		rateLimiter: newRateLimiter(),
+		stats:       newBotStats(),
 	}, nil
 }
 
@@ -123,6 +158,10 @@ func (t *TelegramNotifier) SendNoRejectionsMessage(chatID int64, message string)
 
 	if err != nil {
 		return fmt.Errorf("failed to send telegram message: %w", err)
+	}
+
+	if t.stats != nil {
+		t.stats.recordCheck(0)
 	}
 
 	return nil
@@ -166,6 +205,10 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 		return fmt.Errorf("failed to send telegram message: %w", err)
 	}
 
+	if t.stats != nil {
+		t.stats.recordCheck(len(rejections))
+	}
+
 	return nil
 }
 
@@ -202,6 +245,8 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, t.handleStart)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/configure", bot.MatchTypeExact, t.handleConfig)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/status", bot.MatchTypeExact, t.handleStatus)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/stats", bot.MatchTypeExact, t.handleStats)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/whoami", bot.MatchTypeExact, t.handleWhoAmI)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/language", bot.MatchTypeExact, t.handleLanguage)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, t.handleHelp)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/checknow", bot.MatchTypeExact, t.handleCheckNow)
@@ -216,6 +261,8 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 		{Command: "start", Description: "Welcome message"},
 		{Command: "configure", Description: "Configure notification sections"},
 		{Command: "status", Description: "View current preferences"},
+		{Command: "stats", Description: "View bot statistics"},
+		{Command: "whoami", Description: "View your account details"},
 		{Command: "language", Description: "Change language"},
 		{Command: "help", Description: "Show available commands"},
 		{Command: "checknow", Description: "Immediate check"},
@@ -449,6 +496,108 @@ func (t *TelegramNotifier) handleHelp(ctx context.Context, b *bot.Bot, update *m
 	})
 }
 
+func (t *TelegramNotifier) handleStats(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
+
+	lang := t.getUserLanguage(chatID)
+
+	if !t.IsAuthorized(chatID) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      i18n.Localize(lang, "unauthorized", nil),
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	totalUsers := 0
+	if t.prefManager != nil {
+		prefs, err := t.prefManager.List()
+		if err != nil {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:    chatID,
+				Text:      i18n.Localize(lang, "configure_error", nil),
+				ParseMode: models.ParseModeHTML,
+			})
+			return
+		}
+		totalUsers = len(prefs)
+	}
+
+	totalChecks := 0
+	rejectionsToday := 0
+	if t.stats != nil {
+		totalChecks, rejectionsToday = t.stats.snapshot()
+	}
+
+	msg := i18n.Localize(lang, "stats_overview", map[string]interface{}{
+		"TotalUsers":      totalUsers,
+		"TotalChecks":     totalChecks,
+		"RejectionsToday": rejectionsToday,
+	})
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      msg,
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
+func (t *TelegramNotifier) handleWhoAmI(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	if !t.checkRateLimit(ctx, b, chatID) {
+		return
+	}
+
+	lang := t.getUserLanguage(chatID)
+
+	authorizedStatus := i18n.Localize(lang, "status_no", nil)
+	if t.IsAuthorized(chatID) {
+		authorizedStatus = i18n.Localize(lang, "status_yes", nil)
+	}
+
+	languagePreference := lang
+	sectionsDisplay := i18n.Localize(lang, "whoami_no_sections", nil)
+
+	if t.prefManager != nil {
+		if pref, err := t.prefManager.Get(chatID); err == nil && pref != nil {
+			if pref.Language != "" {
+				languagePreference = pref.Language
+			}
+			sections := pref.Sections()
+			if len(sections) > 0 {
+				sectionsDisplay = strings.Join(sections, ", ")
+			}
+		}
+	}
+
+	msg := i18n.Localize(lang, "whoami_info", map[string]interface{}{
+		"ChatID":     chatID,
+		"Authorized": authorizedStatus,
+		"Language":   languagePreference,
+		"Sections":   sectionsDisplay,
+	})
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      msg,
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
 func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
@@ -496,6 +645,9 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 				Text:      i18n.Localize(lang, "verification_error", map[string]interface{}{"Error": err.Error()}),
 				ParseMode: models.ParseModeHTML,
 			})
+			if t.stats != nil {
+				t.stats.recordCheck(0)
+			}
 		}
 	}()
 }
@@ -689,6 +841,12 @@ func (t *TelegramNotifier) handleLanguage(ctx context.Context, b *bot.Bot, updat
 			},
 			{
 				{Text: "🇧🇷 " + i18n.Localize(lang, "language_portuguese", nil), CallbackData: "lang_pt-BR"},
+			},
+			{
+				{Text: "🇪🇸 " + i18n.Localize(lang, "language_spanish", nil), CallbackData: "lang_es"},
+			},
+			{
+				{Text: "🇫🇷 " + i18n.Localize(lang, "language_french", nil), CallbackData: "lang_fr"},
 			},
 		},
 	}

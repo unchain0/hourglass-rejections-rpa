@@ -26,6 +26,12 @@ func Init() error {
 	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/pt-BR.toml"); err != nil {
 		return fmt.Errorf("failed to load Portuguese translations: %w", err)
 	}
+	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/es.toml"); err != nil {
+		return fmt.Errorf("failed to load Spanish translations: %w", err)
+	}
+	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/fr.toml"); err != nil {
+		return fmt.Errorf("failed to load French translations: %w", err)
+	}
 
 	return nil
 }

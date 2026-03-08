@@ -40,7 +40,7 @@ other = "✅ Idioma alterado com sucesso!"
 
 [help_commands]
 description = "Lista de comandos disponíveis"
-other = "Comandos disponíveis:\n/start - Mensagem de boas-vindas\n/configure - Configurar seções de notificação\n/status - Ver preferências atuais\n/language - Alterar idioma\n/help - Mostrar esta mensagem\n/checknow - Verificação imediata"
+other = "Comandos disponíveis:\n/start - Mensagem de boas-vindas\n/configure - Configurar seções de notificação\n/status - Ver preferências atuais\n/stats - Ver estatísticas do bot\n/whoami - Ver detalhes da sua conta\n/language - Alterar idioma\n/help - Mostrar esta mensagem\n/checknow - Verificação imediata"
 
 [rate_limit_exceeded]
 description = "Aviso de limite de taxa"
@@ -116,11 +116,19 @@ other = "Data:"
 
 [language_english]
 description = "English language option"
-other = "🇺🇸 English"
+other = "English"
 
 [language_portuguese]
 description = "Portuguese language option"
-other = "🇧🇷 Português"
+other = "Português"
+
+[language_spanish]
+description = "Spanish language option"
+other = "Español"
+
+[language_french]
+description = "French language option"
+other = "Français"
 
 [welcome_unauthorized]
 description = "Welcome message for unauthorized users"
@@ -137,6 +145,26 @@ other = "Cancelar"
 [configuration_cancelled]
 description = "Configuration cancelled message"
 other = "❌ Configuração cancelada."
+
+[stats_overview]
+description = "Visão geral das estatísticas do bot"
+other = "📊 <b>Estatísticas do bot</b>\n\n👥 <b>Total de usuários:</b> {{.TotalUsers}}\n✅ <b>Total de verificações:</b> {{.TotalChecks}}\n❌ <b>Rejeições encontradas hoje:</b> {{.RejectionsToday}}"
+
+[whoami_info]
+description = "Detalhes da conta do usuário atual"
+other = "👤 <b>Detalhes da sua conta</b>\n\n🆔 <b>Chat ID:</b> <code>{{.ChatID}}</code>\n🔐 <b>Autorizado:</b> {{.Authorized}}\n🌐 <b>Idioma:</b> {{.Language}}\n📋 <b>Seções configuradas:</b> {{.Sections}}"
+
+[whoami_no_sections]
+description = "Sem seções configuradas para whoami"
+other = "Nenhuma seção configurada"
+
+[status_yes]
+description = "Status afirmativo"
+other = "Sim"
+
+[status_no]
+description = "Status negativo"
+other = "Não"
 
 [rejections_detected]
 description = "Main rejections notification message"

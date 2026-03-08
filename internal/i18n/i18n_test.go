@@ -47,6 +47,16 @@ func TestGetLocalizer(t *testing.T) {
 			wantLang: "en",
 		},
 		{
+			name:     "Spanish language",
+			langTag:  "es",
+			wantLang: "es",
+		},
+		{
+			name:     "French language",
+			langTag:  "fr",
+			wantLang: "fr",
+		},
+		{
 			name:     "Invalid language falls back",
 			langTag:  "invalid",
 			wantLang: "invalid",
@@ -116,6 +126,20 @@ func TestLocalize(t *testing.T) {
 			templateData: nil,
 			wantContain:  "Welcome",
 		},
+		{
+			name:         "Spanish welcome message",
+			lang:         "es",
+			messageID:    "welcome",
+			templateData: nil,
+			wantContain:  "Bienvenido",
+		},
+		{
+			name:         "French welcome message",
+			lang:         "fr",
+			messageID:    "welcome",
+			templateData: nil,
+			wantContain:  "Bienvenue",
+		},
 	}
 
 	for _, tt := range tests {
@@ -151,12 +175,19 @@ func TestLocalize_AllKeys(t *testing.T) {
 		"rejections_detected",
 		"language_english",
 		"language_portuguese",
+		"language_spanish",
+		"language_french",
 		"btn_save",
 		"btn_cancel",
 		"configuration_cancelled",
+		"stats_overview",
+		"whoami_info",
+		"whoami_no_sections",
+		"status_yes",
+		"status_no",
 	}
 
-	languages := []string{"en", "pt-BR"}
+	languages := []string{"en", "pt-BR", "es", "fr"}
 
 	for _, lang := range languages {
 		for _, key := range keys {
@@ -191,6 +222,8 @@ func TestLocalize_RejectionsTemplate(t *testing.T) {
 	}{
 		{name: "English rejections", lang: "en"},
 		{name: "Portuguese rejections", lang: "pt-BR"},
+		{name: "Spanish rejections", lang: "es"},
+		{name: "French rejections", lang: "fr"},
 	}
 
 	for _, tt := range tests {

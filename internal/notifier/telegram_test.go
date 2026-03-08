@@ -444,6 +444,114 @@ func TestHandleHelp_NilMessage(t *testing.T) {
 	tn.handleHelp(context.Background(), b, update)
 }
 
+func TestHandleStats(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBotWithServer(t, srv)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	_, _ = pm.GetOrCreate(54321, "otheruser")
+
+	_ = tn.SendNoRejectionsMessage(12345, "ok")
+	_ = tn.SendRejectionsNotification(12345, []domain.Rejeicao{{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"}})
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleStats(context.Background(), b, update)
+}
+
+func TestHandleStats_UnauthorizedWithMockServer(t *testing.T) {
+	tn := newTestNotifier(t, []int64{999})
+	b := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleStats(context.Background(), b, update)
+}
+
+func TestHandleStats_NilMessage(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{Message: nil}
+	tn.handleStats(context.Background(), b, update)
+}
+
+func TestHandleWhoAmI(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBotWithServer(t, srv)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	_ = pm.UpdateSections(12345, []string{"Campo", "Partes Mecânicas"})
+	_ = pm.UpdateLanguage(12345, "es")
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "testuser"},
+		},
+	}
+
+	tn.handleWhoAmI(context.Background(), b, update)
+}
+
+func TestHandleWhoAmI_NilMessage(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	b := newTestBot(t)
+
+	update := &models.Update{Message: nil}
+	tn.handleWhoAmI(context.Background(), b, update)
+}
+
+func TestHandleLanguageSelect_SpanishAndFrench(t *testing.T) {
+	tn := newTestNotifier(t, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBot(t)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+
+	updateES := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id-es",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "lang_es",
+		},
+	}
+
+	tn.handleLanguageSelect(context.Background(), b, updateES)
+	assert.Equal(t, "es", pm.GetLanguage(12345))
+
+	updateFR := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "test-id-fr",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "lang_fr",
+		},
+	}
+
+	tn.handleLanguageSelect(context.Background(), b, updateFR)
+	assert.Equal(t, "fr", pm.GetLanguage(12345))
+}
+
 func TestHandleCheckNow_Unauthorized(t *testing.T) {
 	tn := newTestNotifier(t, []int64{999})
 	b := newTestBot(t)
@@ -1202,4 +1310,253 @@ func TestHandleSave_GetOrCreateError(t *testing.T) {
 		},
 	}
 	tn.handleSave(context.Background(), b, update)
+}
+
+func TestRateLimiterAllow_WithinLimitAndCleanup(t *testing.T) {
+	rl := newRateLimiter()
+	chatID := int64(12345)
+
+	old := time.Now().Add(-2 * time.Minute)
+	for i := 0; i < 10; i++ {
+		rl.attempts[chatID] = append(rl.attempts[chatID], old)
+	}
+
+	allowed := rl.Allow(chatID)
+	assert.True(t, allowed)
+	assert.Len(t, rl.attempts[chatID], 1)
+}
+
+func TestRateLimiterAllow_Exceeded(t *testing.T) {
+	rl := newRateLimiter()
+	chatID := int64(12345)
+
+	now := time.Now()
+	for i := 0; i < 10; i++ {
+		rl.attempts[chatID] = append(rl.attempts[chatID], now)
+	}
+
+	allowed := rl.Allow(chatID)
+	assert.False(t, allowed)
+	assert.Len(t, rl.attempts[chatID], 10)
+}
+
+func TestFormatTelegramField_EscapesHTML(t *testing.T) {
+	formatted := formatTelegramField("👤", "Who", "<b>Alice & Bob</b>")
+
+	assert.Contains(t, formatted, "👤 <b>Who:</b>")
+	assert.Contains(t, formatted, "&lt;b&gt;Alice &amp; Bob&lt;/b&gt;")
+	assert.NotContains(t, formatted, "<b>Alice & Bob</b>")
+}
+
+func TestCheckRateLimit_NilLimiter(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.rateLimiter = nil
+	b := newTestBotWithServer(t, srv)
+
+	allowed := tn.checkRateLimit(context.Background(), b, 12345)
+	assert.True(t, allowed)
+}
+
+func TestCheckRateLimit_Exceeded(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.rateLimiter = newRateLimiter()
+	b := newTestBotWithServer(t, srv)
+	chatID := int64(12345)
+
+	now := time.Now()
+	for i := 0; i < 10; i++ {
+		tn.rateLimiter.attempts[chatID] = append(tn.rateLimiter.attempts[chatID], now)
+	}
+
+	allowed := tn.checkRateLimit(context.Background(), b, chatID)
+	assert.False(t, allowed)
+}
+
+func TestHandleLanguage_Unauthorized(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{999})
+	b := newTestBotWithServer(t, srv)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleLanguage(context.Background(), b, update)
+}
+
+func TestHandleLanguage_Authorized(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	b := newTestBotWithServer(t, srv)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleLanguage(context.Background(), b, update)
+}
+
+func TestHandleLanguageSelect_Unauthorized(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{999})
+	b := newTestBotWithServer(t, srv)
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "callback-id",
+			From: models.User{ID: 12345, Username: "user"},
+			Data: "lang_pt-BR",
+		},
+	}
+
+	tn.handleLanguageSelect(context.Background(), b, update)
+}
+
+func TestHandleLanguageSelect_AuthorizedUpdatesLanguage(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBotWithServer(t, srv)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+
+	update := &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:   "callback-id",
+			From: models.User{ID: 12345, Username: "testuser"},
+			Data: "lang_pt-BR",
+			Message: models.MaybeInaccessibleMessage{
+				Message: &models.Message{
+					ID:   1,
+					Chat: models.Chat{ID: 12345},
+				},
+			},
+		},
+	}
+
+	tn.handleLanguageSelect(context.Background(), b, update)
+	assert.Equal(t, "pt-BR", pm.GetLanguage(12345))
+}
+
+func TestBotStats_RecordCheckAndSnapshot(t *testing.T) {
+	stats := newBotStats()
+	stats.lastResetDate = "2000-01-01"
+
+	stats.recordCheck(3)
+	totalChecks, rejectionsToday := stats.snapshot()
+
+	assert.Equal(t, 1, totalChecks)
+	assert.Equal(t, 3, rejectionsToday)
+}
+
+func TestHandleStats_Unauthorized(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{999})
+	b := newTestBotWithServer(t, srv)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleStats(context.Background(), b, update)
+}
+
+func TestHandleStats_Authorized(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	tn.stats = newBotStats()
+	b := newTestBotWithServer(t, srv)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	tn.stats.recordCheck(2)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleStats(context.Background(), b, update)
+}
+
+func TestHandleStats_ListError(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	tn.prefManager = newClosedPrefManager(t)
+	b := newTestBotWithServer(t, srv)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleStats(context.Background(), b, update)
+}
+
+func TestHandleWhoAmI_WithoutPreferences(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	b := newTestBotWithServer(t, srv)
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleWhoAmI(context.Background(), b, update)
+}
+
+func TestHandleWhoAmI_WithPreferences(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBotWithServer(t, srv)
+
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	_ = pm.UpdateSections(12345, []string{"Campo", "Partes Mecânicas"})
+	_ = pm.UpdateLanguage(12345, "pt-BR")
+
+	update := &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+		},
+	}
+
+	tn.handleWhoAmI(context.Background(), b, update)
 }

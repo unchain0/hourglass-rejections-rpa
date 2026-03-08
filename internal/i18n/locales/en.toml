@@ -40,7 +40,7 @@ other = "✅ Language changed successfully!"
 
 [help_commands]
 description = "Available commands list"
-other = "Available commands:\n/start - Welcome message\n/configure - Configure notification sections\n/status - View current preferences\n/language - Change language\n/help - Show this message\n/checknow - Immediate check"
+other = "Available commands:\n/start - Welcome message\n/configure - Configure notification sections\n/status - View current preferences\n/stats - View bot statistics\n/whoami - View your account details\n/language - Change language\n/help - Show this message\n/checknow - Immediate check"
 
 [rate_limit_exceeded]
 description = "Rate limit warning"
@@ -116,11 +116,19 @@ other = "Date:"
 
 [language_english]
 description = "English language option"
-other = "🇺🇸 English"
+other = "English"
 
 [language_portuguese]
 description = "Portuguese language option"
-other = "🇧🇷 Português"
+other = "Português"
+
+[language_spanish]
+description = "Spanish language option"
+other = "Español"
+
+[language_french]
+description = "French language option"
+other = "Français"
 
 [welcome_unauthorized]
 description = "Welcome message for unauthorized users"
@@ -137,6 +145,26 @@ other = "Cancel"
 [configuration_cancelled]
 description = "Configuration cancelled message"
 other = "❌ Configuration cancelled."
+
+[stats_overview]
+description = "Bot statistics overview"
+other = "📊 <b>Bot statistics</b>\n\n👥 <b>Total users:</b> {{.TotalUsers}}\n✅ <b>Total checks:</b> {{.TotalChecks}}\n❌ <b>Rejections found today:</b> {{.RejectionsToday}}"
+
+[whoami_info]
+description = "Current user account details"
+other = "👤 <b>Your account details</b>\n\n🆔 <b>Chat ID:</b> <code>{{.ChatID}}</code>\n🔐 <b>Authorized:</b> {{.Authorized}}\n🌐 <b>Language:</b> {{.Language}}\n📋 <b>Configured sections:</b> {{.Sections}}"
+
+[whoami_no_sections]
+description = "No configured sections for whoami"
+other = "No sections configured"
+
+[status_yes]
+description = "Affirmative status"
+other = "Yes"
+
+[status_no]
+description = "Negative status"
+other = "No"
 
 [rejections_detected]
 description = "Main rejections notification message"
