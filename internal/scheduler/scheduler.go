@@ -77,7 +77,12 @@ func (s *Scheduler) runWithTicker(ctx context.Context, ticker *time.Ticker) erro
 			if s.runAnalysisFn != nil {
 				analysisFn = s.runAnalysisFn
 			}
-			if err := analysisFn(ctx); err != nil {
+
+			analysisCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			err := analysisFn(analysisCtx)
+			cancel()
+
+			if err != nil {
 				logger.Error("scheduled analysis failed", "error", err)
 				s.sentryClient.CaptureError(err, map[string]interface{}{
 					"phase": "scheduled_analysis",

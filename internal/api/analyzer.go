@@ -119,8 +119,9 @@ func (a *APIAnalyzer) getUserName(userID int) string {
 
 // analyzeGenericNotifications is a generic function to analyze notifications for a section.
 func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType string) ([]domain.Rejeicao, error) {
-	start := time.Now().Format("2006-01-02")
-	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
+	now := time.Now()
+	start := now.Format("2006-01-02")
+	end := now.AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
 
 	notifications, err := a.client.GetNotifications(start, end, notificationType)
 	if err != nil {
@@ -128,7 +129,7 @@ func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType 
 	}
 
 	var rejeicoes []domain.Rejeicao
-	timestamp := time.Now()
+	timestamp := now
 
 	for _, notif := range notifications {
 		if notif.Status == "declined" {

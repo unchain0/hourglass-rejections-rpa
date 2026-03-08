@@ -91,10 +91,18 @@ func newSQLiteStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	db.Exec("PRAGMA foreign_keys = ON")
-	db.Exec("PRAGMA journal_mode = WAL")
-	db.Exec("PRAGMA synchronous = NORMAL")
-	db.Exec("PRAGMA busy_timeout = 5000")
+	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		return nil, fmt.Errorf("failed to set PRAGMA foreign_keys: %w", err)
+	}
+	if err := db.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
+		return nil, fmt.Errorf("failed to set PRAGMA journal_mode: %w", err)
+	}
+	if err := db.Exec("PRAGMA synchronous = NORMAL").Error; err != nil {
+		return nil, fmt.Errorf("failed to set PRAGMA synchronous: %w", err)
+	}
+	if err := db.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+		return nil, fmt.Errorf("failed to set PRAGMA busy_timeout: %w", err)
+	}
 
 	if err := autoMigrateFn(db); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)

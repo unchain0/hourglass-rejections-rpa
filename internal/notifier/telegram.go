@@ -53,7 +53,12 @@ func (rl *rateLimiter) Allow(chatID int64) bool {
 		return false
 	}
 
-	rl.attempts[chatID] = append(valid, now)
+	valid = append(valid, now)
+	if len(valid) > 0 {
+		rl.attempts[chatID] = valid
+	} else {
+		delete(rl.attempts, chatID)
+	}
 	return true
 }
 
@@ -183,10 +188,10 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 	for i, r := range rejections {
 		rejectionsList = append(rejectionsList, map[string]interface{}{
 			"Number":  i + 1,
-			"Who":     r.Quem,
-			"Section": r.Secao,
-			"What":    r.OQue,
-			"When":    r.PraQuando,
+			"Who":     html.EscapeString(r.Quem),
+			"Section": html.EscapeString(r.Secao),
+			"What":    html.EscapeString(r.OQue),
+			"When":    html.EscapeString(r.PraQuando),
 		})
 	}
 
@@ -663,7 +668,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 		if err := callback(ctx, chatID); err != nil {
 			b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:    chatID,
-				Text:      i18n.Localize(lang, "verification_error", map[string]interface{}{"Error": err.Error()}),
+				Text:      i18n.Localize(lang, "verification_error", map[string]interface{}{"Error": html.EscapeString(err.Error())}),
 				ParseMode: models.ParseModeHTML,
 			})
 			if t.stats != nil {

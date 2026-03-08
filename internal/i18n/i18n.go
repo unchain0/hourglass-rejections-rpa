@@ -58,6 +58,9 @@ func resetForTesting() {
 
 // GetLocalizer returns a localizer for the given language tag.
 func GetLocalizer(langTag string) *i18n.Localizer {
+	if bundle == nil {
+		_ = Init()
+	}
 	if langTag == "" {
 		return i18n.NewLocalizer(bundle, "en")
 	}
@@ -67,8 +70,12 @@ func GetLocalizer(langTag string) *i18n.Localizer {
 // Localize translates a message ID to the specified language.
 func Localize(lang string, messageID string, templateData map[string]interface{}) string {
 	localizer := GetLocalizer(lang)
-	return localizer.MustLocalize(&i18n.LocalizeConfig{
+	msg, err := localizer.Localize(&i18n.LocalizeConfig{
 		MessageID:    messageID,
 		TemplateData: templateData,
 	})
+	if err != nil {
+		return messageID
+	}
+	return msg
 }

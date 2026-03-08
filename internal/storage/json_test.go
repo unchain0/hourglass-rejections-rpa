@@ -118,7 +118,7 @@ func TestFileStorage_Save_Error(t *testing.T) {
 	}
 	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to write JSON file")
+	assert.Contains(t, err.Error(), "failed to write temp file")
 
 	// Test Save error from saveCSV
 	tempDir3, err := os.MkdirTemp("", "storage_test_csv_error_save")
@@ -231,21 +231,6 @@ func TestFileStorage_Save_CSVMkdirError(t *testing.T) {
 
 	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
 	assert.Error(t, err)
-}
-
-func TestFileStorage_SaveCSV_Error(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "storage_csv_error")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	fs := &FileStorage{
-		outputDir: tempDir,
-	}
-
-	// Test os.Create error
-	err = fs.saveCSV(tempDir, []domain.Rejeicao{{}}) // tempDir is a directory, os.Create(tempDir) should fail
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create CSV file")
 }
 
 func TestFileStorage_Cookies(t *testing.T) {

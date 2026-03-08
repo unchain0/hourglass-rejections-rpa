@@ -59,21 +59,35 @@ func (fs *FileStorage) saveJSON(filename string, rejeicoes []domain.Rejeicao) er
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
-	if err := os.WriteFile(filename, data, 0600); err != nil {
-		return fmt.Errorf("failed to write JSON file: %w", err)
-	}
+	return writeFileAtomic(filename, data, 0600)
+}
 
-	return nil
+func writeFileAtomic(filename string, data []byte, perm os.FileMode) error {
+	tmp := filename + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	return os.Rename(tmp, filename)
 }
 
 func (fs *FileStorage) saveCSV(filename string, rejeicoes []domain.Rejeicao) error {
-	file, err := os.Create(filename)
+	tmp := filename + ".tmp"
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
-		return fmt.Errorf("failed to create CSV file: %w", err)
+		return fmt.Errorf("failed to create temp CSV file: %w", err)
 	}
-	defer file.Close()
+	defer os.Remove(tmp)
 
-	return fs.writeCSV(file, rejeicoes)
+	if err := fs.writeCSV(file, rejeicoes); err != nil {
+		file.Close()
+		return err
+	}
+
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("failed to close CSV file: %w", err)
+	}
+
+	return os.Rename(tmp, filename)
 }
 
 func (fs *FileStorage) writeCSV(w io.Writer, rejeicoes []domain.Rejeicao) error {
