@@ -1,12 +1,14 @@
 package preferences
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestNewDatabaseConfigFromEnv_Defaults(t *testing.T) {
@@ -175,4 +177,52 @@ func TestNewSQLiteStore_PermissionError(t *testing.T) {
 	store2, err := newSQLiteStore(filepath.Join(tempDir, "test2.db"))
 	assert.Error(t, err)
 	assert.Nil(t, store2)
+}
+
+func TestNewSQLiteStore_AutoMigrateError(t *testing.T) {
+	originalAutoMigrate := autoMigrateFn
+	defer func() { autoMigrateFn = originalAutoMigrate }()
+
+	autoMigrateFn = func(db *gorm.DB) error {
+		return fmt.Errorf("auto migrate failed")
+	}
+
+	store, err := newSQLiteStore(":memory:")
+	assert.Error(t, err)
+	assert.Nil(t, store)
+}
+
+func TestNewSQLiteStore_SetSecurePermissionsError(t *testing.T) {
+	originalSetSecure := setSecurePermissionsFn
+	setSecurePermissionsFn = func(dbPath string) error {
+		return fmt.Errorf("permission denied")
+	}
+	defer func() { setSecurePermissionsFn = originalSetSecure }()
+
+	store, err := newSQLiteStore(":memory:")
+	assert.Error(t, err)
+	assert.Nil(t, store)
+}
+
+func TestNewPostgresStore_AutoMigrateError(t *testing.T) {
+	originalAutoMigrate := autoMigrateFn
+	defer func() { autoMigrateFn = originalAutoMigrate }()
+
+	autoMigrateFn = func(db *gorm.DB) error {
+		return fmt.Errorf("auto migrate failed")
+	}
+
+	cfg := &DatabaseConfig{
+		Type:     "postgres",
+		Host:     "localhost",
+		Port:     "5432",
+		User:     "test",
+		Password: "test",
+		DBName:   "test",
+		SSLMode:  "disable",
+	}
+
+	store, err := newPostgresStore(cfg)
+	assert.Error(t, err)
+	assert.Nil(t, store)
 }

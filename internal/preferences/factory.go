@@ -75,6 +75,10 @@ func NewStoreFromConfig(cfg *DatabaseConfig) (*Store, error) {
 	}
 }
 
+var autoMigrateFn = func(db *gorm.DB) error {
+	return db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{})
+}
+
 func newSQLiteStore(dbPath string) (*Store, error) {
 	if err := ensureSecureDirectory(dbPath); err != nil {
 		return nil, fmt.Errorf("failed to ensure secure directory: %w", err)
@@ -92,11 +96,11 @@ func newSQLiteStore(dbPath string) (*Store, error) {
 	db.Exec("PRAGMA synchronous = NORMAL")
 	db.Exec("PRAGMA busy_timeout = 5000")
 
-	if err := db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{}); err != nil {
+	if err := autoMigrateFn(db); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	if err := setSecurePermissions(dbPath); err != nil {
+	if err := setSecurePermissionsFn(dbPath); err != nil {
 		return nil, fmt.Errorf("failed to set database permissions: %w", err)
 	}
 
