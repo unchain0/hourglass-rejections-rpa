@@ -19,10 +19,10 @@ jobs:
         go-version: '1.26'
 
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v4
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.64.5
-        args: --timeout=5m --go=1.26
+        version: latest
+        args: --timeout=5m
   test:
     name: Test
     runs-on: ubuntu-latest
