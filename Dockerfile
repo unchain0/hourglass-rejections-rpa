@@ -6,7 +6,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o rpa ./cmd/rpa
 
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates tzdata chromium nss freetype harfbuzz ttf-freefont && \
+RUN apk add --no-cache ca-certificates tzdata chromium nss freetype harfbuzz ttf-freefont curl && \
     addgroup -g 1000 -S rpa && \
     adduser -u 1000 -S rpa -G rpa
 WORKDIR /app
