@@ -1,3 +1,4 @@
+// Package testutil provides mock implementations for testing.
 package testutil
 
 import (
@@ -8,6 +9,7 @@ import (
 	"strings"
 )
 
+// MockFileSystem is a mock implementation of the file system interface.
 type MockFileSystem struct {
 	HomeDir    string
 	HomeDirErr error
@@ -24,6 +26,7 @@ type MockFileSystem struct {
 	}
 }
 
+// NewMockFileSystem creates a new mock file system.
 func NewMockFileSystem() *MockFileSystem {
 	return &MockFileSystem{
 		Files: make(map[string][]byte),
@@ -39,10 +42,12 @@ func NewMockFileSystem() *MockFileSystem {
 	}
 }
 
+// UserHomeDir returns the mock home directory.
 func (m *MockFileSystem) UserHomeDir() (string, error) {
 	return m.HomeDir, m.HomeDirErr
 }
 
+// ReadFile reads a file from the mock file system.
 func (m *MockFileSystem) ReadFile(filename string) ([]byte, error) {
 	m.Calls.ReadFile = append(m.Calls.ReadFile, filename)
 	if m.ReadErr != nil {
@@ -54,7 +59,8 @@ func (m *MockFileSystem) ReadFile(filename string) ([]byte, error) {
 	return nil, fmt.Errorf("file not found: %s", filename)
 }
 
-func (m *MockFileSystem) WriteFile(filename string, data []byte, perm os.FileMode) error {
+// WriteFile writes a file to the mock file system.
+func (m *MockFileSystem) WriteFile(filename string, data []byte, _ os.FileMode) error {
 	m.Calls.WriteFile = append(m.Calls.WriteFile, filename)
 	if m.WriteErr != nil {
 		return m.WriteErr
@@ -63,7 +69,8 @@ func (m *MockFileSystem) WriteFile(filename string, data []byte, perm os.FileMod
 	return nil
 }
 
-func (m *MockFileSystem) MkdirAll(path string, perm os.FileMode) error {
+// MkdirAll creates directories in the mock file system.
+func (m *MockFileSystem) MkdirAll(path string, _ os.FileMode) error {
 	m.Calls.MkdirAll = append(m.Calls.MkdirAll, path)
 	return m.MkdirErr
 }
@@ -75,12 +82,14 @@ type MockHTTPClient struct {
 	Requests []*http.Request
 }
 
+// NewMockHTTPClient creates a new mock HTTP client.
 func NewMockHTTPClient() *MockHTTPClient {
 	return &MockHTTPClient{
 		Requests: []*http.Request{},
 	}
 }
 
+// Do executes an HTTP request and returns a mock response.
 func (m *MockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	m.Requests = append(m.Requests, req)
 	return m.Response, m.Err
@@ -101,6 +110,7 @@ type MockUserInput struct {
 	}
 }
 
+// NewMockUserInput creates a new mock user input.
 func NewMockUserInput() *MockUserInput {
 	return &MockUserInput{
 		Calls: struct {
@@ -115,6 +125,7 @@ func NewMockUserInput() *MockUserInput {
 	}
 }
 
+// ReadLine reads a line from mock input.
 func (m *MockUserInput) ReadLine() (string, error) {
 	m.Calls.ReadLine++
 	if m.LineErr != nil {
@@ -128,6 +139,7 @@ func (m *MockUserInput) ReadLine() (string, error) {
 	return line, nil
 }
 
+// Confirm prompts for confirmation with a message.
 func (m *MockUserInput) Confirm(msg string) (bool, error) {
 	m.Calls.Confirm++
 	m.Calls.ConfirmMsg = append(m.Calls.ConfirmMsg, msg)
@@ -152,6 +164,7 @@ type MockSCPClient struct {
 	Calls int
 }
 
+// NewMockSCPClient creates a new mock SCP client.
 func NewMockSCPClient() *MockSCPClient {
 	return &MockSCPClient{
 		Copies: []struct {
@@ -161,6 +174,7 @@ func NewMockSCPClient() *MockSCPClient {
 	}
 }
 
+// CopyFile copies a file using SCP.
 func (m *MockSCPClient) CopyFile(src, dst string) error {
 	m.Calls++
 	m.Copies = append(m.Copies, struct {

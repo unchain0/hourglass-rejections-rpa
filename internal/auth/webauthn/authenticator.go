@@ -206,7 +206,7 @@ func (a *Authenticator) httpGet(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -431,6 +431,6 @@ func (a *Authenticator) httpPost(url string, data []byte) ([]byte, error) {
 
 func generateUserID() string {
 	id := make([]byte, 16)
-	rand.Read(id)
+	_, _ = rand.Read(id)
 	return base64.StdEncoding.EncodeToString(id)
 }

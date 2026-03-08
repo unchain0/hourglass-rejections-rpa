@@ -1,3 +1,4 @@
+// Package sentry provides Sentry error tracking integration.
 package sentry
 
 import (

@@ -43,7 +43,7 @@ func TestNew_InvalidDSN(t *testing.T) {
 	}
 }
 
-func TestClient_CaptureError_Disabled(t *testing.T) {
+func TestClient_CaptureError_Disabled(_ *testing.T) {
 	client := &Client{enabled: false}
 
 	// Should not panic when disabled
@@ -51,14 +51,14 @@ func TestClient_CaptureError_Disabled(t *testing.T) {
 	client.CaptureError(errors.New("test error"), map[string]interface{}{"key": "value"})
 }
 
-func TestClient_CaptureMessage_Disabled(t *testing.T) {
+func TestClient_CaptureMessage_Disabled(_ *testing.T) {
 	client := &Client{enabled: false}
 
 	// Should not panic when disabled
 	client.CaptureMessage("test message", "info")
 }
 
-func TestClient_Flush_Disabled(t *testing.T) {
+func TestClient_Flush_Disabled(_ *testing.T) {
 	client := &Client{enabled: false}
 
 	// Should not panic when disabled

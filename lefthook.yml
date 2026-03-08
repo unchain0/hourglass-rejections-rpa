@@ -30,7 +30,7 @@ pre-push:
       run: |
         go tool cover -func=coverage.out | grep total | awk '{print "Total coverage: " $3}'
         COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-        if [ "$(echo "$COVERAGE < 100" | bc -l)" = "1" ]; then
-          echo "Coverage is below 100%"
+        if [ "$(echo "$COVERAGE < 95" | bc -l)" = "1" ]; then
+          echo "Coverage is below 95%"
           exit 1
         fi

@@ -30,6 +30,42 @@ func (m *mockBrowserAuth) WithHeadless(_ bool) browserAuth {
 	return m
 }
 
+// setupVPSUploadTest é um helper para testes de VPS upload.
+func setupVPSUploadTest(t *testing.T, inputs []string) (error, string) {
+	t.Helper()
+
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	defer func() {
+		_ = w.Close()
+		os.Stdin = oldStdin
+	}()
+
+	go func() {
+		for _, input := range inputs {
+			_, _ = fmt.Fprintln(w, input)
+		}
+	}()
+
+	oldStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() {
+		_ = pw.Close()
+		os.Stdout = oldStdout
+	}()
+
+	tokensPath := filepath.Join(t.TempDir(), "tokens.json")
+	err := askVPSUpload(tokensPath)
+	_ = r
+
+	_ = pw.Close()
+	output, _ := io.ReadAll(pr)
+
+	return err, string(output)
+}
+
 func TestSetupOptions(t *testing.T) {
 	t.Run("default options", func(t *testing.T) {
 		opts := setupOptions{
@@ -577,71 +613,19 @@ func TestAskVPSUpload(t *testing.T) {
 	})
 
 	t.Run("valid VPS host with default path", func(t *testing.T) {
-		oldStdin := os.Stdin
-		r, w, _ := os.Pipe()
-		os.Stdin = r
-		defer func() {
-			_ = w.Close()
-			os.Stdin = oldStdin
-		}()
-
-		go func() {
-			_, _ = fmt.Fprintln(w, "yes")
-			_, _ = fmt.Fprintln(w, "user@host")
-			_, _ = fmt.Fprintln(w, "")
-		}()
-
-		oldStdout := os.Stdout
-		pr, pw, _ := os.Pipe()
-		os.Stdout = pw
-		defer func() {
-			_ = pw.Close()
-			os.Stdout = oldStdout
-		}()
-
-		err := askVPSUpload(tokensPath)
-		_ = r
+		err, output := setupVPSUploadTest(t, []string{"yes", "user@host", ""})
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")
-
-		_ = pw.Close()
-		output, _ := io.ReadAll(pr)
-		assert.Contains(t, string(output), "Transferring tokens to VPS")
+		assert.Contains(t, output, "Transferring tokens to VPS")
 	})
 
 	t.Run("valid VPS host with custom path", func(t *testing.T) {
-		oldStdin := os.Stdin
-		r, w, _ := os.Pipe()
-		os.Stdin = r
-		defer func() {
-			_ = w.Close()
-			os.Stdin = oldStdin
-		}()
-
-		go func() {
-			_, _ = fmt.Fprintln(w, "yes")
-			_, _ = fmt.Fprintln(w, "user@host")
-			_, _ = fmt.Fprintln(w, "/custom/path/tokens.json")
-		}()
-
-		oldStdout := os.Stdout
-		pr, pw, _ := os.Pipe()
-		os.Stdout = pw
-		defer func() {
-			_ = pw.Close()
-			os.Stdout = oldStdout
-		}()
-
-		err := askVPSUpload(tokensPath)
-		_ = r
+		err, output := setupVPSUploadTest(t, []string{"yes", "user@host", "/custom/path/tokens.json"})
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")
-
-		_ = pw.Close()
-		output, _ := io.ReadAll(pr)
-		assert.Contains(t, string(output), "Transferring tokens to VPS")
+		assert.Contains(t, output, "Transferring tokens to VPS")
 	})
 
 	t.Run("case insensitive yes", func(t *testing.T) {

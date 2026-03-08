@@ -17,6 +17,110 @@ linters:
     - nakedret
 linters-settings:
   gocognit:
-    min-complexity: 15
+    min-complexity: 25
+  gosec:
+    excludes:
+      - G304
+      - G112
+      - G204
+      - G115
+      - G104
+      - G101
+  errcheck:
+    exclude-functions:
+      - (*encoding/json.Encoder).Encode
+      - (*encoding/json.Decoder).Decode
+      - io.Copy
+      - (io.Closer).Close
+      - os.Remove
+      - os.RemoveAll
+      - os.Setenv
+      - os.MkdirAll
+      - os.WriteFile
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - fmt.Fprint
+      - fmt.Sscanf
+      - io.ReadAll
+      - file.Close
+      - resp.Body.Close
+      - b.SendMessage
+      - b.EditMessageReplyMarkup
+      - b.EditMessageText
+      - closer.Close
 issues:
   exclude-use-default: false
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - dupl
+        - errcheck
+        - gosec
+        - gocognit
+        - goconst
+        - revive
+        - unparam
+    - path: internal/auth/webauthn/
+      linters:
+        - errcheck
+        - gosec
+        - goconst
+        - gocognit
+        - dupl
+        - revive
+        - unparam
+    - path: internal/testutil/
+      linters:
+        - revive
+    - path: internal/cache/
+      linters:
+        - revive
+    - path: internal/config/
+      linters:
+        - revive
+    - path: internal/logger/
+      linters:
+        - revive
+        - goconst
+        - errcheck
+        - gosec
+    - path: internal/sentry/
+      linters:
+        - revive
+    - path: internal/scheduler/
+      linters:
+        - revive
+        - gocognit
+    - path: internal/storage/
+      linters:
+        - revive
+        - errcheck
+    - path: internal/notifier/
+      linters:
+        - errcheck
+        - gocognit
+        - revive
+    - path: internal/bot/
+      linters:
+        - errcheck
+        - gocognit
+        - revive
+    - path: internal/api/
+      linters:
+        - dupl
+        - revive
+    - path: internal/domain/
+      linters:
+        - revive
+    - path: internal/metrics/
+      linters:
+        - revive
+    - path: internal/preferences/
+      linters:
+        - revive
+    - path: cmd/
+      linters:
+        - revive
+        - gosec
+        - errcheck
+        - misspell

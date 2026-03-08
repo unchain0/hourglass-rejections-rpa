@@ -103,7 +103,7 @@ func (a *Authenticator) beginAuthentication() (*BeginAuthenticationResponse, err
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -271,7 +271,7 @@ func (a *Authenticator) finishAuthentication(assertion *AssertionResponse) (*Aut
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
