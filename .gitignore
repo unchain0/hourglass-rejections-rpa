@@ -1,6 +1,9 @@
 # Binaries
 rpa
 generate-key
+save-tokens
+setup-auth
+token-refresh
 *.exe
 *.dll
 *.so
@@ -64,6 +67,9 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Sisyphus/Agent artifacts
+.sisyphus/
 
 # Documentation (keep only README.md)
 HOOKS.md

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -26,8 +27,13 @@ type Scheduler struct {
 	analyzer     Analyzer
 	store        Storage
 	cache        *cache.RejectionCache
+	notifier     domain.Notifier
 
 	runAnalysisFn func(ctx context.Context) error
+}
+
+func (s *Scheduler) SetNotifier(n domain.Notifier) {
+	s.notifier = n
 }
 
 func New(cfg *config.Config, sentryClient *sentry.Client, analyzer Analyzer, store Storage) *Scheduler {
@@ -100,6 +106,7 @@ func (s *Scheduler) calculateInterval(now time.Time) time.Duration {
 }
 
 func (s *Scheduler) runAnalysis(ctx context.Context) error {
+	start := time.Now()
 	var allRejections []domain.Rejeicao
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -151,10 +158,10 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 	}
 
 	wg.Wait()
-	return s.sendNotifications(allRejections)
+	return s.sendNotifications(allRejections, time.Since(start))
 }
 
-func (s *Scheduler) sendNotifications(rejections []domain.Rejeicao) error {
+func (s *Scheduler) sendNotifications(rejections []domain.Rejeicao, duration time.Duration) error {
 	if len(rejections) == 0 {
 		return nil
 	}
@@ -164,5 +171,37 @@ func (s *Scheduler) sendNotifications(rejections []domain.Rejeicao) error {
 		return nil
 	}
 
+	if s.notifier == nil {
+		slog.Warn("no notifier configured, skipping notification")
+		return nil
+	}
+
+	bySection := make(map[string]int)
+	for _, r := range rejections {
+		bySection[r.Secao]++
+	}
+
+	summary := fmt.Sprintf("%d rejeições detectadas", len(rejections))
+	if len(bySection) > 0 {
+		summary += ". Seções: "
+		first := true
+		for section, count := range bySection {
+			if !first {
+				summary += ", "
+			}
+			summary += fmt.Sprintf("%s (%d)", section, count)
+			first = false
+		}
+	}
+
+	if err := s.notifier.SendJobCompletion(summary, duration); err != nil {
+		slog.Error("failed to send notification", "error", err)
+		s.sentryClient.CaptureError(err, map[string]interface{}{
+			"phase": "send_notification",
+		})
+		return err
+	}
+
+	slog.Info("notification sent", "summary", summary, "duration", duration)
 	return nil
 }

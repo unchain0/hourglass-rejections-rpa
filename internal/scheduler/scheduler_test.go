@@ -77,7 +77,7 @@ func TestScheduler_sendNotifications_EmptyRejections(t *testing.T) {
 		cache: cache.New(),
 	}
 
-	err := s.sendNotifications([]domain.Rejeicao{})
+	err := s.sendNotifications([]domain.Rejeicao{}, 0)
 	if err != nil {
 		t.Errorf("sendNotifications with empty rejections should return nil, got: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestScheduler_sendNotifications_WithChanges(t *testing.T) {
 		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
 	}
 
-	err := s.sendNotifications(rejections)
+	err := s.sendNotifications(rejections, time.Second)
 	if err != nil {
 		t.Errorf("sendNotifications with changes should return nil, got: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestScheduler_sendNotifications_NoChanges(t *testing.T) {
 	}
 
 	s.cache.HasChanges(rejections)
-	err := s.sendNotifications(rejections)
+	err := s.sendNotifications(rejections, time.Second)
 
 	if err != nil {
 		t.Errorf("sendNotifications with no changes should return nil, got: %v", err)

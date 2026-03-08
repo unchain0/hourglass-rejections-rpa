@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"hourglass-rejections-rpa/internal/domain"
@@ -12,6 +13,8 @@ import (
 type APIAnalyzer struct {
 	client          *Client
 	userCache       map[int]*User
+	userCacheOnce   sync.Once
+	userCacheErr    error
 	congregationID  int
 	daysToLookAhead int
 }
@@ -41,15 +44,15 @@ func (a *APIAnalyzer) SetDaysToLookAhead(days int) {
 func (a *APIAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error) {
 	start := time.Now()
 
-	// Load users cache if empty
-	if len(a.userCache) == 0 {
-		if err := a.loadUsers(); err != nil {
-			return &domain.JobResult{
-				Secao:    section,
-				Duration: time.Since(start),
-				Error:    fmt.Errorf("failed to load users: %w", err),
-			}, nil
-		}
+	a.userCacheOnce.Do(func() {
+		a.userCacheErr = a.loadUsers()
+	})
+	if a.userCacheErr != nil {
+		return &domain.JobResult{
+			Secao:    section,
+			Duration: time.Since(start),
+			Error:    fmt.Errorf("failed to load users: %w", a.userCacheErr),
+		}, nil
 	}
 
 	var rejeicoes []domain.Rejeicao

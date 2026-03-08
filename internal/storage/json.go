@@ -36,7 +36,8 @@ func (fs *FileStorage) Save(ctx context.Context, rejeicoes []domain.Rejeicao) er
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	timestamp := time.Now().Format("20060102_1504")
+	now := time.Now()
+	timestamp := now.Format("20060102_150405") + fmt.Sprintf("_%09d", now.Nanosecond())
 	jsonFilename := filepath.Join(fs.outputDir, fmt.Sprintf("rejeicoes_%s.json", timestamp))
 	csvFilename := filepath.Join(fs.outputDir, fmt.Sprintf("rejeicoes_%s.csv", timestamp))
 

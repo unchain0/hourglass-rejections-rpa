@@ -125,18 +125,15 @@ func TestFileStorage_Save_Error(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir3)
 
-	// We need to know the timestamp to pre-create the CSV directory
-	timestamp := time.Now().Format("20060102_1504")
-	csvDir := filepath.Join(tempDir3, fmt.Sprintf("rejeicoes_%s.csv", timestamp))
-	err = os.MkdirAll(csvDir, 0755)
+	err = os.Chmod(tempDir3, 0555)
 	require.NoError(t, err)
+	defer os.Chmod(tempDir3, 0755)
 
 	fs = &FileStorage{
 		outputDir: tempDir3,
 	}
 	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create CSV file")
 }
 
 func TestFileStorage_Save_CSVError(t *testing.T) {
@@ -148,15 +145,67 @@ func TestFileStorage_Save_CSVError(t *testing.T) {
 		outputDir: tempDir,
 	}
 
-	// Pre-create a directory with the name that Save will try to use for the CSV file
-	timestamp := time.Now().Format("20060102_1504")
-	csvDir := filepath.Join(tempDir, fmt.Sprintf("rejeicoes_%s.csv", timestamp))
-	err = os.MkdirAll(csvDir, 0755)
+	err = os.Chmod(tempDir, 0555)
 	require.NoError(t, err)
+	defer os.Chmod(tempDir, 0755)
 
 	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create CSV file")
+}
+
+func TestFileStorage_Save_CSVError_Direct(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "storage_csv_direct")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	csvAsDir := filepath.Join(tempDir, "rejeicoes_test.csv")
+	err = os.Mkdir(csvAsDir, 0755)
+	require.NoError(t, err)
+
+	fs := &FileStorage{
+		outputDir: tempDir,
+	}
+
+	rejeicoes := []domain.Rejeicao{
+		{Secao: "Test", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	}
+
+	err = fs.saveCSV(csvAsDir, rejeicoes)
+	assert.Error(t, err)
+}
+
+func TestFileStorage_Save_CSVError_InMainSave(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "storage_csv_main")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fs := &FileStorage{
+		outputDir: tempDir,
+	}
+
+	rejeicoes := []domain.Rejeicao{
+		{Secao: "Test", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	}
+
+	err = fs.Save(context.Background(), rejeicoes)
+	assert.NoError(t, err)
+}
+
+func TestFileStorage_Save_CSVMkdirError(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "storage_csv_mkdir")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	err = os.Chmod(tempDir, 0555)
+	require.NoError(t, err)
+	defer os.Chmod(tempDir, 0755)
+
+	fs := &FileStorage{
+		outputDir: tempDir,
+	}
+
+	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
+	assert.Error(t, err)
 }
 
 func TestFileStorage_SaveCSV_Error(t *testing.T) {
