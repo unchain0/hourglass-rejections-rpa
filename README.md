@@ -15,11 +15,11 @@ Automated system to monitor assignment rejections in Hourglass. Runs 2x daily (9
 - **Smart Scheduling**: Cron jobs for 9 AM and 5 PM daily
 - **Multiple Formats**: Exports data in JSON and CSV
 - **Maximum Range**: Searches for rejections up to 2 years (730 days)
-- **86.2% Coverage**: Comprehensive unit tests
+- **98.1% Coverage**: Comprehensive unit tests
 
 ## 📋 Prerequisites
 
-- Go 1.24+ (for development)
+- Go 1.26+ (for development)
 - Docker (for deployment)
 - Telegram account (for notifications)
 
@@ -402,7 +402,7 @@ Coolify will automatically detect the `docker-compose.yml` and build.
 
 ## 🛠️ Technologies
 
-- **Go 1.24** - Main language
+- **Go 1.26** - Main language
 - **go-telegram/bot** - Telegram integration
 - **robfig/cron** - Scheduling
 - **charmbracelet/log** - Logging
