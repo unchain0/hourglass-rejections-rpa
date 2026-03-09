@@ -63,7 +63,7 @@ func (c *Client) LoadTokensFromFile(path string) error {
 }
 
 // NewClientWithWebAuthn creates a new Hourglass API client with WebAuthn authentication.
-func NewClientWithWebAuthn(credentialsPath string) (*Client, error) {
+func NewClientWithWebAuthn(credentialsPath string, sentryCapture func(error, map[string]interface{})) (*Client, error) {
 	jar, _ := cookiejar.New(nil)
 	client := &Client{
 		httpClient: &http.Client{
@@ -74,7 +74,16 @@ func NewClientWithWebAuthn(credentialsPath string) (*Client, error) {
 		useWebAuthn: true,
 	}
 
-	tokenManager, err := webauthn.NewTokenManager(credentialsPath, defaultBaseURL)
+	tokenManager, err := webauthn.NewTokenManager(credentialsPath, defaultBaseURL,
+		webauthn.WithOnError(func(err error) {
+			if sentryCapture != nil {
+				sentryCapture(err, map[string]interface{}{
+					"component": "token_manager",
+					"action":    "token_renewal",
+				})
+			}
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create token manager: %w", err)
 	}
@@ -83,10 +92,18 @@ func NewClientWithWebAuthn(credentialsPath string) (*Client, error) {
 	return client, nil
 }
 
-func (c *Client) EnableWebAuthn(credentialsPath string) error {
+func (c *Client) EnableWebAuthn(credentialsPath string, sentryCapture func(error, map[string]interface{})) error {
 	tokenManager, err := webauthn.NewTokenManager(credentialsPath, c.baseURL,
 		webauthn.WithOnTokenRenewed(func(tokens *webauthn.AuthTokens) {
 			c.UpdateTokensFromManager(tokens)
+		}),
+		webauthn.WithOnError(func(err error) {
+			if sentryCapture != nil {
+				sentryCapture(err, map[string]interface{}{
+					"component": "token_manager",
+					"action":    "token_renewal",
+				})
+			}
 		}),
 	)
 	if err != nil {

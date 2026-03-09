@@ -603,7 +603,7 @@ func TestClient_EnsureAuth_WebAuthnEnabledWithoutTokenManager(t *testing.T) {
 }
 
 func TestNewClientWithWebAuthn_InvalidCredentialsPath(t *testing.T) {
-	client, err := NewClientWithWebAuthn("/nonexistent/webauthn-credentials.json")
+	client, err := NewClientWithWebAuthn("/nonexistent/webauthn-credentials.json", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, client)
@@ -613,7 +613,7 @@ func TestNewClientWithWebAuthn_InvalidCredentialsPath(t *testing.T) {
 func TestClient_EnableWebAuthn_InvalidCredentialsPath(t *testing.T) {
 	client := NewClient()
 
-	err := client.EnableWebAuthn("/nonexistent/webauthn-credentials.json")
+	err := client.EnableWebAuthn("/nonexistent/webauthn-credentials.json", nil)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create token manager")
@@ -622,7 +622,7 @@ func TestClient_EnableWebAuthn_InvalidCredentialsPath(t *testing.T) {
 func TestNewClientWithWebAuthn_Success(t *testing.T) {
 	credentialsPath := t.TempDir() + "/webauthn-credentials.json"
 
-	client, err := NewClientWithWebAuthn(credentialsPath)
+	client, err := NewClientWithWebAuthn(credentialsPath, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -635,7 +635,7 @@ func TestClient_EnableWebAuthn_Success(t *testing.T) {
 	client := NewClient()
 	credentialsPath := t.TempDir() + "/webauthn-credentials.json"
 
-	err := client.EnableWebAuthn(credentialsPath)
+	err := client.EnableWebAuthn(credentialsPath, nil)
 
 	require.NoError(t, err)
 	assert.True(t, client.useWebAuthn)
@@ -656,7 +656,7 @@ func TestClient_EnableWebAuthn_CallbackUpdatesTokensOnStart(t *testing.T) {
 	require.NoError(t, os.WriteFile(tokensPath, data, 0o600))
 
 	client := NewClient()
-	err = client.EnableWebAuthn(credentialsPath)
+	err = client.EnableWebAuthn(credentialsPath, nil)
 	require.NoError(t, err)
 
 	err = client.StartTokenManager(t.Context())

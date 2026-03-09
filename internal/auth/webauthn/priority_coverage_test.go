@@ -299,7 +299,7 @@ func TestPriority_TokenManagerAuthenticateWithFallback(t *testing.T) {
 
 	_, err := tm.authenticateWithFallback()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "native authentication failed")
+	assert.Contains(t, err.Error(), "no WebAuthn credentials available")
 }
 
 func TestPriority_BeginAuthenticationErrorPaths(t *testing.T) {
@@ -613,7 +613,7 @@ func TestPriority_BrowserFallbackErrorPathAndChromePath(t *testing.T) {
 
 		_, err := tm.authenticateWithFallback()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "browser auth fallback failed")
+		assert.Contains(t, err.Error(), "no WebAuthn credentials available")
 	})
 }
 

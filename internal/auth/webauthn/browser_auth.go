@@ -15,11 +15,38 @@ import (
 )
 
 const (
-	authPath           = "/v2/page/app"
-	maxAuthAttempts    = 3
-	authAttemptTimeout = 2 * time.Minute
-	authPollInterval   = 1 * time.Second
+	authPath             = "/v2/page/app"
+	maxAuthAttempts      = 3
+	defaultAuthTimeout   = 2 * time.Minute
+	testAuthTimeout      = 5 * time.Second
+	shortTestAuthTimeout = 1 * time.Second
+	defaultPollInterval  = 1 * time.Second
+	testPollInterval     = 100 * time.Millisecond
 )
+
+func getPollInterval() time.Duration {
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("TEST_TIMEOUT_SHORT") == "1" {
+		return testPollInterval
+	}
+	return defaultPollInterval
+}
+
+func getAuthAttemptTimeout() time.Duration {
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
+		return shortTestAuthTimeout
+	}
+	if os.Getenv("TEST_TIMEOUT_SHORT") == "1" {
+		return testAuthTimeout
+	}
+	return defaultAuthTimeout
+}
+
+func getRetryDelay(attempt int) time.Duration {
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("TEST_TIMEOUT_SHORT") == "1" {
+		return 100 * time.Millisecond
+	}
+	return time.Duration(attempt) * time.Second
+}
 
 func getChromePath() string {
 	if path := os.Getenv("CHROME_BIN"); path != "" {
@@ -80,7 +107,7 @@ func (ba *BrowserAuth) Authenticate() (*AuthTokens, error) {
 		}
 
 		slog.Info("retrying authentication after transient error", "attempt", attempt, "error", err)
-		time.Sleep(time.Duration(attempt) * time.Second)
+		time.Sleep(getRetryDelay(attempt))
 	}
 
 	slog.Error("browser authentication failed", "error", lastErr)
@@ -119,7 +146,7 @@ func (ba *BrowserAuth) authenticateAttempt() (*AuthTokens, error) {
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
 	defer cancelBrowser()
 
-	timeoutCtx, cancelTimeout := context.WithTimeout(browserCtx, authAttemptTimeout)
+	timeoutCtx, cancelTimeout := context.WithTimeout(browserCtx, getAuthAttemptTimeout())
 	defer cancelTimeout()
 
 	var cookies []*network.Cookie
@@ -193,11 +220,11 @@ func (ba *BrowserAuth) waitForAuthentication(ctx context.Context, cookies *[]*ne
 		}
 
 		if state.IsAuthenticatedURL && !state.HasWebAuthnPrompt {
-			time.Sleep(authPollInterval)
+			time.Sleep(getPollInterval())
 			continue
 		}
 
-		time.Sleep(authPollInterval)
+		time.Sleep(getPollInterval())
 	}
 }
 
