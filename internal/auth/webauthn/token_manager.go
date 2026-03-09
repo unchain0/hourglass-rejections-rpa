@@ -93,9 +93,13 @@ func NewTokenManager(storagePath, baseURL string, opts ...TokenManagerOption) (*
 		return nil, err
 	}
 
+	isHeadless := IsHeadlessEnvironment()
+	if isHeadless {
+		slog.Info("detected headless environment, disabling browser authentication", "storage_path", storagePath)
+	}
+
 	tm := &TokenManager{
 		authenticator:    authenticator,
-		browserAuth:      NewBrowserAuth(baseURL),
 		storagePath:      storagePath,
 		tokensPath:       tokensPath,
 		baseURL:          baseURL,
@@ -103,9 +107,15 @@ func NewTokenManager(storagePath, baseURL string, opts ...TokenManagerOption) (*
 		stopChan:         make(chan struct{}),
 	}
 
+	if !isHeadless {
+		tm.browserAuth = NewBrowserAuth(baseURL)
+	}
+
 	for _, opt := range opts {
 		opt(tm)
 	}
+
+	slog.Info("token manager initialized", "tokens_path", tm.tokensPath, "storage_path", tm.storagePath, "headless", isHeadless, "has_browser_auth", tm.browserAuth != nil)
 
 	return tm, nil
 }
@@ -169,28 +179,45 @@ func (tm *TokenManager) IsAuthenticated() bool {
 func (tm *TokenManager) EnsureValidTokens() (*AuthTokens, error) {
 	tokens := tm.GetTokens()
 
+	if tokens != nil {
+		timeUntilExpiry := time.Until(tokens.ExpiresAt)
+		slog.Debug("checking token validity", "expires_at", tokens.ExpiresAt, "time_until_expiry", timeUntilExpiry, "threshold", tm.renewalThreshold)
+	}
+
 	if tokens == nil || tokens.IsNearExpiry(tm.renewalThreshold) {
-		slog.Info("renewing authentication tokens")
+		if tokens == nil {
+			slog.Info("no tokens available, attempting authentication")
+		} else {
+			slog.Info("tokens near expiry or expired, renewing", "expires_at", tokens.ExpiresAt, "threshold", tm.renewalThreshold)
+		}
+
 		newTokens, err := tm.authenticateWithFallback()
 		if err != nil {
+			slog.Error("authentication failed", "error", err)
 			if tm.onError != nil {
 				tm.onError(err)
 			}
 			return nil, err
 		}
 
+		slog.Info("authentication successful, updating tokens", "expires_at", newTokens.ExpiresAt)
 		tm.setTokens(newTokens)
+
 		if err := tm.SaveTokens(newTokens); err != nil {
-			slog.Warn("failed to persist authentication tokens", "path", tm.tokensPath, "error", err)
+			slog.Error("CRITICAL: failed to persist authentication tokens", "path", tm.tokensPath, "error", err)
+		} else {
+			slog.Info("tokens persisted successfully", "path", tm.tokensPath)
 		}
 
 		if tm.onTokenRenewed != nil {
+			slog.Info("calling onTokenRenewed callback")
 			tm.onTokenRenewed(newTokens)
 		}
 
 		return newTokens, nil
 	}
 
+	slog.Debug("tokens still valid, no renewal needed", "expires_at", tokens.ExpiresAt)
 	return tokens, nil
 }
 
@@ -204,21 +231,37 @@ func (tm *TokenManager) SaveTokens(tokens *AuthTokens) error {
 		return errors.New("tokens path is not configured")
 	}
 
+	slog.Info("saving tokens to disk", "path", tm.tokensPath, "expires_at", tokens.ExpiresAt, "hglogin_present", tokens.HGLogin != "", "xsrf_present", tokens.XSRFToken != "")
+
 	data, err := json.Marshal(tokens)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tokens: %w", err)
 	}
 
 	dir := filepath.Dir(tm.tokensPath)
+	slog.Debug("ensuring directory exists", "dir", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create tokens directory: %w", err)
 	}
 
-	if err := os.WriteFile(tm.tokensPath, data, 0o600); err != nil {
-		return fmt.Errorf("failed to write tokens file: %w", err)
+	tempPath := tm.tokensPath + ".tmp"
+	slog.Debug("writing to temp file", "temp_path", tempPath)
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write temp tokens file: %w", err)
 	}
 
-	slog.Info("persisted authentication tokens", "path", tm.tokensPath, "expires_at", tokens.ExpiresAt)
+	slog.Debug("renaming temp file to final path", "from", tempPath, "to", tm.tokensPath)
+	if err := os.Rename(tempPath, tm.tokensPath); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to rename tokens file: %w", err)
+	}
+
+	info, err := os.Stat(tm.tokensPath)
+	if err != nil {
+		slog.Warn("could not stat tokens file after save", "error", err)
+	} else {
+		slog.Info("tokens saved successfully", "path", tm.tokensPath, "size", info.Size(), "expires_at", tokens.ExpiresAt)
+	}
 
 	return nil
 }
@@ -247,20 +290,33 @@ func (tm *TokenManager) LoadTokens() (*AuthTokens, error) {
 }
 
 func (tm *TokenManager) authenticateWithFallback() (*AuthTokens, error) {
+	slog.Info("attempting authentication fallback", "has_browser_auth", tm.browserAuth != nil, "has_credentials", tm.HasWebAuthnCredentials())
+
 	if tm.browserAuth != nil {
-		slog.Info("using browser authentication")
+		slog.Info("trying browser authentication first")
 		tokens, err := tm.browserAuth.Authenticate()
 		if err == nil {
+			slog.Info("browser authentication succeeded")
 			return tokens, nil
 		}
-		slog.Error("browser authentication failed", "error", err)
+		slog.Error("browser authentication failed, falling back to WebAuthn", "error", err)
+	} else {
+		slog.Info("browser auth disabled (headless environment), using WebAuthn only")
 	}
 
+	if !tm.HasWebAuthnCredentials() {
+		slog.Error("no WebAuthn credentials found", "storage_path", tm.storagePath)
+		return nil, fmt.Errorf("no WebAuthn credentials available - run 'make setup-auth' to configure")
+	}
+
+	slog.Info("attempting WebAuthn authentication", "storage_path", tm.storagePath)
 	tokens, err := tm.authenticator.Authenticate()
 	if err != nil {
+		slog.Error("WebAuthn authentication failed", "error", err)
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
+	slog.Info("WebAuthn authentication succeeded")
 	return tokens, nil
 }
 
