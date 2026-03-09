@@ -48,7 +48,7 @@ func (rl *rateLimiter) Allow(chatID int64) bool {
 		}
 	}
 
-	if len(valid) >= 10 {
+	if len(valid) >= 30 {
 		rl.attempts[chatID] = valid
 		return false
 	}

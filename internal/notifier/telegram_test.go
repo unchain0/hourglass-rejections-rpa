@@ -1331,13 +1331,13 @@ func TestRateLimiterAllow_Exceeded(t *testing.T) {
 	chatID := int64(12345)
 
 	now := time.Now()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		rl.attempts[chatID] = append(rl.attempts[chatID], now)
 	}
 
 	allowed := rl.Allow(chatID)
 	assert.False(t, allowed)
-	assert.Len(t, rl.attempts[chatID], 10)
+	assert.Len(t, rl.attempts[chatID], 30)
 }
 
 func TestFormatTelegramField_EscapesHTML(t *testing.T) {
@@ -1370,7 +1370,7 @@ func TestCheckRateLimit_Exceeded(t *testing.T) {
 	chatID := int64(12345)
 
 	now := time.Now()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		tn.rateLimiter.attempts[chatID] = append(tn.rateLimiter.attempts[chatID], now)
 	}
 
