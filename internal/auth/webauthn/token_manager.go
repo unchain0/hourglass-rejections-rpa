@@ -313,7 +313,7 @@ func (tm *TokenManager) authenticateWithFallback() (*AuthTokens, error) {
 	tokens, err := tm.authenticator.Authenticate()
 	if err != nil {
 		slog.Error("WebAuthn authentication failed", "error", err)
-		return nil, fmt.Errorf("authentication failed: %w", err)
+		return nil, fmt.Errorf("browser auth fallback failed: %w", err)
 	}
 
 	slog.Info("WebAuthn authentication succeeded")

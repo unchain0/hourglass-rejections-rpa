@@ -607,15 +607,24 @@ func TestPriority_BrowserFallbackErrorPathAndChromePath(t *testing.T) {
 		t.Setenv("CHROME_PATH", "")
 
 		tempDir := t.TempDir()
+		credentialsPath := filepath.Join(tempDir, "credentials.json")
+		storage, _ := NewStorage(credentialsPath)
+		storage.Save(&StoredCredentials{Version: 1, Credentials: []Credential{{ID: "test-cred"}}})
+
 		tm := &TokenManager{
-			authenticator: &Authenticator{storage: &Storage{path: filepath.Join(tempDir, "credentials.json")}},
-			browserAuth:   NewBrowserAuth("https://example.com"),
-			storagePath:   filepath.Join(tempDir, "credentials.json"),
+			authenticator: &Authenticator{
+				storage: &Storage{path: credentialsPath},
+				httpClient: &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
+					return nil, errors.New("webauthn auth failed")
+				}},
+			},
+			browserAuth: NewBrowserAuth("https://example.com"),
+			storagePath: credentialsPath,
 		}
 
 		_, err := tm.authenticateWithFallback()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no WebAuthn credentials available")
+		assert.Contains(t, err.Error(), "browser auth fallback failed")
 	})
 }
 
