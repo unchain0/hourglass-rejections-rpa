@@ -606,9 +606,11 @@ func TestPriority_BrowserFallbackErrorPathAndChromePath(t *testing.T) {
 		t.Setenv("CHROME_BIN", "/definitely/not/a/real/chrome")
 		t.Setenv("CHROME_PATH", "")
 
+		tempDir := t.TempDir()
 		tm := &TokenManager{
-			authenticator: &Authenticator{storage: &Storage{path: filepath.Join(t.TempDir(), "credentials.json")}},
+			authenticator: &Authenticator{storage: &Storage{path: filepath.Join(tempDir, "credentials.json")}},
 			browserAuth:   NewBrowserAuth("https://example.com"),
+			storagePath:   filepath.Join(tempDir, "credentials.json"),
 		}
 
 		_, err := tm.authenticateWithFallback()
