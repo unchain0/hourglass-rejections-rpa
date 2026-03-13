@@ -3,10 +3,11 @@ package webauthn
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,7 @@ func TestAuthTokens(t *testing.T) {
 	assert.False(t, tokens.IsExpired())
 	assert.False(t, tokens.IsNearExpiry(30*time.Minute))
 	assert.True(t, tokens.IsNearExpiry(2*time.Hour))
+	assert.True(t, tokens.IsUsable())
 
 	expiredTokens := &AuthTokens{
 		HGLogin:   "test",
@@ -94,14 +96,20 @@ func TestAuthTokens(t *testing.T) {
 		ExpiresAt: time.Now().Add(-1 * time.Hour),
 	}
 	assert.True(t, expiredTokens.IsExpired())
+	assert.True(t, expiredTokens.IsUsable())
+
+	incompleteTokens := &AuthTokens{HGLogin: "test"}
+	assert.False(t, incompleteTokens.IsUsable())
 }
 
 func TestAuthenticator_Register(t *testing.T) {
-	// Create mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
+	tempDir := t.TempDir()
+	storagePath := filepath.Join(tempDir, "credentials.json")
+	auth, err := NewAuthenticator(storagePath, "https://example.com")
+	require.NoError(t, err)
+	auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
 		case "/auth/webauthn/register/begin":
-			// Return mock begin response
 			response := BeginRegistrationResponse{
 				PublicKey: PublicKeyClass{
 					Rp: Rp{
@@ -124,38 +132,33 @@ func TestAuthenticator_Register(t *testing.T) {
 					},
 				},
 			}
-			json.NewEncoder(w).Encode(response)
-
-		case "/auth/webauthn/register/finish":
-			// Verify request structure
-			var req AttestationResponse
-			err := json.NewDecoder(r.Body).Decode(&req)
+			body, err := json.Marshal(response)
 			require.NoError(t, err)
-
-			assert.Equal(t, "public-key", req.Type)
-			assert.NotEmpty(t, req.ID)
-			assert.NotEmpty(t, req.Response.ClientDataJSON)
-			assert.NotEmpty(t, req.Response.AttestationObject)
-			assert.Equal(t, "platform", req.AuthenticatorAttachment)
-
-			w.WriteHeader(http.StatusCreated)
-
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+				Header:     make(http.Header),
+			}, nil
+		case "/auth/webauthn/register/finish":
+			var reqBody AttestationResponse
+			err := json.NewDecoder(req.Body).Decode(&reqBody)
+			require.NoError(t, err)
+			assert.Equal(t, "public-key", reqBody.Type)
+			assert.NotEmpty(t, reqBody.ID)
+			assert.NotEmpty(t, reqBody.Response.ClientDataJSON)
+			assert.NotEmpty(t, reqBody.Response.AttestationObject)
+			assert.Equal(t, "platform", reqBody.AuthenticatorAttachment)
+			return &http.Response{
+				StatusCode: http.StatusCreated,
+				Body:       io.NopCloser(strings.NewReader("created")),
+				Header:     make(http.Header),
+			}, nil
 		default:
-			t.Errorf("unexpected request to %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
+			t.Fatalf("unexpected request to %s", req.URL.Path)
+			return nil, nil
 		}
-	}))
-	defer server.Close()
+	}}
 
-	// Create temp storage
-	tempDir := t.TempDir()
-	storagePath := filepath.Join(tempDir, "credentials.json")
-
-	// Create authenticator
-	auth, err := NewAuthenticator(storagePath, server.URL)
-	require.NoError(t, err)
-
-	// Test registration
 	cred, err := auth.Register("Test User")
 	require.NoError(t, err)
 	require.NotNil(t, cred)
@@ -168,54 +171,6 @@ func TestAuthenticator_Register(t *testing.T) {
 }
 
 func TestAuthenticator_Authenticate(t *testing.T) {
-	// Create mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/auth/webauthn/login/begin":
-			response := BeginAuthenticationResponse{
-				PublicKey: struct {
-					Challenge string `json:"challenge"`
-					Timeout   int64  `json:"timeout"`
-					RpID      string `json:"rpId"`
-				}{
-					Challenge: "test-challenge-123",
-					RpID:      "hourglass-app.com",
-					Timeout:   60000,
-				},
-			}
-			json.NewEncoder(w).Encode(response)
-
-		case "/auth/webauthn/login/finish":
-			var req AssertionResponse
-			err := json.NewDecoder(r.Body).Decode(&req)
-			require.NoError(t, err)
-
-			assert.Equal(t, "public-key", req.Type)
-			assert.NotEmpty(t, req.ID)
-			assert.NotEmpty(t, req.Response.AuthenticatorData)
-			assert.NotEmpty(t, req.Response.ClientDataJSON)
-			assert.NotEmpty(t, req.Response.Signature)
-			assert.NotEmpty(t, req.Response.UserHandle)
-
-			// Set cookies in response
-			http.SetCookie(w, &http.Cookie{
-				Name:  "hglogin",
-				Value: "test-hglogin-value",
-			})
-			http.SetCookie(w, &http.Cookie{
-				Name:  "X-Hourglass-XSRF-Token",
-				Value: "test-xsrf-token",
-			})
-			w.WriteHeader(http.StatusOK)
-
-		default:
-			t.Errorf("unexpected request to %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	// Create temp storage with a pre-registered credential
 	tempDir := t.TempDir()
 	storagePath := filepath.Join(tempDir, "credentials.json")
 
@@ -230,11 +185,62 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 	err = storage.Save(storedCreds)
 	require.NoError(t, err)
 
-	// Create authenticator
-	auth, err := NewAuthenticator(storagePath, server.URL)
+	auth, err := NewAuthenticator(storagePath, "https://example.com")
 	require.NoError(t, err)
+	auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/auth/webauthn/login/begin":
+			assert.Equal(t, http.MethodGet, req.Method)
+			response := BeginAuthenticationResponse{
+				PublicKey: struct {
+					Challenge string `json:"challenge"`
+					Timeout   int64  `json:"timeout"`
+					RpID      string `json:"rpId"`
+				}{
+					Challenge: "test-challenge-123",
+					RpID:      "hourglass-app.com",
+					Timeout:   60000,
+				},
+			}
+			body, err := json.Marshal(response)
+			require.NoError(t, err)
+			header := make(http.Header)
+			header.Add("Set-Cookie", "hglogin=begin-hg")
+			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=begin-xsrf")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+				Header:     header,
+			}, nil
+		case "/auth/webauthn/login/finish":
+			var reqBody AssertionResponse
+			err := json.NewDecoder(req.Body).Decode(&reqBody)
+			require.NoError(t, err)
+			assert.Equal(t, "public-key", reqBody.Type)
+			assert.NotEmpty(t, reqBody.ID)
+			assert.NotEmpty(t, reqBody.Response.AuthenticatorData)
+			assert.NotEmpty(t, reqBody.Response.ClientDataJSON)
+			assert.NotEmpty(t, reqBody.Response.Signature)
+			assert.NotEmpty(t, reqBody.Response.UserHandle)
+			cookie, err := req.Cookie("hglogin")
+			require.NoError(t, err)
+			assert.Equal(t, "begin-hg", cookie.Value)
+			assert.Equal(t, "begin-xsrf", req.Header.Get("X-Hourglass-XSRF-Token"))
 
-	// Test authentication
+			header := make(http.Header)
+			header.Add("Set-Cookie", "hglogin=test-hglogin-value")
+			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=test-xsrf-token")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     header,
+			}, nil
+		default:
+			t.Fatalf("unexpected request to %s", req.URL.Path)
+			return nil, nil
+		}
+	}}
+
 	tokens, err := auth.Authenticate()
 	require.NoError(t, err)
 	require.NotNil(t, tokens)
@@ -249,10 +255,28 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 }
 
 func TestTokenManager(t *testing.T) {
-	// Create mock server
 	authCallCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
+	tempDir := t.TempDir()
+	storagePath := filepath.Join(tempDir, "credentials.json")
+
+	cred, _ := GenerateCredential("hourglass-app.com", "test-user", "Test")
+	storage, _ := NewStorage(storagePath)
+	storedCreds, _ := storage.Load()
+	storedCreds.Credentials = append(storedCreds.Credentials, *cred)
+	storage.Save(storedCreds)
+
+	// Create token manager
+	tokenRenewed := false
+	tm, err := NewTokenManager(storagePath, "https://example.com",
+		WithBrowserAuth(nil),
+		WithRenewalThreshold(2*time.Hour),
+		WithOnTokenRenewed(func(tokens *AuthTokens) {
+			tokenRenewed = true
+		}),
+	)
+	require.NoError(t, err)
+	tm.authenticator.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
 		case "/auth/webauthn/login/begin":
 			response := BeginAuthenticationResponse{
 				PublicKey: struct {
@@ -265,36 +289,31 @@ func TestTokenManager(t *testing.T) {
 					Timeout:   60000,
 				},
 			}
-			json.NewEncoder(w).Encode(response)
-
+			body, err := json.Marshal(response)
+			require.NoError(t, err)
+			header := make(http.Header)
+			header.Add("Set-Cookie", "hglogin=pre-auth-hg")
+			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=pre-auth-xsrf")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+				Header:     header,
+			}, nil
 		case "/auth/webauthn/login/finish":
 			authCallCount++
-			http.SetCookie(w, &http.Cookie{Name: "hglogin", Value: "token-" + string(rune(authCallCount))})
-			http.SetCookie(w, &http.Cookie{Name: "X-Hourglass-XSRF-Token", Value: "xsrf-" + string(rune(authCallCount))})
-			w.WriteHeader(http.StatusOK)
+			header := make(http.Header)
+			header.Add("Set-Cookie", "hglogin=token-value")
+			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=xsrf-value")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     header,
+			}, nil
+		default:
+			t.Fatalf("unexpected request to %s", req.URL.Path)
+			return nil, nil
 		}
-	}))
-	defer server.Close()
-
-	// Create temp storage with credential
-	tempDir := t.TempDir()
-	storagePath := filepath.Join(tempDir, "credentials.json")
-
-	cred, _ := GenerateCredential("hourglass-app.com", "test-user", "Test")
-	storage, _ := NewStorage(storagePath)
-	storedCreds, _ := storage.Load()
-	storedCreds.Credentials = append(storedCreds.Credentials, *cred)
-	storage.Save(storedCreds)
-
-	// Create token manager
-	tokenRenewed := false
-	tm, err := NewTokenManager(storagePath, server.URL,
-		WithRenewalThreshold(2*time.Hour), // Long threshold for testing
-		WithOnTokenRenewed(func(tokens *AuthTokens) {
-			tokenRenewed = true
-		}),
-	)
-	require.NoError(t, err)
+	}}
 
 	// Test initial authentication
 	tokens, err := tm.EnsureValidTokens()
@@ -307,12 +326,10 @@ func TestTokenManager(t *testing.T) {
 	tokens2, err := tm.EnsureValidTokens()
 	require.NoError(t, err)
 	assert.Equal(t, tokens.HGLogin, tokens2.HGLogin)
-	assert.Equal(t, 1, authCallCount) // Should not have called auth again
+	assert.Equal(t, 1, authCallCount)
 
-	// Test IsAuthenticated
 	assert.True(t, tm.IsAuthenticated())
 
-	// Test GetTokens returns copy
 	retrieved := tm.GetTokens()
 	assert.Equal(t, tokens.HGLogin, retrieved.HGLogin)
 }

@@ -6,10 +6,40 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+)
+
+type renewalTicker interface {
+	C() <-chan time.Time
+	Stop()
+}
+
+type timeTicker struct {
+	*time.Ticker
+}
+
+func (t *timeTicker) C() <-chan time.Time {
+	return t.Ticker.C
+}
+
+var (
+	osUserHomeDirTokenManager = os.UserHomeDir
+	osMkdirAllTokenManager    = os.MkdirAll
+	osWriteFileTokenManager   = os.WriteFile
+	osRenameTokenManager      = os.Rename
+	osRemoveTokenManager      = os.Remove
+	osStatTokenManager        = os.Stat
+	osReadFileTokenManager    = os.ReadFile
+	jsonMarshalTokenManager   = json.Marshal
+	jsonUnmarshalTokenManager = json.Unmarshal
+	newRenewalTicker          = func(d time.Duration) renewalTicker {
+		return &timeTicker{Ticker: time.NewTicker(d)}
+	}
 )
 
 // TokenManager handles automatic token renewal using WebAuthn.
@@ -22,6 +52,7 @@ type TokenManager struct {
 
 	currentTokens *AuthTokens
 	mu            sync.RWMutex
+	renewMu       sync.Mutex
 
 	// Callbacks
 	onTokenRenewed func(tokens *AuthTokens)
@@ -30,6 +61,7 @@ type TokenManager struct {
 	// Configuration
 	renewalThreshold time.Duration
 	stopChan         chan struct{}
+	stopOnce         sync.Once
 }
 
 // TokenManagerOption configures the TokenManager.
@@ -76,7 +108,7 @@ func NewTokenManager(storagePath, baseURL string, opts ...TokenManagerOption) (*
 	if storagePath == "" {
 		storagePath = os.Getenv("WEBAUTHN_CREDENTIALS_PATH")
 		if storagePath == "" {
-			homeDir, err := os.UserHomeDir()
+			homeDir, err := osUserHomeDirTokenManager()
 			if err == nil {
 				storagePath = filepath.Join(homeDir, ".hourglass-rpa", "webauthn-credentials.json")
 			}
@@ -87,6 +119,8 @@ func NewTokenManager(storagePath, baseURL string, opts ...TokenManagerOption) (*
 	if tokensPath == "" {
 		tokensPath = filepath.Join(filepath.Dir(storagePath), "auth-tokens.json")
 	}
+
+	baseURL = normalizeWebAuthnBaseURL(baseURL)
 
 	authenticator, err := NewAuthenticator(storagePath, baseURL)
 	if err != nil {
@@ -137,7 +171,7 @@ func (tm *TokenManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	if loadedTokens != nil && !loadedTokens.IsNearExpiry(tm.renewalThreshold) && tm.onTokenRenewed != nil {
+	if loadedTokens != nil && loadedTokens.IsUsable() && !loadedTokens.IsNearExpiry(tm.renewalThreshold) && tm.onTokenRenewed != nil {
 		tm.onTokenRenewed(tokens)
 	}
 
@@ -149,7 +183,9 @@ func (tm *TokenManager) Start(ctx context.Context) error {
 
 // Stop stops the automatic renewal loop.
 func (tm *TokenManager) Stop() {
-	close(tm.stopChan)
+	tm.stopOnce.Do(func() {
+		close(tm.stopChan)
+	})
 }
 
 // GetTokens returns the current authentication tokens.
@@ -172,7 +208,7 @@ func (tm *TokenManager) GetTokens() *AuthTokens {
 // IsAuthenticated returns true if we have valid tokens.
 func (tm *TokenManager) IsAuthenticated() bool {
 	tokens := tm.GetTokens()
-	return tokens != nil && !tokens.IsExpired()
+	return tokens != nil && tokens.IsUsable() && !tokens.IsExpired()
 }
 
 // EnsureValidTokens ensures tokens are valid, renewing if necessary.
@@ -184,41 +220,83 @@ func (tm *TokenManager) EnsureValidTokens() (*AuthTokens, error) {
 		slog.Debug("checking token validity", "expires_at", tokens.ExpiresAt, "time_until_expiry", timeUntilExpiry, "threshold", tm.renewalThreshold)
 	}
 
-	if tokens == nil || tokens.IsNearExpiry(tm.renewalThreshold) {
-		if tokens == nil {
-			slog.Info("no tokens available, attempting authentication")
-		} else {
-			slog.Info("tokens near expiry or expired, renewing", "expires_at", tokens.ExpiresAt, "threshold", tm.renewalThreshold)
-		}
-
-		newTokens, err := tm.authenticateWithFallback()
-		if err != nil {
-			slog.Error("authentication failed", "error", err)
-			if tm.onError != nil {
-				tm.onError(err)
-			}
-			return nil, err
-		}
-
-		slog.Info("authentication successful, updating tokens", "expires_at", newTokens.ExpiresAt)
-		tm.setTokens(newTokens)
-
-		if err := tm.SaveTokens(newTokens); err != nil {
-			slog.Error("CRITICAL: failed to persist authentication tokens", "path", tm.tokensPath, "error", err)
-		} else {
-			slog.Info("tokens persisted successfully", "path", tm.tokensPath)
-		}
-
-		if tm.onTokenRenewed != nil {
-			slog.Info("calling onTokenRenewed callback")
-			tm.onTokenRenewed(newTokens)
-		}
-
-		return newTokens, nil
+	if !tm.tokensNeedRenewal(tokens) {
+		slog.Debug("tokens still valid, no renewal needed", "expires_at", tokens.ExpiresAt)
+		return tokens, nil
 	}
 
-	slog.Debug("tokens still valid, no renewal needed", "expires_at", tokens.ExpiresAt)
-	return tokens, nil
+	tm.renewMu.Lock()
+	defer tm.renewMu.Unlock()
+
+	tokens = tm.GetTokens()
+	if !tm.tokensNeedRenewal(tokens) {
+		slog.Debug("tokens refreshed by another goroutine", "expires_at", tokens.ExpiresAt)
+		return tokens, nil
+	}
+
+	if tokens == nil {
+		slog.Info("no tokens available, attempting authentication")
+	} else if !tokens.IsUsable() {
+		slog.Warn("persisted tokens are incomplete, re-authenticating")
+	} else {
+		slog.Info("tokens near expiry or expired, renewing", "expires_at", tokens.ExpiresAt, "threshold", tm.renewalThreshold)
+	}
+
+	newTokens, err := tm.authenticateWithFallback()
+	if err != nil {
+		slog.Error("authentication failed", "error", err)
+		if tm.onError != nil {
+			tm.onError(err)
+		}
+		return nil, err
+	}
+
+	slog.Info("authentication successful, updating tokens", "expires_at", newTokens.ExpiresAt)
+	tm.setTokens(newTokens)
+
+	if err := tm.SaveTokens(newTokens); err != nil {
+		slog.Error("CRITICAL: failed to persist authentication tokens", "path", tm.tokensPath, "error", err)
+	} else {
+		slog.Info("tokens persisted successfully", "path", tm.tokensPath)
+	}
+
+	if tm.onTokenRenewed != nil {
+		slog.Info("calling onTokenRenewed callback")
+		tm.onTokenRenewed(newTokens)
+	}
+
+	return newTokens, nil
+}
+
+func (tm *TokenManager) tokensNeedRenewal(tokens *AuthTokens) bool {
+	if tokens == nil {
+		return true
+	}
+
+	if !tokens.IsUsable() {
+		return true
+	}
+
+	return tokens.IsNearExpiry(tm.renewalThreshold)
+}
+
+func normalizeWebAuthnBaseURL(baseURL string) string {
+	trimmed := strings.TrimRight(baseURL, "/")
+	if trimmed == "" {
+		return trimmed
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return trimmed
+	}
+
+	if strings.HasPrefix(strings.TrimRight(parsed.Path, "/"), "/api/") {
+		parsed.Path = ""
+		parsed.RawPath = ""
+	}
+
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 // SaveTokens persists authentication tokens to disk with owner-only permissions.
@@ -233,30 +311,30 @@ func (tm *TokenManager) SaveTokens(tokens *AuthTokens) error {
 
 	slog.Info("saving tokens to disk", "path", tm.tokensPath, "expires_at", tokens.ExpiresAt, "hglogin_present", tokens.HGLogin != "", "xsrf_present", tokens.XSRFToken != "")
 
-	data, err := json.Marshal(tokens)
+	data, err := jsonMarshalTokenManager(tokens)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tokens: %w", err)
 	}
 
 	dir := filepath.Dir(tm.tokensPath)
 	slog.Debug("ensuring directory exists", "dir", dir)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := osMkdirAllTokenManager(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create tokens directory: %w", err)
 	}
 
 	tempPath := tm.tokensPath + ".tmp"
 	slog.Debug("writing to temp file", "temp_path", tempPath)
-	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
+	if err := osWriteFileTokenManager(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp tokens file: %w", err)
 	}
 
 	slog.Debug("renaming temp file to final path", "from", tempPath, "to", tm.tokensPath)
-	if err := os.Rename(tempPath, tm.tokensPath); err != nil {
-		os.Remove(tempPath)
+	if err := osRenameTokenManager(tempPath, tm.tokensPath); err != nil {
+		osRemoveTokenManager(tempPath)
 		return fmt.Errorf("failed to rename tokens file: %w", err)
 	}
 
-	info, err := os.Stat(tm.tokensPath)
+	info, err := osStatTokenManager(tm.tokensPath)
 	if err != nil {
 		slog.Warn("could not stat tokens file after save", "error", err)
 	} else {
@@ -272,7 +350,7 @@ func (tm *TokenManager) LoadTokens() (*AuthTokens, error) {
 		return nil, errors.New("tokens path is not configured")
 	}
 
-	data, err := os.ReadFile(tm.tokensPath)
+	data, err := osReadFileTokenManager(tm.tokensPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			slog.Info("persisted tokens file not found", "path", tm.tokensPath)
@@ -282,7 +360,7 @@ func (tm *TokenManager) LoadTokens() (*AuthTokens, error) {
 	}
 
 	var tokens AuthTokens
-	if err := json.Unmarshal(data, &tokens); err != nil {
+	if err := jsonUnmarshalTokenManager(data, &tokens); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal tokens file: %w", err)
 	}
 
@@ -327,7 +405,7 @@ func (tm *TokenManager) setTokens(tokens *AuthTokens) {
 }
 
 func (tm *TokenManager) renewalLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := newRenewalTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -336,7 +414,7 @@ func (tm *TokenManager) renewalLoop(ctx context.Context) {
 			return
 		case <-tm.stopChan:
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			_, err := tm.EnsureValidTokens()
 			if err != nil {
 				slog.Error("failed to renew tokens", "error", err)

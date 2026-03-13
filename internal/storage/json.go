@@ -18,6 +18,9 @@ var (
 	jsonMarshalIndent = json.MarshalIndent
 	newCSVWriter      = func(w io.Writer) *csv.Writer { return csv.NewWriter(w) }
 	saveCSVFn         = (*FileStorage).saveCSV
+	openFileFn        = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		return os.OpenFile(name, flag, perm)
+	}
 )
 
 type FileStorage struct {
@@ -32,29 +35,29 @@ func New(cfg *config.Config) *FileStorage {
 	}
 }
 
-func (fs *FileStorage) Save(ctx context.Context, rejeicoes []domain.Rejeicao) error {
+func (fs *FileStorage) Save(ctx context.Context, rejections []domain.Rejection) error {
 	if err := os.MkdirAll(fs.outputDir, 0750); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	now := time.Now()
 	timestamp := now.Format("20060102_150405") + fmt.Sprintf("_%09d", now.Nanosecond())
-	jsonFilename := filepath.Join(fs.outputDir, fmt.Sprintf("rejeicoes_%s.json", timestamp))
-	csvFilename := filepath.Join(fs.outputDir, fmt.Sprintf("rejeicoes_%s.csv", timestamp))
+	jsonFilename := filepath.Join(fs.outputDir, fmt.Sprintf("rejections_%s.json", timestamp))
+	csvFilename := filepath.Join(fs.outputDir, fmt.Sprintf("rejections_%s.csv", timestamp))
 
-	if err := fs.saveJSON(jsonFilename, rejeicoes); err != nil {
+	if err := fs.saveJSON(jsonFilename, rejections); err != nil {
 		return err
 	}
 
-	if err := saveCSVFn(fs, csvFilename, rejeicoes); err != nil {
+	if err := saveCSVFn(fs, csvFilename, rejections); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (fs *FileStorage) saveJSON(filename string, rejeicoes []domain.Rejeicao) error {
-	data, err := jsonMarshalIndent(rejeicoes, "", "  ")
+func (fs *FileStorage) saveJSON(filename string, rejections []domain.Rejection) error {
+	data, err := jsonMarshalIndent(rejections, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
@@ -70,15 +73,15 @@ func writeFileAtomic(filename string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmp, filename)
 }
 
-func (fs *FileStorage) saveCSV(filename string, rejeicoes []domain.Rejeicao) error {
+func (fs *FileStorage) saveCSV(filename string, rejections []domain.Rejection) error {
 	tmp := filename + ".tmp"
-	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, err := openFileFn(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create temp CSV file: %w", err)
 	}
 	defer os.Remove(tmp)
 
-	if err := fs.writeCSV(file, rejeicoes); err != nil {
+	if err := fs.writeCSV(file, rejections); err != nil {
 		file.Close()
 		return err
 	}
@@ -90,22 +93,20 @@ func (fs *FileStorage) saveCSV(filename string, rejeicoes []domain.Rejeicao) err
 	return os.Rename(tmp, filename)
 }
 
-func (fs *FileStorage) writeCSV(w io.Writer, rejeicoes []domain.Rejeicao) error {
+func (fs *FileStorage) writeCSV(w io.Writer, rejections []domain.Rejection) error {
 	writer := newCSVWriter(w)
 
-	// Header
-	header := []string{"secao", "quem", "oque", "pra_quando", "timestamp"}
+	header := []string{"section", "who", "what", "when", "timestamp"}
 	if err := writer.Write(header); err != nil {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	// Data
-	for _, r := range rejeicoes {
+	for _, r := range rejections {
 		row := []string{
-			r.Secao,
-			r.Quem,
-			r.OQue,
-			r.PraQuando,
+			r.Section,
+			r.Who,
+			r.What,
+			r.When,
 			r.Timestamp.Format(time.RFC3339),
 		}
 		if err := writer.Write(row); err != nil {

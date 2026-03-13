@@ -15,6 +15,17 @@ import (
 	"time"
 )
 
+var (
+	jsonMarshalAuthentication = json.Marshal
+	createAssertionAuthData   = func(a *Authenticator, cred *Credential, clientDataHash []byte) ([]byte, error) {
+		return a.createAssertionAuthenticatorData(cred, clientDataHash)
+	}
+	createAssertionSignature = func(a *Authenticator, privateKey *ecdsa.PrivateKey, authData, clientDataHash []byte) ([]byte, error) {
+		return a.createSignature(privateKey, authData, clientDataHash)
+	}
+	ecdsaSignAuthentication = ecdsa.Sign
+)
+
 func (a *Authenticator) Authenticate() (*AuthTokens, error) {
 	cred, err := a.getStoredCredential()
 	if err != nil {
@@ -161,19 +172,19 @@ func (a *Authenticator) createAssertion(cred *Credential, beginResp *BeginAuthen
 		CrossOrigin: false,
 	}
 
-	clientDataJSON, err := json.Marshal(clientData)
+	clientDataJSON, err := jsonMarshalAuthentication(clientData)
 	if err != nil {
 		return nil, fmt.Errorf("marshal client data: %w", err)
 	}
 
 	clientDataHash := sha256.Sum256(clientDataJSON)
 
-	authData, err := a.createAssertionAuthenticatorData(cred, clientDataHash[:])
+	authData, err := createAssertionAuthData(a, cred, clientDataHash[:])
 	if err != nil {
 		return nil, fmt.Errorf("create authenticator data: %w", err)
 	}
 
-	signature, err := a.createSignature(privateKey, authData, clientDataHash[:])
+	signature, err := createAssertionSignature(a, privateKey, authData, clientDataHash[:])
 	if err != nil {
 		return nil, fmt.Errorf("create signature: %w", err)
 	}
@@ -218,7 +229,7 @@ func (a *Authenticator) createSignature(privateKey *ecdsa.PrivateKey, authData, 
 
 	hash := sha256.Sum256(sigData)
 
-	r, s, err := ecdsa.Sign(rand.Reader, privateKey, hash[:])
+	r, s, err := ecdsaSignAuthentication(rand.Reader, privateKey, hash[:])
 	if err != nil {
 		return nil, fmt.Errorf("sign failed: %w", err)
 	}

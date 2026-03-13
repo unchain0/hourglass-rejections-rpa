@@ -106,6 +106,22 @@ func TestGetLocalizer(t *testing.T) {
 	}
 }
 
+func TestGetLocalizer_InitializesBundleOnDemand(t *testing.T) {
+	resetForTesting()
+
+	localizer := GetLocalizer("")
+
+	require.NotNil(t, localizer)
+	assert.NotNil(t, bundle)
+}
+
+func TestGetLocalizer_InitializesBundleWhenNeeded(t *testing.T) {
+	resetForTesting()
+	localizer := GetLocalizer("en")
+	assert.NotNil(t, localizer)
+	assert.NotNil(t, bundle)
+}
+
 func TestLocalize(t *testing.T) {
 	resetForTesting()
 	err := Init()
@@ -182,6 +198,12 @@ func TestLocalize(t *testing.T) {
 			assert.Contains(t, got, tt.wantContain)
 		})
 	}
+}
+
+func TestLocalize_ReturnsMessageIDOnError(t *testing.T) {
+	resetForTesting()
+	require.NoError(t, Init())
+	assert.Equal(t, "missing_message_id", Localize("en", "missing_message_id", nil))
 }
 
 func TestLocalize_AllKeys(t *testing.T) {

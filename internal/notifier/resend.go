@@ -92,7 +92,7 @@ func (r *ResendNotifier) SendDailyReport(stats domain.DailyStats) error {
 
 <hr>
 <p>Hourglass Rejections RPA</p>
-`, stats.Date.Format("2006-01-02"), stats.TotalJobs, stats.TotalRej, sectionsHTML)
+`, stats.Date.Format("2006-01-02"), stats.TotalJobs, stats.TotalRejections, sectionsHTML)
 
 	return r.sendEmail(subject, body)
 }

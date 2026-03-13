@@ -192,6 +192,39 @@ func TestNewSQLiteStore_AutoMigrateError(t *testing.T) {
 	assert.Nil(t, store)
 }
 
+func TestNewSQLiteStore_PRAGMAErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantError string
+	}{
+		{name: "foreign keys", query: "PRAGMA foreign_keys = ON", wantError: "failed to set PRAGMA foreign_keys"},
+		{name: "journal mode", query: "PRAGMA journal_mode = WAL", wantError: "failed to set PRAGMA journal_mode"},
+		{name: "synchronous", query: "PRAGMA synchronous = NORMAL", wantError: "failed to set PRAGMA synchronous"},
+		{name: "busy timeout", query: "PRAGMA busy_timeout = 5000", wantError: "failed to set PRAGMA busy_timeout"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalExecPragma := execPragmaFn
+			t.Cleanup(func() { execPragmaFn = originalExecPragma })
+
+			execPragmaFn = func(db *gorm.DB, query string) error {
+				if query == tt.query {
+					return fmt.Errorf("pragma failed")
+				}
+				return originalExecPragma(db, query)
+			}
+
+			store, err := newSQLiteStore(":memory:")
+			assert.Error(t, err)
+			assert.Nil(t, store)
+			assert.Contains(t, err.Error(), tt.wantError)
+			assert.Contains(t, err.Error(), "pragma failed")
+		})
+	}
+}
+
 func TestNewSQLiteStore_SetSecurePermissionsError(t *testing.T) {
 	originalSetSecure := setSecurePermissionsFn
 	setSecurePermissionsFn = func(dbPath string) error {
@@ -205,9 +238,14 @@ func TestNewSQLiteStore_SetSecurePermissionsError(t *testing.T) {
 }
 
 func TestNewPostgresStore_AutoMigrateError(t *testing.T) {
+	originalOpenPostgres := openPostgresDBFn
 	originalAutoMigrate := autoMigrateFn
+	defer func() { openPostgresDBFn = originalOpenPostgres }()
 	defer func() { autoMigrateFn = originalAutoMigrate }()
 
+	openPostgresDBFn = func(dsn string) (*gorm.DB, error) {
+		return openSQLiteDBFn(":memory:")
+	}
 	autoMigrateFn = func(db *gorm.DB) error {
 		return fmt.Errorf("auto migrate failed")
 	}
@@ -225,4 +263,29 @@ func TestNewPostgresStore_AutoMigrateError(t *testing.T) {
 	store, err := newPostgresStore(cfg)
 	assert.Error(t, err)
 	assert.Nil(t, store)
+	assert.Contains(t, err.Error(), "failed to migrate database")
+}
+
+func TestNewPostgresStore_Success(t *testing.T) {
+	originalOpenPostgres := openPostgresDBFn
+	t.Cleanup(func() { openPostgresDBFn = originalOpenPostgres })
+
+	openPostgresDBFn = func(dsn string) (*gorm.DB, error) {
+		return openSQLiteDBFn(":memory:")
+	}
+
+	cfg := &DatabaseConfig{
+		Type:     "postgres",
+		Host:     "localhost",
+		Port:     "5432",
+		User:     "test",
+		Password: "test",
+		DBName:   "test",
+		SSLMode:  "disable",
+	}
+
+	store, err := newPostgresStore(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, store)
+	require.NoError(t, store.Close())
 }

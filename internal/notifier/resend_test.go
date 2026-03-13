@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -68,8 +67,8 @@ func TestNewResendNotifier(t *testing.T) {
 	}
 }
 
-func setupTestServer(handler http.HandlerFunc) (*httptest.Server, *ResendNotifier) {
-	server := httptest.NewServer(handler)
+func setupTestServer(t *testing.T, handler http.HandlerFunc) (*testServer, *ResendNotifier) {
+	server := newHTTPTestServer(t, handler)
 	transport := &mockTransport{targetURL: server.URL}
 	client := &http.Client{
 		Transport: transport,
@@ -85,7 +84,7 @@ func setupTestServer(handler http.HandlerFunc) (*httptest.Server, *ResendNotifie
 }
 
 func TestResendNotifier_sendEmail_Success200(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// Verify request method
 		if r.Method != "POST" {
 			t.Errorf("expected POST request, got %s", r.Method)
@@ -112,7 +111,7 @@ func TestResendNotifier_sendEmail_Success200(t *testing.T) {
 }
 
 func TestResendNotifier_SendJobCompletion_Success(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// Verify the request contains expected fields
 		if r.Method != "POST" {
 			t.Errorf("expected POST request, got %s", r.Method)
@@ -133,7 +132,7 @@ func TestResendNotifier_SendJobCompletion_Success(t *testing.T) {
 }
 
 func TestResendNotifier_SendJobFailure_Success(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("expected POST request, got %s", r.Method)
 		}
@@ -154,7 +153,7 @@ func TestResendNotifier_SendJobFailure_Success(t *testing.T) {
 }
 
 func TestResendNotifier_SendDailyReport_Success(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("expected POST request, got %s", r.Method)
 		}
@@ -168,13 +167,13 @@ func TestResendNotifier_SendDailyReport_Success(t *testing.T) {
 	defer server.Close()
 
 	stats := domain.DailyStats{
-		Date:      time.Now(),
-		TotalJobs: 6,
-		TotalRej:  42,
+		Date:            time.Now(),
+		TotalJobs:       6,
+		TotalRejections: 42,
 		Sections: map[string]int{
-			"Partes Mecânicas":   15,
-			"Campo":              18,
-			"Testemunho Público": 9,
+			"Mechanical Parts":  15,
+			"Field Ministry":    18,
+			"Public Witnessing": 9,
 		},
 	}
 
@@ -185,7 +184,7 @@ func TestResendNotifier_SendDailyReport_Success(t *testing.T) {
 }
 
 func TestResendNotifier_sendEmail_Status201(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})
 	defer server.Close()
@@ -197,7 +196,7 @@ func TestResendNotifier_sendEmail_Status201(t *testing.T) {
 }
 
 func TestResendNotifier_sendEmail_Non200Status(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	})
 	defer server.Close()
@@ -214,7 +213,7 @@ func TestResendNotifier_sendEmail_Non200Status(t *testing.T) {
 }
 
 func TestResendNotifier_sendEmail_Unauthorized(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
 	defer server.Close()
@@ -231,7 +230,7 @@ func TestResendNotifier_sendEmail_Unauthorized(t *testing.T) {
 }
 
 func TestResendNotifier_sendEmail_InternalServerError(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 	defer server.Close()
@@ -263,16 +262,16 @@ func TestResendNotifier_sendEmail_HTTPRequestFailure(t *testing.T) {
 }
 
 func TestResendNotifier_SendDailyReport_EmptySections(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	defer server.Close()
 
 	stats := domain.DailyStats{
-		Date:      time.Now(),
-		TotalJobs: 0,
-		TotalRej:  0,
-		Sections:  map[string]int{},
+		Date:            time.Now(),
+		TotalJobs:       0,
+		TotalRejections: 0,
+		Sections:        map[string]int{},
 	}
 
 	err := n.SendDailyReport(stats)
@@ -282,7 +281,7 @@ func TestResendNotifier_SendDailyReport_EmptySections(t *testing.T) {
 }
 
 func TestResendNotifier_SendJobCompletion_LongDuration(t *testing.T) {
-	server, n := setupTestServer(func(w http.ResponseWriter, r *http.Request) {
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	defer server.Close()
@@ -323,7 +322,7 @@ func TestResendNotifier_sendEmail_RestoresMarshal(t *testing.T) {
 	_ = n.sendEmail("s", "b")
 
 	jsonMarshal = original
-	server, n2 := setupTestServer(func(w http.ResponseWriter, _ *http.Request) {
+	server, n2 := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	defer server.Close()

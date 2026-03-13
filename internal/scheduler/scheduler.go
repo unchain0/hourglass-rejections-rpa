@@ -18,7 +18,7 @@ type Analyzer interface {
 }
 
 type Storage interface {
-	Save(ctx context.Context, rejections []domain.Rejeicao) error
+	Save(ctx context.Context, rejections []domain.Rejection) error
 }
 
 type Scheduler struct {
@@ -112,7 +112,7 @@ func (s *Scheduler) calculateInterval(now time.Time) time.Duration {
 
 func (s *Scheduler) runAnalysis(ctx context.Context) error {
 	start := time.Now()
-	var allRejections []domain.Rejeicao
+	var allRejections []domain.Rejection
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -145,17 +145,17 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 
 			slog.Info("section analysis complete", "section", sec, "total", result.Total)
 
-			if len(result.Rejeicoes) > 0 {
+			if len(result.Rejections) > 0 {
 				mu.Lock()
-				allRejections = append(allRejections, result.Rejeicoes...)
+				allRejections = append(allRejections, result.Rejections...)
 				mu.Unlock()
 
-				if err := s.store.Save(ctx, result.Rejeicoes); err != nil {
+				if err := s.store.Save(ctx, result.Rejections); err != nil {
 					slog.Error("failed to save rejections", "section", sec, "error", err)
 					s.sentryClient.CaptureError(err, map[string]interface{}{
 						"section": sec,
 						"phase":   "save_rejections",
-						"count":   len(result.Rejeicoes),
+						"count":   len(result.Rejections),
 					})
 				}
 			}
@@ -166,7 +166,7 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 	return s.sendNotifications(allRejections, time.Since(start))
 }
 
-func (s *Scheduler) sendNotifications(rejections []domain.Rejeicao, duration time.Duration) error {
+func (s *Scheduler) sendNotifications(rejections []domain.Rejection, duration time.Duration) error {
 	if len(rejections) == 0 {
 		return nil
 	}
@@ -183,12 +183,12 @@ func (s *Scheduler) sendNotifications(rejections []domain.Rejeicao, duration tim
 
 	bySection := make(map[string]int)
 	for _, r := range rejections {
-		bySection[r.Secao]++
+		bySection[r.Section]++
 	}
 
-	summary := fmt.Sprintf("%d rejeições detectadas", len(rejections))
+	summary := fmt.Sprintf("%d rejections detected", len(rejections))
 	if len(bySection) > 0 {
-		summary += ". Seções: "
+		summary += ". Sections: "
 		first := true
 		for section, count := range bySection {
 			if !first {

@@ -93,6 +93,12 @@ func TestTokenManagerOptions(t *testing.T) {
 		assert.True(t, renewedCalled)
 		assert.True(t, errorCalled)
 	})
+
+	t.Run("normalizes api base url", func(t *testing.T) {
+		tm, err := NewTokenManager(storagePath, "https://example.com/api/v0.2")
+		assert.NoError(t, err)
+		assert.Equal(t, "https://example.com", tm.baseURL)
+	})
 }
 
 func TestTokenManagerWithTokensPath(t *testing.T) {
@@ -125,5 +131,13 @@ func TestTokenManagerSaveTokensErrors(t *testing.T) {
 		err := tm2.SaveTokens(tokens)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "tokens path is not configured")
+	})
+}
+
+func TestTokenManagerStopIsIdempotent(t *testing.T) {
+	tm := &TokenManager{stopChan: make(chan struct{})}
+	assert.NotPanics(t, func() {
+		tm.Stop()
+		tm.Stop()
 	})
 }

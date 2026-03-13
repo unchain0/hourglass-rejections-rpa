@@ -16,7 +16,23 @@ import (
 	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
 )
 
-var execCommand = exec.Command
+var (
+	execCommand                     = exec.Command
+	generateCredentialAuthenticator = GenerateCredential
+	createAttestationAuthenticator  = func(a *Authenticator, cred *Credential, beginResp *BeginRegistrationResponse) (*AttestationResponse, error) {
+		return a.createAttestation(cred, beginResp)
+	}
+	finishRegistrationAuthenticator = func(a *Authenticator, attestation *AttestationResponse) error {
+		return a.finishRegistration(attestation)
+	}
+	createAuthenticatorDataAuthenticator = func(a *Authenticator, cred *Credential, clientDataHash []byte) ([]byte, error) {
+		return a.createAuthenticatorData(cred, clientDataHash)
+	}
+	createAttestationObjectAuthenticator = func(a *Authenticator, authData []byte) ([]byte, error) {
+		return a.createAttestationObject(authData)
+	}
+	jsonMarshalAuthenticator = json.Marshal
+)
 
 type Authenticator struct {
 	storage    *Storage
@@ -60,7 +76,7 @@ func (a *Authenticator) Register(userName string) (*Credential, error) {
 		rpID = "hourglass-app.com"
 	}
 
-	credential, err := GenerateCredential(rpID, userID, userName)
+	credential, err := generateCredentialAuthenticator(rpID, userID, userName)
 	if err != nil {
 		return nil, fmt.Errorf("generate credential failed: %w", err)
 	}
@@ -68,7 +84,7 @@ func (a *Authenticator) Register(userName string) (*Credential, error) {
 	fmt.Printf("DEBUG: Generated credential - ID: %s, UserID: %s, RPID: %s\n",
 		credential.ID, credential.UserID, credential.RPID)
 
-	attestation, err := a.createAttestation(credential, beginResp)
+	attestation, err := createAttestationAuthenticator(a, credential, beginResp)
 	if err != nil {
 		return nil, fmt.Errorf("create attestation failed: %w", err)
 	}
@@ -76,7 +92,7 @@ func (a *Authenticator) Register(userName string) (*Credential, error) {
 	fmt.Printf("DEBUG: Attestation - Type: %s, ID: %s, RawID: %s\n",
 		attestation.Type, attestation.ID, attestation.RawID)
 
-	if err := a.finishRegistration(attestation); err != nil {
+	if err := finishRegistrationAuthenticator(a, attestation); err != nil {
 		return nil, fmt.Errorf("finish registration failed: %w", err)
 	}
 
@@ -243,21 +259,21 @@ func (a *Authenticator) createAttestation(cred *Credential, beginResp *BeginRegi
 		CrossOrigin: false,
 	}
 
-	clientDataJSON, err := json.Marshal(clientData)
+	clientDataJSON, err := jsonMarshalAuthenticator(clientData)
 	if err != nil {
 		return nil, fmt.Errorf("marshal client data: %w", err)
 	}
 
 	clientDataHash := sha256.Sum256(clientDataJSON)
 
-	authData, err := a.createAuthenticatorData(cred, clientDataHash[:])
+	authData, err := createAuthenticatorDataAuthenticator(a, cred, clientDataHash[:])
 	if err != nil {
 		return nil, fmt.Errorf("create authenticator data: %w", err)
 	}
 
 	debugAuthData(authData)
 
-	attestationObject, err := a.createAttestationObject(authData)
+	attestationObject, err := createAttestationObjectAuthenticator(a, authData)
 	if err != nil {
 		return nil, fmt.Errorf("create attestation object: %w", err)
 	}
@@ -346,7 +362,7 @@ func debugAuthData(authData []byte) {
 func (a *Authenticator) finishRegistration(attestation *AttestationResponse) error {
 	url := fmt.Sprintf("%s/auth/webauthn/register/finish", a.baseURL)
 
-	body, err := json.Marshal(attestation)
+	body, err := jsonMarshalAuthenticator(attestation)
 	if err != nil {
 		return fmt.Errorf("marshal attestation: %w", err)
 	}

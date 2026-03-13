@@ -54,11 +54,7 @@ func (rl *rateLimiter) Allow(chatID int64) bool {
 	}
 
 	valid = append(valid, now)
-	if len(valid) > 0 {
-		rl.attempts[chatID] = valid
-	} else {
-		delete(rl.attempts, chatID)
-	}
+	rl.attempts[chatID] = valid
 	return true
 }
 
@@ -173,7 +169,7 @@ func (t *TelegramNotifier) SendNoRejectionsMessage(chatID int64, message string)
 }
 
 // SendRejectionsNotification sends a notification about rejections to a specific chat ID.
-func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error {
+func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections []domain.Rejection) error {
 	if len(rejections) == 0 {
 		return nil
 	}
@@ -188,10 +184,10 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 	for i, r := range rejections {
 		rejectionsList = append(rejectionsList, map[string]interface{}{
 			"Number":  i + 1,
-			"Who":     html.EscapeString(r.Quem),
-			"Section": html.EscapeString(r.Secao),
-			"What":    html.EscapeString(r.OQue),
-			"When":    html.EscapeString(r.PraQuando),
+			"Who":     html.EscapeString(r.Who),
+			"Section": html.EscapeString(r.Section),
+			"What":    html.EscapeString(r.What),
+			"When":    html.EscapeString(r.When),
 		})
 	}
 

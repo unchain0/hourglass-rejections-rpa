@@ -27,6 +27,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Empty(t, cfg.HourglassXSRFToken)
 	assert.Empty(t, cfg.HourglassHGLogin)
 	assert.Empty(t, cfg.SentryDSN)
+	assert.True(t, cfg.AutoRefreshTokens)
 }
 func TestLoad_Overrides(t *testing.T) {
 	os.Setenv("HOURGLASS_URL", "https://test.com")
@@ -39,6 +40,8 @@ func TestLoad_Overrides(t *testing.T) {
 	os.Setenv("SENTRY_ENVIRONMENT", "staging")
 	os.Setenv("HOURGLASS_XSRF_TOKEN", "test-xsrf-token")
 	os.Setenv("HOURGLASS_HGLOGIN_COOKIE", "test-hglogin-cookie")
+	os.Setenv("WEBAUTHN_CREDENTIALS_PATH", "/tmp/webauthn-credentials.json")
+	os.Setenv("AUTO_REFRESH_TOKENS", "false")
 	os.Setenv("SENTRY_DSN", "https://test-sentry-dsn")
 	defer os.Clearenv()
 
@@ -56,6 +59,8 @@ func TestLoad_Overrides(t *testing.T) {
 	assert.Equal(t, "staging", cfg.SentryEnvironment)
 	assert.Equal(t, "test-xsrf-token", cfg.HourglassXSRFToken)
 	assert.Equal(t, "test-hglogin-cookie", cfg.HourglassHGLogin)
+	assert.Equal(t, "/tmp/webauthn-credentials.json", cfg.WebAuthnCredentialsPath)
+	assert.False(t, cfg.AutoRefreshTokens)
 	assert.Equal(t, "https://test-sentry-dsn", cfg.SentryDSN)
 }
 func TestLoad_Error_InvalidDuration(t *testing.T) {

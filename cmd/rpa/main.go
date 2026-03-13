@@ -67,6 +67,9 @@ func main() {
 }
 
 var sentryClientGlobal *sentry.Client
+var enableWebAuthnClient = func(apiClient *api.Client, credentialsPath string) error {
+	return apiClient.EnableWebAuthn(credentialsPath, captureError)
+}
 
 func captureError(err error, extras map[string]interface{}) {
 	if sentryClientGlobal != nil && sentryClientGlobal.IsEnabled() {
@@ -101,7 +104,12 @@ func run(ctx context.Context, opts runOptions) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	_, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store := setupDependencies(cfg)
+
+	if err := apiClient.StartTokenManager(ctx); err != nil {
+		return fmt.Errorf("failed to start token manager: %w", err)
+	}
+	defer apiClient.StopTokenManager()
 
 	if *onceMode {
 		slog.Info("running in once mode")
@@ -132,22 +140,24 @@ func setupSentry(cfg *config.Config) *sentry.Client {
 
 func setupDependencies(cfg *config.Config) (*api.Client, *api.APIAnalyzer, *storage.FileStorage) {
 	apiClient := api.NewClient()
+	apiClient.SetBaseURL(cfg.HourglassURL)
+
+	tokensPath := resolveTokensPath(cfg)
+	if tokensPath != "" {
+		apiClient.SetWebAuthnTokensPath(tokensPath)
+	}
+
+	if enableWebAuthnTokenManager(apiClient, cfg) {
+		analyzer := api.NewAPIAnalyzer(apiClient)
+		store := storage.New(cfg)
+		return apiClient, analyzer, store
+	}
 
 	if cfg.HourglassXSRFToken != "" && cfg.HourglassHGLogin != "" {
 		apiClient.SetXSRFToken(cfg.HourglassXSRFToken)
 		apiClient.SetHGLogin(cfg.HourglassHGLogin)
 		slog.Info("using tokens from environment variables")
 	} else {
-		tokensPath := cfg.TokensPath
-		if tokensPath == "" {
-			tokensPath = os.Getenv("TOKENS_PATH")
-		}
-		if tokensPath == "" {
-			if homeDir, err := os.UserHomeDir(); err == nil {
-				tokensPath = filepath.Join(homeDir, ".hourglass-rpa", "auth-tokens.json")
-			}
-		}
-
 		if tokensPath != "" {
 			if err := apiClient.LoadTokensFromFile(tokensPath); err != nil {
 				slog.Warn("failed to load tokens from file", "path", tokensPath, "error", err)
@@ -160,6 +170,73 @@ func setupDependencies(cfg *config.Config) (*api.Client, *api.APIAnalyzer, *stor
 	analyzer := api.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
 	return apiClient, analyzer, store
+}
+
+func resolveTokensPath(cfg *config.Config) string {
+	if cfg.TokensPath != "" {
+		return cfg.TokensPath
+	}
+
+	if tokensPath := os.Getenv("TOKENS_PATH"); tokensPath != "" {
+		return tokensPath
+	}
+
+	if tokensPath := os.Getenv("WEBAUTHN_TOKENS_PATH"); tokensPath != "" {
+		return tokensPath
+	}
+
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(homeDir, ".hourglass-rpa", "auth-tokens.json")
+	}
+
+	return ""
+}
+
+func resolveWebAuthnCredentialsPath(cfg *config.Config) string {
+	if cfg.WebAuthnCredentialsPath != "" {
+		return cfg.WebAuthnCredentialsPath
+	}
+
+	if credentialsPath := os.Getenv("WEBAUTHN_CREDENTIALS_PATH"); credentialsPath != "" {
+		return credentialsPath
+	}
+
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(homeDir, ".hourglass-rpa", "webauthn-credentials.json")
+	}
+
+	return ""
+}
+
+func enableWebAuthnTokenManager(apiClient *api.Client, cfg *config.Config) bool {
+	if !cfg.AutoRefreshTokens {
+		slog.Info("automatic token renewal disabled")
+		return false
+	}
+
+	credentialsPath := resolveWebAuthnCredentialsPath(cfg)
+	if credentialsPath == "" {
+		return false
+	}
+
+	_, err := os.Stat(credentialsPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			slog.Info("webauthn credentials not found, using static token flow", "path", credentialsPath)
+			return false
+		}
+
+		slog.Warn("failed to inspect webauthn credentials path", "path", credentialsPath, "error", err)
+		return false
+	}
+
+	if err := enableWebAuthnClient(apiClient, credentialsPath); err != nil {
+		slog.Warn("failed to enable webauthn token manager", "path", credentialsPath, "error", err)
+		return false
+	}
+
+	slog.Info("enabled webauthn token manager", "credentials_path", credentialsPath)
+	return true
 }
 
 var runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {

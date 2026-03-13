@@ -22,8 +22,8 @@ func TestNew(t *testing.T) {
 
 func TestRejectionCache_HasChanges_FirstCheckWithRejections(t *testing.T) {
 	c := New()
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	if !c.HasChanges(rejections) {
@@ -41,7 +41,7 @@ func TestRejectionCache_HasChanges_FirstCheckWithRejections(t *testing.T) {
 
 func TestRejectionCache_HasChanges_FirstCheckEmpty(t *testing.T) {
 	c := New()
-	rejections := []domain.Rejeicao{}
+	rejections := []domain.Rejection{}
 
 	if c.HasChanges(rejections) {
 		t.Error("first check with no rejections should return false")
@@ -66,8 +66,8 @@ func TestRejectionCache_HasChanges_FirstCheckNilSlice(t *testing.T) {
 
 func TestRejectionCache_HasChanges_SameResults(t *testing.T) {
 	c := New()
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	c.HasChanges(rejections)
@@ -79,12 +79,12 @@ func TestRejectionCache_HasChanges_SameResults(t *testing.T) {
 
 func TestRejectionCache_HasChanges_DifferentCount(t *testing.T) {
 	c := New()
-	rejections1 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections1 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
-	rejections2 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
-		{Secao: "Campo", Quem: "Jane", OQue: "Test2", PraQuando: "02/03/2026"},
+	rejections2 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
+		{Section: "Field Ministry", Who: "Jane", What: "Test2", When: "02/03/2026"},
 	}
 
 	c.HasChanges(rejections1)
@@ -98,76 +98,76 @@ func TestRejectionCache_HasChanges_DifferentCount(t *testing.T) {
 	}
 }
 
-func TestRejectionCache_HasChanges_DifferentSecao(t *testing.T) {
+func TestRejectionCache_HasChanges_DifferentSection(t *testing.T) {
 	c := New()
-	rejections1 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections1 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
-	rejections2 := []domain.Rejeicao{
-		{Secao: "Partes Mecânicas", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections2 := []domain.Rejection{
+		{Section: "Mechanical Parts", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	c.HasChanges(rejections1)
 
 	if !c.HasChanges(rejections2) {
-		t.Error("different Secao should return true")
+		t.Error("different Section should return true")
 	}
 }
 
-func TestRejectionCache_HasChanges_DifferentQuem(t *testing.T) {
+func TestRejectionCache_HasChanges_DifferentWho(t *testing.T) {
 	c := New()
-	rejections1 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections1 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
-	rejections2 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "Jane", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections2 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "Jane", What: "Test", When: "01/03/2026"},
 	}
 
 	c.HasChanges(rejections1)
 
 	if !c.HasChanges(rejections2) {
-		t.Error("different Quem should return true")
+		t.Error("different Who should return true")
 	}
 }
 
-func TestRejectionCache_HasChanges_DifferentOQue(t *testing.T) {
+func TestRejectionCache_HasChanges_DifferentWhat(t *testing.T) {
 	c := New()
-	rejections1 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections1 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
-	rejections2 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Different", PraQuando: "01/03/2026"},
+	rejections2 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Different", When: "01/03/2026"},
 	}
 
 	c.HasChanges(rejections1)
 
 	if !c.HasChanges(rejections2) {
-		t.Error("different OQue should return true")
+		t.Error("different What should return true")
 	}
 }
 
-func TestRejectionCache_HasChanges_SamePraQuandoDifferent(t *testing.T) {
+func TestRejectionCache_HasChanges_SameWhenDifferent(t *testing.T) {
 	c := New()
-	rejections1 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections1 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
-	rejections2 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "02/03/2026"},
+	rejections2 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "02/03/2026"},
 	}
 
 	c.HasChanges(rejections1)
 
 	if c.HasChanges(rejections2) {
-		t.Error("PraQuando is not compared, so should return false")
+		t.Error("When is not compared, so should return false")
 	}
 }
 
 func TestRejectionCache_HasChanges_EmptyToNonEmpty(t *testing.T) {
 	c := New()
-	c.HasChanges([]domain.Rejeicao{})
+	c.HasChanges([]domain.Rejection{})
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	if !c.HasChanges(rejections) {
@@ -177,12 +177,12 @@ func TestRejectionCache_HasChanges_EmptyToNonEmpty(t *testing.T) {
 
 func TestRejectionCache_HasChanges_NonEmptyToEmpty(t *testing.T) {
 	c := New()
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 	c.HasChanges(rejections)
 
-	if !c.HasChanges([]domain.Rejeicao{}) {
+	if !c.HasChanges([]domain.Rejection{}) {
 		t.Error("non-empty to empty should return true (different count)")
 	}
 }
@@ -194,8 +194,8 @@ func TestRejectionCache_LastCheck(t *testing.T) {
 		t.Error("LastCheck should be zero for new cache")
 	}
 
-	c.HasChanges([]domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	c.HasChanges([]domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	})
 
 	if c.LastCheck().IsZero() {
@@ -209,8 +209,8 @@ func TestRejectionCache_ConcurrentAccess(t *testing.T) {
 
 	go func() {
 		for i := 0; i < 100; i++ {
-			c.HasChanges([]domain.Rejeicao{
-				{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+			c.HasChanges([]domain.Rejection{
+				{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 			})
 		}
 		done <- true
@@ -237,13 +237,13 @@ func TestRejectionCache_ConcurrentAccess(t *testing.T) {
 
 func TestRejectionCache_MultipleRejectionsOrder(t *testing.T) {
 	c := New()
-	rejections1 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test1", PraQuando: "01/03/2026"},
-		{Secao: "Campo", Quem: "Jane", OQue: "Test2", PraQuando: "02/03/2026"},
+	rejections1 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test1", When: "01/03/2026"},
+		{Section: "Field Ministry", Who: "Jane", What: "Test2", When: "02/03/2026"},
 	}
-	rejections2 := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "Jane", OQue: "Test2", PraQuando: "02/03/2026"},
-		{Secao: "Campo", Quem: "John", OQue: "Test1", PraQuando: "01/03/2026"},
+	rejections2 := []domain.Rejection{
+		{Section: "Field Ministry", Who: "Jane", What: "Test2", When: "02/03/2026"},
+		{Section: "Field Ministry", Who: "John", What: "Test1", When: "01/03/2026"},
 	}
 
 	c.HasChanges(rejections1)

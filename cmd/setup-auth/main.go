@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ import (
 )
 
 const (
-	defaultBaseURL    = "https://app.hourglass-app.com/api/v0.2"
+	defaultBaseURL    = "https://app.hourglass-app.com"
 	defaultConfigDir  = ".hourglass-rpa"
 	defaultTokensFile = "auth-tokens.json"
 )
@@ -36,6 +37,11 @@ type BrowserAuthFactory interface {
 type browserAuth interface {
 	Authenticate() (*webauthn.AuthTokens, error)
 	WithHeadless(headless bool) browserAuth
+}
+
+type credentialRegistrar interface {
+	SetCookies(xsrfToken, hgLogin string)
+	Register(userName string) (*webauthn.Credential, error)
 }
 
 type UserInput interface {
@@ -146,6 +152,7 @@ func (c *execSCPClient) CopyFile(localPath, remoteHost, remotePath string) error
 type setupRunner struct {
 	fs              FileSystem
 	browserAuthFact BrowserAuthFactory
+	authFactory     func(storagePath, baseURL string) (credentialRegistrar, error)
 	userInput       UserInput
 	scpClient       SCPClient
 	baseURL         string
@@ -158,6 +165,7 @@ func newSetupRunner() *setupRunner {
 	return &setupRunner{
 		fs:              osFileSystem{},
 		browserAuthFact: functionBrowserAuthFactory{newFn: newBrowserAuth},
+		authFactory:     defaultCredentialRegistrarFactory,
 		userInput:       newConsoleUserInput(os.Stdin),
 		scpClient: &execSCPClient{
 			stdout: os.Stdout,
@@ -168,6 +176,10 @@ func newSetupRunner() *setupRunner {
 		tokensFile: defaultTokensFile,
 		osExit:     os.Exit,
 	}
+}
+
+var defaultCredentialRegistrarFactory = func(storagePath, baseURL string) (credentialRegistrar, error) {
+	return webauthn.NewAuthenticator(storagePath, baseURL)
 }
 
 type setupOptions struct {
@@ -230,9 +242,11 @@ func (r *setupRunner) run() error {
 
 	configDir := filepath.Join(homeDir, r.configDir)
 	tokensPath := filepath.Join(configDir, r.tokensFile)
+	credentialsPath := filepath.Join(configDir, "webauthn-credentials.json")
 
 	fmt.Println("📍 Configuration Directory:", configDir)
 	fmt.Println("📄 Tokens File:        ", tokensPath)
+	fmt.Println("🔐 WebAuthn File:      ", credentialsPath)
 	fmt.Println()
 
 	if err := r.fs.MkdirAll(configDir, 0700); err != nil {
@@ -286,11 +300,15 @@ func (r *setupRunner) run() error {
 		return fmt.Errorf("failed to save tokens: %w", err)
 	}
 
+	if err := r.registerWebAuthnCredential(credentialsPath, tokens); err != nil {
+		return fmt.Errorf("failed to register webauthn credential: %w", err)
+	}
+
 	fmt.Println("💾 Tokens saved successfully!")
 	fmt.Printf("   📁 Location: %s\n", tokensPath)
 	fmt.Println()
 
-	return r.askVPSUpload(tokensPath)
+	return r.askVPSUploadWithCredentials(tokensPath, credentialsPath)
 }
 
 func checkExistingTokens(path string) (*webauthn.AuthTokens, error) {
@@ -329,6 +347,29 @@ func (r *setupRunner) saveTokens(path string, tokens *webauthn.AuthTokens) error
 	if err := r.fs.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write tokens file: %w", err)
 	}
+
+	return nil
+}
+
+func (r *setupRunner) registerWebAuthnCredential(credentialsPath string, tokens *webauthn.AuthTokens) error {
+	if r.authFactory == nil {
+		r.authFactory = defaultCredentialRegistrarFactory
+	}
+
+	fmt.Println("🔐 Registering WebAuthn credential for automatic renewal...")
+
+	authenticator, err := r.authFactory(credentialsPath, r.baseURL)
+	if err != nil {
+		return fmt.Errorf("failed to create authenticator: %w", err)
+	}
+
+	authenticator.SetCookies(tokens.XSRFToken, tokens.HGLogin)
+	if _, err := authenticator.Register("Hourglass RPA"); err != nil {
+		return fmt.Errorf("failed to register credential: %w", err)
+	}
+
+	fmt.Printf("   📁 Credential stored at: %s\n", credentialsPath)
+	fmt.Println()
 
 	return nil
 }
@@ -393,6 +434,73 @@ func (r *setupRunner) askVPSUpload(tokensPath string) error {
 	fmt.Println("2. Verify tokens are in the correct location")
 	fmt.Println("3. Ensure WEBAUTHN_TOKENS_PATH environment variable is set (if needed)")
 	fmt.Println("4. Run the application: ./rpa")
+	fmt.Println()
+	fmt.Println("✅ Setup complete!")
+
+	return nil
+}
+
+func (r *setupRunner) askVPSUploadWithCredentials(tokensPath, credentialsPath string) error {
+	fmt.Println("📦 VPS Deployment")
+	fmt.Println("==================")
+	fmt.Println()
+	fmt.Println("You can copy the authentication files to your VPS for remote deployment.")
+	fmt.Println()
+
+	confirm, err := r.userInput.Confirm("📡 Transfer authentication files to VPS via SCP? (yes/no): ")
+	if err != nil {
+		return fmt.Errorf("failed to read transfer confirmation: %w", err)
+	}
+
+	if !confirm {
+		fmt.Println("\n✅ Setup complete!")
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Print("🖥️  VPS host (user@host): ")
+	vpsHost, err := r.userInput.ReadLine()
+	if err != nil {
+		return fmt.Errorf("failed to read VPS host: %w", err)
+	}
+
+	if vpsHost == "" {
+		fmt.Println("❌ VPS host cannot be empty")
+		return nil
+	}
+
+	fmt.Print("📂 VPS target path for tokens (default: ~/.hourglass-rpa/auth-tokens.json): ")
+	vpsTokensPath, err := r.userInput.ReadLine()
+	if err != nil {
+		return fmt.Errorf("failed to read VPS target path: %w", err)
+	}
+
+	if vpsTokensPath == "" {
+		vpsTokensPath = "~/.hourglass-rpa/auth-tokens.json"
+	}
+
+	vpsCredentialsPath := path.Join(path.Dir(vpsTokensPath), "webauthn-credentials.json")
+
+	fmt.Println()
+	fmt.Println("📤 Transferring token file...")
+	if err := r.scpClient.CopyFile(tokensPath, vpsHost, vpsTokensPath); err != nil {
+		return err
+	}
+
+	fmt.Println("📤 Transferring WebAuthn credential...")
+	if err := r.scpClient.CopyFile(credentialsPath, vpsHost, vpsCredentialsPath); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("✅ Authentication files transferred successfully!")
+	fmt.Printf("   📄 Tokens:      %s:%s\n", vpsHost, vpsTokensPath)
+	fmt.Printf("   🔐 Credentials: %s:%s\n", vpsHost, vpsCredentialsPath)
+	fmt.Println()
+	fmt.Println("📋 Next steps:")
+	fmt.Println("1. SSH into your VPS")
+	fmt.Println("2. Verify both files are in ~/.hourglass-rpa")
+	fmt.Println("3. Start the application: ./rpa")
 	fmt.Println()
 	fmt.Println("✅ Setup complete!")
 

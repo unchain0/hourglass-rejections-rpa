@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -19,6 +18,35 @@ func TestNewClient(t *testing.T) {
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.httpClient)
 	assert.Equal(t, defaultBaseURL, client.baseURL)
+}
+
+func TestClient_SetBaseURL_UsesSiteRoot(t *testing.T) {
+	client := NewClient()
+	client.SetBaseURL("https://hourglass.example.com")
+	assert.Equal(t, "https://hourglass.example.com/api/v0.2", client.baseURL)
+}
+
+func TestClient_SetBaseURL_KeepsAPIPath(t *testing.T) {
+	client := NewClient()
+	client.SetBaseURL("https://hourglass.example.com/api/v0.2")
+	assert.Equal(t, "https://hourglass.example.com/api/v0.2", client.baseURL)
+}
+
+func TestClient_SetBaseURL_UsesDefaultWhenEmpty(t *testing.T) {
+	client := NewClient()
+	client.SetBaseURL("")
+	assert.Equal(t, defaultBaseURL, client.baseURL)
+}
+
+func TestClient_SetBaseURL_KeepsInvalidURLUntouched(t *testing.T) {
+	client := NewClient()
+	client.SetBaseURL("://bad-url")
+	assert.Equal(t, "://bad-url", client.baseURL)
+}
+
+func TestNormalizeAPIBaseURL_ParseErrorReturnsOriginal(t *testing.T) {
+	invalidURL := "http://[::1"
+	assert.Equal(t, invalidURL, normalizeAPIBaseURL(invalidURL))
 }
 
 func TestClient_SetXSRFToken(t *testing.T) {
@@ -45,7 +73,7 @@ func TestClient_GetUsers(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/fsreport/users", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Accept"))
@@ -66,7 +94,7 @@ func TestClient_GetUsers(t *testing.T) {
 }
 
 func TestClient_GetUsers_Error(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error": "unauthorized"}`))
 	}))
@@ -105,7 +133,7 @@ func TestClient_GetAVAttendants(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/scheduling/av_attendant/2026-03-01_2026-03-07", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
@@ -142,7 +170,7 @@ func TestClient_GetMeetings(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/scheduling/mm/meeting/2026-03-01_2026-03-07", r.URL.Path)
 		assert.Equal(t, "lgroup=48092&no_subs=true", r.URL.RawQuery)
 		assert.Equal(t, http.MethodGet, r.Method)
@@ -163,7 +191,7 @@ func TestClient_GetMeetings(t *testing.T) {
 }
 
 func TestClient_GetMeetings_Error(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -177,7 +205,7 @@ func TestClient_GetMeetings_Error(t *testing.T) {
 }
 
 func TestClient_WithXSRFToken(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("X-Hourglass-XSRF-Token")
 		assert.Equal(t, "KizSvAQQ4B6lCkHNGagusFtX5nRjlbVZ", token)
 
@@ -195,7 +223,7 @@ func TestClient_WithXSRFToken(t *testing.T) {
 }
 
 func TestClient_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -215,7 +243,7 @@ func intPtr(i int) *int {
 }
 
 func TestClient_GetUsers_DecodeError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`invalid json`))
 	}))
@@ -231,7 +259,7 @@ func TestClient_GetUsers_DecodeError(t *testing.T) {
 }
 
 func TestClient_GetAVAttendants_DecodeError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{invalid`))
 	}))
@@ -246,7 +274,7 @@ func TestClient_GetAVAttendants_DecodeError(t *testing.T) {
 }
 
 func TestClient_GetAVAttendants_StatusError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte(`{"error": "forbidden"}`))
 	}))
@@ -262,7 +290,7 @@ func TestClient_GetAVAttendants_StatusError(t *testing.T) {
 }
 
 func TestClient_GetMeetings_DecodeError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{`))
 	}))
@@ -332,7 +360,7 @@ func TestClient_GetMeetings_InvalidURL(t *testing.T) {
 }
 
 func TestClient_EmptyResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"users": []}`))
 	}))
@@ -392,7 +420,7 @@ func TestClient_GetNotifications(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/scheduling/notifications/2026-03-01_2026-03-31/pubwit", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
@@ -412,7 +440,7 @@ func TestClient_GetNotifications(t *testing.T) {
 }
 
 func TestClient_GetNotifications_Error(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -427,7 +455,7 @@ func TestClient_GetNotifications_Error(t *testing.T) {
 }
 
 func TestClient_GetNotifications_DecodeError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{invalid`))
 	}))
@@ -469,7 +497,7 @@ func TestClient_SetHGLogin(t *testing.T) {
 }
 
 func TestClient_setCookies_WithHGLogin(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("hglogin")
 		assert.NoError(t, err)
 		assert.Equal(t, "my-session-cookie", cookie.Value)
@@ -488,7 +516,7 @@ func TestClient_setCookies_WithHGLogin(t *testing.T) {
 }
 
 func TestClient_setCookies_Empty(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, err := r.Cookie("hglogin")
 		assert.Error(t, err, "hglogin cookie should not be present")
 
@@ -664,6 +692,78 @@ func TestClient_EnableWebAuthn_CallbackUpdatesTokensOnStart(t *testing.T) {
 
 	assert.Equal(t, "callback-hg-login", client.hgLogin)
 	assert.Equal(t, "callback-xsrf-token", client.xsrfToken)
+}
+
+func TestClient_SetWebAuthnTokensPath(t *testing.T) {
+	client := NewClient()
+	client.SetWebAuthnTokensPath("/tmp/custom-auth-tokens.json")
+	assert.Equal(t, "/tmp/custom-auth-tokens.json", client.webAuthnTokensPath)
+}
+
+func TestClient_EnableWebAuthn_UsesCustomTokensPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	credentialsPath := tmpDir + "/webauthn-credentials.json"
+	tokensPath := tmpDir + "/custom-auth-tokens.json"
+	tokens := &webauthn.AuthTokens{
+		HGLogin:   "custom-hg-login",
+		XSRFToken: "custom-xsrf-token",
+		ExpiresAt: time.Now().Add(2 * time.Hour),
+	}
+	data, err := json.Marshal(tokens)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(tokensPath, data, 0o600))
+
+	client := NewClient()
+	client.SetWebAuthnTokensPath(tokensPath)
+	require.NoError(t, client.EnableWebAuthn(credentialsPath, nil))
+	require.NoError(t, client.StartTokenManager(t.Context()))
+
+	assert.Equal(t, "custom-hg-login", client.hgLogin)
+	assert.Equal(t, "custom-xsrf-token", client.xsrfToken)
+}
+
+func TestClient_EnableWebAuthn_ErrorCallbackInvoked(t *testing.T) {
+	t.Setenv("CI", "true")
+
+	client := NewClient()
+	tmpDir := t.TempDir()
+	credentialsPath := tmpDir + "/webauthn-credentials.json"
+
+	var capturedErr error
+	err := client.EnableWebAuthn(credentialsPath, func(err error, extras map[string]interface{}) {
+		capturedErr = err
+		assert.Equal(t, "token_manager", extras["component"])
+		assert.Equal(t, "token_renewal", extras["action"])
+	})
+	require.NoError(t, err)
+
+	err = client.ensureAuth()
+	require.Error(t, err)
+	require.Error(t, capturedErr)
+}
+
+func TestNewClientWithWebAuthn_CallbackUpdatesTokensOnStart(t *testing.T) {
+	tmpDir := t.TempDir()
+	credentialsPath := tmpDir + "/webauthn-credentials.json"
+	tokensPath := tmpDir + "/auth-tokens.json"
+	tokens := &webauthn.AuthTokens{
+		HGLogin:   "constructor-hg-login",
+		XSRFToken: "constructor-xsrf-token",
+		ExpiresAt: time.Now().Add(2 * time.Hour),
+	}
+	data, err := json.Marshal(tokens)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(tokensPath, data, 0o600))
+
+	t.Setenv("WEBAUTHN_TOKENS_PATH", tokensPath)
+	client, err := NewClientWithWebAuthn(credentialsPath, nil)
+	require.NoError(t, err)
+
+	err = client.StartTokenManager(t.Context())
+	require.NoError(t, err)
+
+	assert.Equal(t, "constructor-hg-login", client.hgLogin)
+	assert.Equal(t, "constructor-xsrf-token", client.xsrfToken)
 }
 
 func TestClient_StartTokenManager_Success(t *testing.T) {

@@ -8,24 +8,28 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"hourglass-rejections-rpa/internal/auth/webauthn"
 )
 
 const (
-	defaultBaseURL = "https://app.hourglass-app.com/api/v0.2"
+	defaultSiteURL = "https://app.hourglass-app.com"
+	defaultBaseURL = defaultSiteURL + "/api/v0.2"
 )
 
 // Client is an HTTP client for the Hourglass API.
 type Client struct {
-	httpClient   *http.Client
-	baseURL      string
-	xsrfToken    string
-	hgLogin      string
-	tokenManager *webauthn.TokenManager
-	useWebAuthn  bool
+	httpClient         *http.Client
+	baseURL            string
+	xsrfToken          string
+	hgLogin            string
+	tokenManager       *webauthn.TokenManager
+	webAuthnTokensPath string
+	useWebAuthn        bool
 }
 
 // NewClient creates a new Hourglass API client.
@@ -39,6 +43,35 @@ func NewClient() *Client {
 		baseURL:     defaultBaseURL,
 		useWebAuthn: false,
 	}
+}
+
+func normalizeAPIBaseURL(baseURL string) string {
+	trimmed := strings.TrimRight(baseURL, "/")
+	if trimmed == "" {
+		return defaultBaseURL
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return trimmed
+	}
+
+	path := strings.TrimRight(parsed.Path, "/")
+	if path == "" {
+		parsed.Path = "/api/v0.2"
+		parsed.RawPath = ""
+		return strings.TrimRight(parsed.String(), "/")
+	}
+
+	return trimmed
+}
+
+func (c *Client) SetBaseURL(baseURL string) {
+	c.baseURL = normalizeAPIBaseURL(baseURL)
+}
+
+func (c *Client) SetWebAuthnTokensPath(tokensPath string) {
+	c.webAuthnTokensPath = tokensPath
 }
 
 // LoadTokensFromFile loads authentication tokens from a JSON file.
@@ -64,36 +97,29 @@ func (c *Client) LoadTokensFromFile(path string) error {
 
 // NewClientWithWebAuthn creates a new Hourglass API client with WebAuthn authentication.
 func NewClientWithWebAuthn(credentialsPath string, sentryCapture func(error, map[string]interface{})) (*Client, error) {
-	jar, _ := cookiejar.New(nil)
-	client := &Client{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
-		},
-		baseURL:     defaultBaseURL,
-		useWebAuthn: true,
-	}
+	client := NewClient()
 
-	tokenManager, err := webauthn.NewTokenManager(credentialsPath, defaultBaseURL,
-		webauthn.WithOnError(func(err error) {
-			if sentryCapture != nil {
-				sentryCapture(err, map[string]interface{}{
-					"component": "token_manager",
-					"action":    "token_renewal",
-				})
-			}
-		}),
-	)
+	err := client.EnableWebAuthn(credentialsPath, sentryCapture)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create token manager: %w", err)
+		return nil, err
 	}
 
-	client.tokenManager = tokenManager
 	return client, nil
 }
 
 func (c *Client) EnableWebAuthn(credentialsPath string, sentryCapture func(error, map[string]interface{})) error {
-	tokenManager, err := webauthn.NewTokenManager(credentialsPath, c.baseURL,
+	tokenManager, err := c.newTokenManager(credentialsPath, sentryCapture)
+	if err != nil {
+		return fmt.Errorf("failed to create token manager: %w", err)
+	}
+
+	c.tokenManager = tokenManager
+	c.useWebAuthn = true
+	return nil
+}
+
+func (c *Client) newTokenManager(credentialsPath string, sentryCapture func(error, map[string]interface{})) (*webauthn.TokenManager, error) {
+	opts := []webauthn.TokenManagerOption{
 		webauthn.WithOnTokenRenewed(func(tokens *webauthn.AuthTokens) {
 			c.UpdateTokensFromManager(tokens)
 		}),
@@ -105,14 +131,13 @@ func (c *Client) EnableWebAuthn(credentialsPath string, sentryCapture func(error
 				})
 			}
 		}),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create token manager: %w", err)
 	}
 
-	c.tokenManager = tokenManager
-	c.useWebAuthn = true
-	return nil
+	if c.webAuthnTokensPath != "" {
+		opts = append(opts, webauthn.WithTokensPath(c.webAuthnTokensPath))
+	}
+
+	return webauthn.NewTokenManager(credentialsPath, c.baseURL, opts...)
 }
 
 func (c *Client) StartTokenManager(ctx context.Context) error {

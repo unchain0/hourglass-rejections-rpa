@@ -5,30 +5,30 @@ import (
 	"time"
 )
 
-// Rejeicao represents a rejection record.
-type Rejeicao struct {
-	Secao     string    `json:"secao"`
-	Quem      string    `json:"quem"`
-	OQue      string    `json:"oque"`
-	PraQuando string    `json:"pra_quando"`
+// Rejection represents a rejection record.
+type Rejection struct {
+	Section   string    `json:"section"`
+	Who       string    `json:"who"`
+	What      string    `json:"what"`
+	When      string    `json:"when"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
 // JobResult represents the result of a scraping job for a specific section.
 type JobResult struct {
-	Secao     string
-	Total     int
-	Rejeicoes []Rejeicao
-	Duration  time.Duration
-	Error     error
+	Section    string
+	Total      int
+	Rejections []Rejection
+	Duration   time.Duration
+	Error      error
 }
 
 // DailyStats represents the statistics for a day's scraping jobs.
 type DailyStats struct {
-	Date      time.Time
-	TotalJobs int
-	TotalRej  int
-	Sections  map[string]int
+	Date            time.Time
+	TotalJobs       int
+	TotalRejections int
+	Sections        map[string]int
 }
 
 // Cookie represents a browser cookie for persistence.

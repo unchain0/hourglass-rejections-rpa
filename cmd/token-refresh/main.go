@@ -1,10 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,54 +9,41 @@ import (
 	"hourglass-rejections-rpa/internal/auth/webauthn"
 )
 
-type FileSystem interface {
-	UserHomeDir() (string, error)
-	ReadFile(path string) ([]byte, error)
-	WriteFile(path string, data []byte, perm os.FileMode) error
-	MkdirAll(path string, perm os.FileMode) error
+const (
+	defaultBaseURL          = "https://app.hourglass-app.com"
+	defaultRefreshThreshold = 6 * time.Hour
+)
+
+type tokenManager interface {
+	LoadTokens() (*webauthn.AuthTokens, error)
+	EnsureValidTokens() (*webauthn.AuthTokens, error)
 }
 
-type HTTPClient interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
-type osFileSystem struct{}
-
-func (osFileSystem) UserHomeDir() (string, error) {
-	return os.UserHomeDir()
-}
-
-func (osFileSystem) ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-func (osFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error {
-	return os.WriteFile(path, data, perm)
-}
-
-func (osFileSystem) MkdirAll(path string, perm os.FileMode) error {
-	return os.MkdirAll(path, perm)
-}
+type tokenManagerFactory func(string, string, ...webauthn.TokenManagerOption) (tokenManager, error)
 
 type tokenRefresher struct {
-	fs         FileSystem
-	httpClient HTTPClient
-	baseURL    string
+	userHomeDir         func() (string, error)
+	getenv              func(string) string
+	tokenManagerFactory tokenManagerFactory
+	baseURL             string
 }
 
 func newTokenRefresher() *tokenRefresher {
 	return &tokenRefresher{
-		fs:         &osFileSystem{},
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		baseURL:    "https://app.hourglass-app.com",
+		userHomeDir: os.UserHomeDir,
+		getenv:      os.Getenv,
+		tokenManagerFactory: func(credentialsPath, baseURL string, opts ...webauthn.TokenManagerOption) (tokenManager, error) {
+			return webauthn.NewTokenManager(credentialsPath, baseURL, opts...)
+		},
+		baseURL: defaultBaseURL,
 	}
 }
 
 var osExit = os.Exit
-var jsonMarshal = json.Marshal
+var newTokenRefresherFunc = newTokenRefresher
 
 func main() {
-	tr := newTokenRefresher()
+	tr := newTokenRefresherFunc()
 	if err := tr.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		osExit(1)
@@ -67,125 +51,112 @@ func main() {
 }
 
 func (tr *tokenRefresher) Run() error {
-	fmt.Println("🔄 Token Refresh - Tentando renovar tokens automaticamente")
+	fmt.Println("🔄 Token Refresh - Renovação real via WebAuthn")
 	fmt.Println()
 
-	homeDir, err := tr.fs.UserHomeDir()
+	configDir, err := tr.configDir()
 	if err != nil {
-		return fmt.Errorf("erro ao obter diretório home: %w", err)
+		return fmt.Errorf("erro ao obter diretório de configuração: %w", err)
 	}
 
-	tokensPath := filepath.Join(homeDir, ".hourglass-rpa", "auth-tokens.json")
+	credentialsPath := tr.credentialsPath(configDir)
+	tokensPath := tr.tokensPath(configDir)
+	renewalThreshold := tr.renewalThreshold()
 
-	tokens, err := tr.loadTokens(tokensPath)
+	fmt.Printf("🔐 Credenciais WebAuthn: %s\n", credentialsPath)
+	fmt.Printf("💾 Tokens:               %s\n", tokensPath)
+	fmt.Printf("⏱️  Limite de renovação: %s\n", renewalThreshold)
+
+	tm, err := tr.tokenManagerFactory(
+		credentialsPath,
+		tr.baseURL,
+		webauthn.WithTokensPath(tokensPath),
+		webauthn.WithRenewalThreshold(renewalThreshold),
+	)
 	if err != nil {
-		fmt.Println("💡 Execute: make save-tokens")
-		return fmt.Errorf("erro ao carregar tokens: %w", err)
+		return fmt.Errorf("erro ao criar gerenciador de tokens: %w", err)
 	}
 
-	fmt.Printf("📅 Tokens atuais válidos até: %s\n", tokens.ExpiresAt.Format("02/01/2006 15:04:05"))
-
-	newTokens, err := tr.tryRefresh(tokens)
+	currentTokens, err := tm.LoadTokens()
 	if err != nil {
-		fmt.Printf("\n❌ Refresh automático falhou: %v\n", err)
+		return fmt.Errorf("erro ao carregar tokens atuais: %w", err)
+	}
+
+	if currentTokens == nil {
+		fmt.Println("📭 Nenhum token persistido encontrado.")
+	} else {
+		fmt.Printf("📅 Tokens atuais válidos até: %s\n", currentTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
+	}
+
+	refreshedTokens, err := tm.EnsureValidTokens()
+	if err != nil {
 		fmt.Println()
-		fmt.Println("💡 Isso é normal quando:")
-		fmt.Println("   - Tokens já expiraram completamente")
-		fmt.Println("   - A sessão foi invalidada no servidor")
-		fmt.Println("   - É necessário re-autenticar com WebAuthn")
-		fmt.Println()
-		fmt.Println("📝 Próximo passo:")
-		fmt.Println("   make save-tokens")
-		fmt.Println("   # Autentique manualmente no navegador")
-		return fmt.Errorf("refresh automático falhou: %w", err)
-	}
-
-	err = tr.saveTokens(tokensPath, newTokens)
-	if err != nil {
-		return fmt.Errorf("erro ao salvar tokens: %w", err)
+		fmt.Println("💡 Para renovação automática funcionar na VPS, execute antes:")
+		fmt.Println("   make setup-auth")
+		fmt.Println("   # Depois copie auth-tokens.json e webauthn-credentials.json para a VPS")
+		return fmt.Errorf("falha na renovação real dos tokens: %w", err)
 	}
 
 	fmt.Println()
-	fmt.Println("✅ Tokens renovados com sucesso!")
-	fmt.Printf("📅 Nova validade: %s\n", newTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
-	fmt.Println()
-	fmt.Println("🚀 Você pode copiar para a VPS:")
-	fmt.Printf("   make copy-to-vps VPS=seu-usuario@ sua-vps.com\n")
+	if tokensEqual(currentTokens, refreshedTokens) {
+		fmt.Println("✅ Tokens já estavam válidos; nenhuma renovação foi necessária.")
+	} else {
+		fmt.Println("✅ Tokens renovados com sucesso!")
+	}
+	fmt.Printf("📅 Validade atual: %s\n", refreshedTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
 
 	return nil
 }
 
-func (tr *tokenRefresher) loadTokens(path string) (*webauthn.AuthTokens, error) {
-	data, err := tr.fs.ReadFile(path)
+func (tr *tokenRefresher) configDir() (string, error) {
+	homeDir, err := tr.userHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("arquivo de tokens não encontrado")
+		return "", err
 	}
 
-	var tokens webauthn.AuthTokens
-	if err := json.Unmarshal(data, &tokens); err != nil {
-		return nil, fmt.Errorf("erro ao ler tokens: %w", err)
-	}
-
-	return &tokens, nil
+	return filepath.Join(homeDir, ".hourglass-rpa"), nil
 }
 
-func (tr *tokenRefresher) tryRefresh(tokens *webauthn.AuthTokens) (*webauthn.AuthTokens, error) {
-	fmt.Println("🌐 Tentando refresh na API do Hourglass...")
-	req, err := http.NewRequest("GET", tr.baseURL+"/api/v0.2/fsreport/users", nil)
-	if err != nil {
-		return nil, err
+func (tr *tokenRefresher) credentialsPath(configDir string) string {
+	if path := tr.getenv("WEBAUTHN_CREDENTIALS_PATH"); path != "" {
+		return path
 	}
 
-	req.Header.Add("Cookie", fmt.Sprintf("hglogin=%s", tokens.HGLogin))
-	req.Header.Add("X-Hourglass-XSRF-Token", tokens.XSRFToken)
-	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
-
-	resp, err := tr.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("erro na requisição: %w", err)
-	}
-	_ = resp.Body.Close()
-
-	// Ler resposta
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("API retornou status %d: %s", resp.StatusCode, string(body))
-	}
-
-	newTokens := &webauthn.AuthTokens{
-		HGLogin:   tokens.HGLogin,
-		XSRFToken: tokens.XSRFToken,
-		ExpiresAt: time.Now().Add(8 * time.Hour),
-	}
-	for _, cookie := range resp.Cookies() {
-		switch cookie.Name {
-		case "hglogin":
-			if cookie.Value != "" {
-				newTokens.HGLogin = cookie.Value
-				fmt.Println("   📝 Novo hglogin recebido")
-			}
-		case "X-Hourglass-XSRF-Token":
-			if cookie.Value != "" {
-				newTokens.XSRFToken = cookie.Value
-				fmt.Println("   📝 Novo XSRF token recebido")
-			}
-		}
-	}
-
-	return newTokens, nil
+	return filepath.Join(configDir, "webauthn-credentials.json")
 }
 
-func (tr *tokenRefresher) saveTokens(path string, tokens *webauthn.AuthTokens) error {
-	data, err := jsonMarshal(tokens)
-	if err != nil {
-		return err
+func (tr *tokenRefresher) tokensPath(configDir string) string {
+	if path := tr.getenv("WEBAUTHN_TOKENS_PATH"); path != "" {
+		return path
 	}
 
-	dir := filepath.Dir(path)
-	if err := tr.fs.MkdirAll(dir, 0700); err != nil {
-		return err
+	if path := tr.getenv("TOKENS_PATH"); path != "" {
+		return path
 	}
 
-	return tr.fs.WriteFile(path, data, 0600)
+	return filepath.Join(configDir, "auth-tokens.json")
+}
+
+func (tr *tokenRefresher) renewalThreshold() time.Duration {
+	value := tr.getenv("REFRESH_INTERVAL")
+	if value == "" {
+		return defaultRefreshThreshold
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return defaultRefreshThreshold
+	}
+
+	return parsed
+}
+
+func tokensEqual(left, right *webauthn.AuthTokens) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+
+	return left.HGLogin == right.HGLogin &&
+		left.XSRFToken == right.XSRFToken &&
+		left.ExpiresAt.Equal(right.ExpiresAt)
 }

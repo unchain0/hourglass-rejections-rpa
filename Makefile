@@ -1,10 +1,11 @@
 # Hourglass Rejections RPA Makefile
-.PHONY: all build build-rpa build-save-tokens build-token-refresh test clean lint fmt vet coverage docker-build docker-run help run run-once save-tokens token-refresh copy-to-vps copy-to-vps-password
+.PHONY: all build build-rpa build-save-tokens build-token-refresh build-setup-auth test clean lint fmt vet coverage docker-build docker-run help run run-once save-tokens token-refresh setup-auth copy-to-vps copy-to-vps-password
 
 # Variables
 BINARY_NAME=rpa
 SAVE_TOKENS_NAME=save-tokens
 TOKEN_REFRESH_NAME=token-refresh
+SETUP_AUTH_NAME=setup-auth
 BUILD_DIR=.
 DOCKER_IMAGE=hourglass-rejections-rpa
 GO=go
@@ -19,7 +20,7 @@ help:
 	@grep -E '^##' $(MAKEFILE_LIST) | sed 's/## //'
 
 ## build: Build all binaries
-build: build-rpa build-save-tokens build-token-refresh
+build: build-rpa build-save-tokens build-token-refresh build-setup-auth
 
 ## build-rpa: Build the main rpa binary
 build-rpa:
@@ -35,6 +36,11 @@ build-save-tokens:
 build-token-refresh:
 	@echo "Building $(TOKEN_REFRESH_NAME)..."
 	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(TOKEN_REFRESH_NAME) ./cmd/token-refresh
+
+## build-setup-auth: Build the setup-auth utility
+build-setup-auth:
+	@echo "Building $(SETUP_AUTH_NAME)..."
+	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(SETUP_AUTH_NAME) ./cmd/setup-auth
 
 ## test: Run all tests
 test:
@@ -85,7 +91,7 @@ tidy:
 ## clean: Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME) $(TOKEN_REFRESH_NAME) register-webauthn
+	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME) $(TOKEN_REFRESH_NAME) $(SETUP_AUTH_NAME) register-webauthn
 	@rm -f coverage.out coverage.html
 
 ## run: Run the application (requires .env)
@@ -98,7 +104,7 @@ run-once: build-rpa
 	@echo "Running once mode..."
 	./$(BINARY_NAME) -once
 
-## save-tokens: Authenticate and save tokens for VPS
+## save-tokens: Authenticate and save tokens for immediate/manual VPS use
 save-tokens: build-save-tokens
 	@echo "Running save-tokens..."
 	./$(SAVE_TOKENS_NAME)
@@ -108,6 +114,11 @@ save-tokens: build-save-tokens
 token-refresh: build-token-refresh
 	@echo "Running token-refresh..."
 	./$(TOKEN_REFRESH_NAME)
+
+## setup-auth: Provision tokens + WebAuthn credentials for automatic renewal
+setup-auth: build-setup-auth
+	@echo "Running setup-auth..."
+	./$(SETUP_AUTH_NAME)
 
 ## copy-to-vps: Copy saved tokens to VPS using SSH keys
 ## Usage: make copy-to-vps VPS=user@your-vps.com

@@ -2,11 +2,11 @@ package api
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	"hourglass-rejections-rpa/internal/domain"
+	"hourglass-rejections-rpa/internal/i18n"
 )
 
 // APIAnalyzer uses the Hourglass REST API to detect rejections.
@@ -17,6 +17,7 @@ type APIAnalyzer struct {
 	userCacheErr    error
 	congregationID  int
 	daysToLookAhead int
+	language        string
 }
 
 // NewAPIAnalyzer creates a new API-based analyzer.
@@ -24,8 +25,9 @@ func NewAPIAnalyzer(client *Client) *APIAnalyzer {
 	return &APIAnalyzer{
 		client:          client,
 		userCache:       make(map[int]*User),
-		congregationID:  48092, // Default congregation ID
-		daysToLookAhead: 730,   // Default: 2 years (730 days) to catch all rejections
+		congregationID:  48092,
+		daysToLookAhead: 730,
+		language:        "en",
 	}
 }
 
@@ -39,8 +41,12 @@ func (a *APIAnalyzer) SetDaysToLookAhead(days int) {
 	a.daysToLookAhead = days
 }
 
+func (a *APIAnalyzer) SetLanguage(lang string) {
+	a.language = lang
+}
+
 // AnalyzeSection analyzes a specific section for rejections.
-// Supported sections: "Partes Mecânicas", "Campo", "Testemunho Público"
+// Supported sections: "Mechanical Parts", "Field Ministry", "Public Witnessing", "Midweek Meeting"
 func (a *APIAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error) {
 	start := time.Now()
 
@@ -49,27 +55,27 @@ func (a *APIAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error) 
 	})
 	if a.userCacheErr != nil {
 		return &domain.JobResult{
-			Secao:    section,
+			Section:  section,
 			Duration: time.Since(start),
 			Error:    fmt.Errorf("failed to load users: %w", a.userCacheErr),
 		}, nil
 	}
 
-	var rejeicoes []domain.Rejeicao
+	var rejections []domain.Rejection
 	var err error
 
 	switch section {
-	case "Partes Mecânicas", "avattendant":
-		rejeicoes, err = a.analyzePartesMecanicas()
-	case "Campo", "fsMeeting":
-		rejeicoes, err = a.analyzeCampo()
-	case "Testemunho Público", "publicWitnessing":
-		rejeicoes, err = a.analyzeTestemunhoPublico()
-	case "Reunião Meio de Semana", "midweekMeeting":
-		rejeicoes, err = a.analyzeMidweekMeetings()
+	case "Mechanical Parts", "avattendant":
+		rejections, err = a.analyzeMechanicalParts()
+	case "Field Ministry", "fsMeeting":
+		rejections, err = a.analyzeFieldMinistry()
+	case "Public Witnessing", "publicWitnessing":
+		rejections, err = a.analyzePublicWitnessing()
+	case "Midweek Meeting", "midweekMeeting":
+		rejections, err = a.analyzeMidweekMeetings()
 	default:
 		return &domain.JobResult{
-			Secao:    section,
+			Section:  section,
 			Duration: time.Since(start),
 			Error:    fmt.Errorf("unknown section: %s", section),
 		}, nil
@@ -77,18 +83,18 @@ func (a *APIAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error) 
 
 	if err != nil {
 		return &domain.JobResult{
-			Secao:    section,
+			Section:  section,
 			Duration: time.Since(start),
 			Error:    fmt.Errorf("failed to analyze section %s: %w", section, err),
 		}, nil
 	}
 
 	return &domain.JobResult{
-		Secao:     section,
-		Total:     len(rejeicoes),
-		Rejeicoes: rejeicoes,
-		Duration:  time.Since(start),
-		Error:     nil,
+		Section:    section,
+		Total:      len(rejections),
+		Rejections: rejections,
+		Duration:   time.Since(start),
+		Error:      nil,
 	}, nil
 }
 
@@ -118,7 +124,7 @@ func (a *APIAnalyzer) getUserName(userID int) string {
 }
 
 // analyzeGenericNotifications is a generic function to analyze notifications for a section.
-func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType string) ([]domain.Rejeicao, error) {
+func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType string) ([]domain.Rejection, error) {
 	now := time.Now()
 	start := now.Format("2006-01-02")
 	end := now.AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
@@ -128,70 +134,67 @@ func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType 
 		return nil, err
 	}
 
-	var rejeicoes []domain.Rejeicao
+	var rejections []domain.Rejection
+	seen := make(map[string]bool)
 	timestamp := now
 
 	for _, notif := range notifications {
 		if notif.Status == "declined" {
-			rejeicoes = append(rejeicoes, domain.Rejeicao{
-				Secao:     sectionName,
-				Quem:      a.getUserName(notif.Assignee),
-				OQue:      getFriendlyTypeName(notif.Type),
-				PraQuando: formatDateToBrazilian(notif.Date),
+			rejection := domain.Rejection{
+				Section:   sectionName,
+				Who:       a.getUserName(notif.Assignee),
+				What:      getFriendlyTypeName(notif.Type),
+				When:      i18n.FormatDate(notif.Date, a.language),
 				Timestamp: timestamp,
-			})
+			}
+			key := fmt.Sprintf("%s|%s|%s|%s", rejection.Section, rejection.Who, rejection.What, rejection.When)
+			if !seen[key] {
+				seen[key] = true
+				rejections = append(rejections, rejection)
+			}
 		}
 	}
 
-	return rejeicoes, nil
+	return rejections, nil
 }
 
-// analyzePartesMecanicas analyzes mechanical assignments for rejections.
-func (a *APIAnalyzer) analyzePartesMecanicas() ([]domain.Rejeicao, error) {
-	return a.analyzeGenericNotifications("Partes Mecânicas", "ava")
-}
-
-// formatDateToBrazilian converts YYYY-MM-DD to DD/MM/YYYY
-func formatDateToBrazilian(date string) string {
-	parts := strings.Split(date, "-")
-	if len(parts) != 3 {
-		return date
-	}
-	return fmt.Sprintf("%s/%s/%s", parts[2], parts[1], parts[0])
+// analyzeMechanicalParts analyzes mechanical assignments for rejections.
+func (a *APIAnalyzer) analyzeMechanicalParts() ([]domain.Rejection, error) {
+	return a.analyzeGenericNotifications("Mechanical Parts", "ava")
 }
 
 // getFriendlyTypeName converts technical type names to user-friendly names
 func getFriendlyTypeName(typeName string) string {
 	switch typeName {
 	case "ava":
-		return "Áudio/Vídeo & Indicadores"
+		return "Audio/Video & Indicators"
 	case "video":
-		return "Vídeo"
+		return "Video"
 	case "console":
 		return "Console"
 	case "mics":
-		return "Microfone"
+		return "Microphone"
 	case "attendant":
-		return "Atendente"
+		return "Attendant"
 	case "pubwit":
-		return "Testemunho Público"
+		return "Public Witnessing"
 	case "fm":
-		return "Reunião de Campo"
+		return "Field Ministry Meeting"
 	default:
 		return typeName
 	}
 }
 
-func (a *APIAnalyzer) analyzeCampo() ([]domain.Rejeicao, error) {
-	return a.analyzeGenericNotifications("Campo", "fm")
+func (a *APIAnalyzer) analyzeFieldMinistry() ([]domain.Rejection, error) {
+	return a.analyzeGenericNotifications("Field Ministry", "fm")
 }
 
-func (a *APIAnalyzer) analyzeTestemunhoPublico() ([]domain.Rejeicao, error) {
-	return a.analyzeGenericNotifications("Testemunho Público", "pubwit")
+func (a *APIAnalyzer) analyzePublicWitnessing() ([]domain.Rejection, error) {
+	return a.analyzeGenericNotifications("Public Witnessing", "pubwit")
 }
 
 // analyzeMidweekMeetings analyzes midweek meeting assignments for rejections.
-func (a *APIAnalyzer) analyzeMidweekMeetings() ([]domain.Rejeicao, error) {
+func (a *APIAnalyzer) analyzeMidweekMeetings() ([]domain.Rejection, error) {
 	start := time.Now().Format("2006-01-02")
 	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
 
@@ -200,70 +203,71 @@ func (a *APIAnalyzer) analyzeMidweekMeetings() ([]domain.Rejeicao, error) {
 		return nil, err
 	}
 
-	// Buscar programa da reunião para obter títulos das partes
 	meetings, err := a.client.GetMeetings(start, end, a.congregationID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Criar mapa de part ID -> título da designação
 	partTitles := make(map[int]string)
 	for _, meeting := range meetings {
-		// TGW - Tesouros da Palavra de Deus
 		for _, part := range meeting.TGW {
 			partTitles[part.ID] = part.Title
 		}
-		// FM - Reunião de Campo
 		for _, part := range meeting.FM {
 			partTitles[part.ID] = part.Title
 		}
-		// LAC - Vida Cristã
 		for _, part := range meeting.LAC {
 			partTitles[part.ID] = part.Title
 		}
 	}
 
-	var rejeicoes []domain.Rejeicao
+	var rejections []domain.Rejection
+	seen := make(map[string]bool)
 	timestamp := time.Now()
 
 	for _, notif := range notifications {
 		if notif.Status == "declined" {
-			// Usar título real se disponível, senão fallback para nome do flag
 			title := partTitles[notif.Part]
 			if title == "" {
 				title = getMidweekFlagName(notif.Flag)
 			}
 
-			rejeicoes = append(rejeicoes, domain.Rejeicao{
-				Secao:     "Reunião Meio de Semana",
-				Quem:      a.getUserName(notif.Assignee),
-				OQue:      title,
-				PraQuando: formatDateToBrazilian(notif.Date),
+			rejection := domain.Rejection{
+				Section:   "Midweek Meeting",
+				Who:       a.getUserName(notif.Assignee),
+				What:      title,
+				When:      i18n.FormatDate(notif.Date, a.language),
 				Timestamp: timestamp,
-			})
+			}
+
+			key := fmt.Sprintf("%s|%s|%s|%s", rejection.Section, rejection.Who, rejection.What, rejection.When)
+			if !seen[key] {
+				seen[key] = true
+				rejections = append(rejections, rejection)
+			}
 		}
 	}
 
-	return rejeicoes, nil
+	return rejections, nil
 }
 
-// getMidweekFlagName converts flag values to designação names
+// getMidweekFlagName converts flag values to assignment names
 func getMidweekFlagName(flag int) string {
 	switch flag {
 	case 10, 11:
-		return "Leitor do EBC"
+		return "Bible Reading"
 	case 20:
-		return "Orador/Dirigente"
+		return "Speaker/Chairman"
 	case 30:
-		return "Estudante"
+		return "Student"
 	case 40:
-		return "Ajudante"
+		return "Assistant"
 	case 50:
-		return "Designação Especial"
+		return "Special Assignment"
 	case 60:
-		return "Outra Designação"
+		return "Other Assignment"
 	default:
-		return fmt.Sprintf("Designação (flag %d)", flag)
+		return fmt.Sprintf("Assignment (flag %d)", flag)
 	}
 }
 

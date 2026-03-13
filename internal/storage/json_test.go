@@ -40,17 +40,17 @@ func TestFileStorage_Save(t *testing.T) {
 		outputDir: tempDir,
 	}
 
-	rejeicoes := []domain.Rejeicao{
+	rejections := []domain.Rejection{
 		{
-			Secao:     "Secao 1",
-			Quem:      "Quem 1",
-			OQue:      "O Que 1",
-			PraQuando: "Pra Quando 1",
+			Section:   "Section 1",
+			Who:       "Who 1",
+			What:      "O Que 1",
+			When:      "Pra Quando 1",
 			Timestamp: time.Now().UTC().Truncate(time.Second),
 		},
 	}
 
-	err = fs.Save(context.Background(), rejeicoes)
+	err = fs.Save(context.Background(), rejections)
 	assert.NoError(t, err)
 
 	// Check if files were created
@@ -73,10 +73,10 @@ func TestFileStorage_Save(t *testing.T) {
 	// Verify JSON content
 	jsonData, err := os.ReadFile(jsonFile)
 	assert.NoError(t, err)
-	var savedRejeicoes []domain.Rejeicao
-	err = json.Unmarshal(jsonData, &savedRejeicoes)
+	var savedRejections []domain.Rejection
+	err = json.Unmarshal(jsonData, &savedRejections)
 	assert.NoError(t, err)
-	assert.Equal(t, rejeicoes, savedRejeicoes)
+	assert.Equal(t, rejections, savedRejections)
 
 	// Verify CSV content
 	csvData, err := os.Open(csvFile)
@@ -86,12 +86,12 @@ func TestFileStorage_Save(t *testing.T) {
 	records, err := reader.ReadAll()
 	assert.NoError(t, err)
 	assert.Len(t, records, 2) // Header + 1 row
-	assert.Equal(t, []string{"secao", "quem", "oque", "pra_quando", "timestamp"}, records[0])
-	assert.Equal(t, rejeicoes[0].Secao, records[1][0])
-	assert.Equal(t, rejeicoes[0].Quem, records[1][1])
-	assert.Equal(t, rejeicoes[0].OQue, records[1][2])
-	assert.Equal(t, rejeicoes[0].PraQuando, records[1][3])
-	assert.Equal(t, rejeicoes[0].Timestamp.Format(time.RFC3339), records[1][4])
+	assert.Equal(t, []string{"section", "who", "what", "when", "timestamp"}, records[0])
+	assert.Equal(t, rejections[0].Section, records[1][0])
+	assert.Equal(t, rejections[0].Who, records[1][1])
+	assert.Equal(t, rejections[0].What, records[1][2])
+	assert.Equal(t, rejections[0].When, records[1][3])
+	assert.Equal(t, rejections[0].Timestamp.Format(time.RFC3339), records[1][4])
 }
 
 func TestFileStorage_Save_Error(t *testing.T) {
@@ -116,7 +116,7 @@ func TestFileStorage_Save_Error(t *testing.T) {
 	fs = &FileStorage{
 		outputDir: readOnlyDir,
 	}
-	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
+	err = fs.Save(context.Background(), []domain.Rejection{{}})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write temp file")
 
@@ -132,7 +132,7 @@ func TestFileStorage_Save_Error(t *testing.T) {
 	fs = &FileStorage{
 		outputDir: tempDir3,
 	}
-	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
+	err = fs.Save(context.Background(), []domain.Rejection{{}})
 	assert.Error(t, err)
 }
 
@@ -149,7 +149,7 @@ func TestFileStorage_Save_CSVError(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Chmod(tempDir, 0755)
 
-	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
+	err = fs.Save(context.Background(), []domain.Rejection{{}})
 	assert.Error(t, err)
 }
 
@@ -158,7 +158,7 @@ func TestFileStorage_Save_CSVError_Direct(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	csvAsDir := filepath.Join(tempDir, "rejeicoes_test.csv")
+	csvAsDir := filepath.Join(tempDir, "rejections_test.csv")
 	err = os.Mkdir(csvAsDir, 0755)
 	require.NoError(t, err)
 
@@ -166,11 +166,11 @@ func TestFileStorage_Save_CSVError_Direct(t *testing.T) {
 		outputDir: tempDir,
 	}
 
-	rejeicoes := []domain.Rejeicao{
-		{Secao: "Test", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Test", Who: "Test", What: "Test", When: "01/01/2026"},
 	}
 
-	err = fs.saveCSV(csvAsDir, rejeicoes)
+	err = fs.saveCSV(csvAsDir, rejections)
 	assert.Error(t, err)
 }
 
@@ -183,11 +183,11 @@ func TestFileStorage_Save_CSVError_InMainSave(t *testing.T) {
 		outputDir: tempDir,
 	}
 
-	rejeicoes := []domain.Rejeicao{
-		{Secao: "Test", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Test", Who: "Test", What: "Test", When: "01/01/2026"},
 	}
 
-	err = fs.Save(context.Background(), rejeicoes)
+	err = fs.Save(context.Background(), rejections)
 	assert.NoError(t, err)
 }
 
@@ -200,18 +200,18 @@ func TestFileStorage_Save_CSVErrorViaHook(t *testing.T) {
 		outputDir: tempDir,
 	}
 
-	rejeicoes := []domain.Rejeicao{
-		{Secao: "Test", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Test", Who: "Test", What: "Test", When: "01/01/2026"},
 	}
 
 	originalSaveCSV := saveCSVFn
 	defer func() { saveCSVFn = originalSaveCSV }()
 
-	saveCSVFn = func(fs *FileStorage, filename string, rejeicoes []domain.Rejeicao) error {
+	saveCSVFn = func(fs *FileStorage, filename string, rejections []domain.Rejection) error {
 		return fmt.Errorf("mock CSV error")
 	}
 
-	err = fs.Save(context.Background(), rejeicoes)
+	err = fs.Save(context.Background(), rejections)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "mock CSV error")
 }
@@ -229,7 +229,7 @@ func TestFileStorage_Save_CSVMkdirError(t *testing.T) {
 		outputDir: tempDir,
 	}
 
-	err = fs.Save(context.Background(), []domain.Rejeicao{{}})
+	err = fs.Save(context.Background(), []domain.Rejection{{}})
 	assert.Error(t, err)
 }
 
@@ -294,10 +294,79 @@ func (e *errorWriter) Write(p []byte) (n int, err error) {
 	return 0, fmt.Errorf("write error")
 }
 
+type stubWriteCloser struct {
+	closeCalled int
+	closeErr    error
+	writeErr    error
+}
+
+func (s *stubWriteCloser) Write(p []byte) (int, error) {
+	if s.writeErr != nil {
+		return 0, s.writeErr
+	}
+	return len(p), nil
+}
+
+func (s *stubWriteCloser) Close() error {
+	s.closeCalled++
+	return s.closeErr
+}
+
 func TestFileStorage_WriteCSV_Error(t *testing.T) {
 	fs := &FileStorage{}
-	err := fs.writeCSV(&errorWriter{}, []domain.Rejeicao{{}})
+	err := fs.writeCSV(&errorWriter{}, []domain.Rejection{{}})
 	assert.Error(t, err)
+}
+
+func TestFileStorage_SaveCSV_OpenFileError(t *testing.T) {
+	old := openFileFn
+	t.Cleanup(func() { openFileFn = old })
+
+	openFileFn = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		return nil, fmt.Errorf("open failed")
+	}
+
+	err := (&FileStorage{}).saveCSV(filepath.Join(t.TempDir(), "rejections.csv"), nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create temp CSV file")
+	assert.Contains(t, err.Error(), "open failed")
+}
+
+func TestFileStorage_SaveCSV_WriteErrorClosesFile(t *testing.T) {
+	oldOpen := openFileFn
+	oldWriter := newCSVWriter
+	t.Cleanup(func() {
+		openFileFn = oldOpen
+		newCSVWriter = oldWriter
+	})
+
+	file := &stubWriteCloser{}
+	openFileFn = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		return file, nil
+	}
+	newCSVWriter = func(w io.Writer) *csv.Writer {
+		return csv.NewWriter(&errorWriter{})
+	}
+
+	err := (&FileStorage{}).saveCSV(filepath.Join(t.TempDir(), "rejections.csv"), []domain.Rejection{{}})
+	assert.Error(t, err)
+	assert.Equal(t, 1, file.closeCalled)
+}
+
+func TestFileStorage_SaveCSV_CloseError(t *testing.T) {
+	old := openFileFn
+	t.Cleanup(func() { openFileFn = old })
+
+	file := &stubWriteCloser{closeErr: fmt.Errorf("close failed")}
+	openFileFn = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		return file, nil
+	}
+
+	err := (&FileStorage{}).saveCSV(filepath.Join(t.TempDir(), "rejections.csv"), nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to close CSV file")
+	assert.Contains(t, err.Error(), "close failed")
+	assert.Equal(t, 1, file.closeCalled)
 }
 
 func TestFileStorage_MarshalError(t *testing.T) {
@@ -310,7 +379,7 @@ func TestFileStorage_MarshalError(t *testing.T) {
 	fs := &FileStorage{}
 
 	// Test saveJSON marshal error
-	err := fs.saveJSON("test.json", []domain.Rejeicao{{}})
+	err := fs.saveJSON("test.json", []domain.Rejection{{}})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to marshal JSON")
 
@@ -335,23 +404,23 @@ func (w *limitedErrorWriter) Write(p []byte) (n int, err error) {
 
 func TestFileStorage_WriteCSV_LimitedError(t *testing.T) {
 	fs := &FileStorage{}
-	rejeicoes := []domain.Rejeicao{{Secao: "test"}}
+	rejections := []domain.Rejection{{Section: "test"}}
 
 	// Fail during header write (if it exceeds buffer, but it won't)
 	// Fail during row write
-	err := fs.writeCSV(&limitedErrorWriter{limit: 10}, rejeicoes)
+	err := fs.writeCSV(&limitedErrorWriter{limit: 10}, rejections)
 	assert.Error(t, err)
 }
 
 func TestFileStorage_WriteCSV_WriteError(t *testing.T) {
 	fs := &FileStorage{}
-	rejeicoes := make([]domain.Rejeicao, 1000)
-	for i := range rejeicoes {
-		rejeicoes[i] = domain.Rejeicao{
-			Secao: "Very long section name to fill the buffer quickly and trigger a write to the underlying writer",
+	rejections := make([]domain.Rejection, 1000)
+	for i := range rejections {
+		rejections[i] = domain.Rejection{
+			Section: "Very long section name to fill the buffer quickly and trigger a write to the underlying writer",
 		}
 	}
-	err := fs.writeCSV(&errorWriter{}, rejeicoes)
+	err := fs.writeCSV(&errorWriter{}, rejections)
 	assert.Error(t, err)
 }
 
@@ -373,7 +442,7 @@ func TestFileStorage_WriteCSV_HeaderWriteError(t *testing.T) {
 	}
 
 	fs := &FileStorage{}
-	err := fs.writeCSV(&errorWriter{}, []domain.Rejeicao{{}})
+	err := fs.writeCSV(&errorWriter{}, []domain.Rejection{{}})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write CSV header")
 }

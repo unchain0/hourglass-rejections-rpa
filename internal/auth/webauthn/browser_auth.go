@@ -24,6 +24,84 @@ const (
 	testPollInterval     = 100 * time.Millisecond
 )
 
+var (
+	osStat      = os.Stat
+	chromedpRun = chromedp.Run
+	sleepFn     = time.Sleep
+	getCookies  = func(ctx context.Context) ([]*network.Cookie, error) {
+		return storage.GetCookies().Do(ctx)
+	}
+	evaluateAuthPageState = func(ctx context.Context, state *authPageState) error {
+		return chromedpRun(ctx, chromedp.Evaluate(`(() => {
+			const bodyText = document.body ? document.body.innerText : "";
+			const lowerBodyText = bodyText.toLowerCase();
+			const authButtonSelectors = [
+				"button[type='submit']",
+				"button[data-testid*='login']",
+				"button[id*='login']",
+				"button[class*='login']",
+				"[role='button'][data-testid*='login']"
+			];
+			const hasAuthButton = authButtonSelectors.some((selector) => {
+				const el = document.querySelector(selector);
+				if (!el) {
+					return false;
+				}
+				const text = (el.textContent || "").toLowerCase();
+				return text.includes("login") || text.includes("log in") || text.includes("entrar") || text.includes("passkey") || text.includes("security");
+			});
+
+			const hasWebAuthnPrompt =
+				document.querySelector("input[autocomplete='webauthn']") !== null ||
+				document.querySelector("[data-webauthn]") !== null ||
+				document.querySelector("[id*='webauthn']") !== null ||
+				document.querySelector("[class*='webauthn']") !== null ||
+				lowerBodyText.includes("passkey") ||
+				lowerBodyText.includes("security key") ||
+				lowerBodyText.includes("biometric") ||
+				lowerBodyText.includes("webauthn") ||
+				lowerBodyText.includes("touch your");
+
+			const path = window.location.pathname || "";
+			const isAuthenticatedUrl = path === "/v2/page/app";
+
+			return {
+				url: window.location.href,
+				hasAuthButton,
+				hasWebAuthnPrompt,
+				isAuthenticatedUrl,
+			};
+		})()`, state))
+	}
+	triggerWebAuthnPrompt = func(ctx context.Context, clicked *bool) error {
+		return chromedpRun(ctx, chromedp.Evaluate(`(() => {
+			const selectors = [
+				"button[type='submit']",
+				"button[data-testid*='login']",
+				"button[id*='login']",
+				"button[class*='login']",
+				"[role='button'][data-testid*='login']"
+			];
+
+			for (const selector of selectors) {
+				const el = document.querySelector(selector);
+				if (!el) {
+					continue;
+				}
+
+				const text = (el.textContent || "").toLowerCase();
+				if (text.includes("login") || text.includes("log in") || text.includes("entrar") || text.includes("passkey") || text.includes("security")) {
+					el.click();
+					return true;
+				}
+			}
+
+			return false;
+		})()`, clicked))
+	}
+	extractAuthTokens = extractTokens
+)
+
 func getPollInterval() time.Duration {
 	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("TEST_TIMEOUT_SHORT") == "1" {
 		return testPollInterval
@@ -65,7 +143,7 @@ func getChromePath() string {
 		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 	}
 	for _, path := range paths {
-		if _, err := os.Stat(path); err == nil {
+		if _, err := osStat(path); err == nil {
 			return path
 		}
 	}
@@ -107,7 +185,7 @@ func (ba *BrowserAuth) Authenticate() (*AuthTokens, error) {
 		}
 
 		slog.Info("retrying authentication after transient error", "attempt", attempt, "error", err)
-		time.Sleep(getRetryDelay(attempt))
+		sleepFn(getRetryDelay(attempt))
 	}
 
 	slog.Error("browser authentication failed", "error", lastErr)
@@ -154,7 +232,7 @@ func (ba *BrowserAuth) authenticateAttempt() (*AuthTokens, error) {
 
 	slog.Debug("navigating to login page", "url", loginURL)
 
-	if err := chromedp.Run(timeoutCtx,
+	if err := chromedpRun(timeoutCtx,
 		network.Enable(),
 		chromedp.Navigate(loginURL),
 		chromedp.WaitReady("body", chromedp.ByQuery),
@@ -168,7 +246,7 @@ func (ba *BrowserAuth) authenticateAttempt() (*AuthTokens, error) {
 		return nil, fmt.Errorf("failed to complete webauthn flow: %w", err)
 	}
 
-	tokens, err := extractTokens(cookies)
+	tokens, err := extractAuthTokens(cookies)
 	if err != nil {
 		return nil, err
 	}
@@ -203,14 +281,8 @@ func (ba *BrowserAuth) waitForAuthentication(ctx context.Context, cookies *[]*ne
 			return fmt.Errorf("context cancelled before reading cookies: %w", err)
 		}
 
-		var currentCookies []*network.Cookie
-		if err := chromedp.Run(ctx,
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				var err error
-				currentCookies, err = storage.GetCookies().Do(ctx)
-				return err
-			}),
-		); err != nil {
+		currentCookies, err := getCookies(ctx)
+		if err != nil {
 			return fmt.Errorf("failed to read browser cookies: %w", err)
 		}
 
@@ -220,11 +292,11 @@ func (ba *BrowserAuth) waitForAuthentication(ctx context.Context, cookies *[]*ne
 		}
 
 		if state.IsAuthenticatedURL && !state.HasWebAuthnPrompt {
-			time.Sleep(getPollInterval())
+			sleepFn(getPollInterval())
 			continue
 		}
 
-		time.Sleep(getPollInterval())
+		sleepFn(getPollInterval())
 	}
 }
 
@@ -238,46 +310,7 @@ type authPageState struct {
 func (ba *BrowserAuth) getPageState(ctx context.Context) (*authPageState, error) {
 	var state authPageState
 
-	err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const bodyText = document.body ? document.body.innerText : "";
-		const lowerBodyText = bodyText.toLowerCase();
-		const authButtonSelectors = [
-			"button[type='submit']",
-			"button[data-testid*='login']",
-			"button[id*='login']",
-			"button[class*='login']",
-			"[role='button'][data-testid*='login']"
-		];
-		const hasAuthButton = authButtonSelectors.some((selector) => {
-			const el = document.querySelector(selector);
-			if (!el) {
-				return false;
-			}
-			const text = (el.textContent || "").toLowerCase();
-			return text.includes("login") || text.includes("log in") || text.includes("entrar") || text.includes("passkey") || text.includes("security");
-		});
-
-		const hasWebAuthnPrompt =
-			document.querySelector("input[autocomplete='webauthn']") !== null ||
-			document.querySelector("[data-webauthn]") !== null ||
-			document.querySelector("[id*='webauthn']") !== null ||
-			document.querySelector("[class*='webauthn']") !== null ||
-			lowerBodyText.includes("passkey") ||
-			lowerBodyText.includes("security key") ||
-			lowerBodyText.includes("biometric") ||
-			lowerBodyText.includes("webauthn") ||
-			lowerBodyText.includes("touch your");
-
-		const path = window.location.pathname || "";
-		const isAuthenticatedUrl = path === "/v2/page/app";
-
-		return {
-			url: window.location.href,
-			hasAuthButton,
-			hasWebAuthnPrompt,
-			isAuthenticatedUrl,
-		};
-	})()`, &state))
+	err := evaluateAuthPageState(ctx, &state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate auth page state: %w", err)
 	}
@@ -288,30 +321,7 @@ func (ba *BrowserAuth) getPageState(ctx context.Context) (*authPageState, error)
 func (ba *BrowserAuth) tryTriggerWebAuthn(ctx context.Context) (bool, error) {
 	var clicked bool
 
-	err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const selectors = [
-			"button[type='submit']",
-			"button[data-testid*='login']",
-			"button[id*='login']",
-			"button[class*='login']",
-			"[role='button'][data-testid*='login']"
-		];
-
-		for (const selector of selectors) {
-			const el = document.querySelector(selector);
-			if (!el) {
-				continue;
-			}
-
-			const text = (el.textContent || "").toLowerCase();
-			if (text.includes("login") || text.includes("log in") || text.includes("entrar") || text.includes("passkey") || text.includes("security")) {
-				el.click();
-				return true;
-			}
-		}
-
-		return false;
-	})()`, &clicked))
+	err := triggerWebAuthnPrompt(ctx, &clicked)
 	if err != nil {
 		return false, fmt.Errorf("failed to execute auth trigger script: %w", err)
 	}

@@ -79,28 +79,42 @@ var autoMigrateFn = func(db *gorm.DB) error {
 	return db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{})
 }
 
+var openSQLiteDBFn = func(dbPath string) (*gorm.DB, error) {
+	return gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+}
+
+var openPostgresDBFn = func(dsn string) (*gorm.DB, error) {
+	return gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+}
+
+var execPragmaFn = func(db *gorm.DB, query string) error {
+	return db.Exec(query).Error
+}
+
 func newSQLiteStore(dbPath string) (*Store, error) {
 	if err := ensureSecureDirectory(dbPath); err != nil {
 		return nil, fmt.Errorf("failed to ensure secure directory: %w", err)
 	}
 
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	db, err := openSQLiteDBFn(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+	if err := execPragmaFn(db, "PRAGMA foreign_keys = ON"); err != nil {
 		return nil, fmt.Errorf("failed to set PRAGMA foreign_keys: %w", err)
 	}
-	if err := db.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
+	if err := execPragmaFn(db, "PRAGMA journal_mode = WAL"); err != nil {
 		return nil, fmt.Errorf("failed to set PRAGMA journal_mode: %w", err)
 	}
-	if err := db.Exec("PRAGMA synchronous = NORMAL").Error; err != nil {
+	if err := execPragmaFn(db, "PRAGMA synchronous = NORMAL"); err != nil {
 		return nil, fmt.Errorf("failed to set PRAGMA synchronous: %w", err)
 	}
-	if err := db.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+	if err := execPragmaFn(db, "PRAGMA busy_timeout = 5000"); err != nil {
 		return nil, fmt.Errorf("failed to set PRAGMA busy_timeout: %w", err)
 	}
 
@@ -118,14 +132,12 @@ func newSQLiteStore(dbPath string) (*Store, error) {
 func newPostgresStore(cfg *DatabaseConfig) (*Store, error) {
 	dsn := cfg.buildPostgresDSN()
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	db, err := openPostgresDBFn(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open postgres database: %w", err)
 	}
 
-	if err := db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{}); err != nil {
+	if err := autoMigrateFn(db); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 

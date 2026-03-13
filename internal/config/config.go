@@ -15,9 +15,11 @@ type Config struct {
 	ScheduleEvening string        `env:"SCHEDULE_EVENING" envDefault:"0 17 * * *"`
 	Timeout         time.Duration `env:"TIMEOUT" envDefault:"60s"`
 	// Hourglass API Authentication
-	HourglassXSRFToken string `env:"HOURGLASS_XSRF_TOKEN"`
-	HourglassHGLogin   string `env:"HOURGLASS_HGLOGIN_COOKIE"`
-	TokensPath         string `env:"TOKENS_PATH"`
+	HourglassXSRFToken      string `env:"HOURGLASS_XSRF_TOKEN"`
+	HourglassHGLogin        string `env:"HOURGLASS_HGLOGIN_COOKIE"`
+	TokensPath              string `env:"TOKENS_PATH"`
+	WebAuthnCredentialsPath string `env:"WEBAUTHN_CREDENTIALS_PATH"`
+	AutoRefreshTokens       bool   `env:"AUTO_REFRESH_TOKENS" envDefault:"true"`
 	// Playwright Authentication
 	HourglassEmail    string `env:"HOURGLASS_EMAIL"`
 	HourglassPassword string `env:"HOURGLASS_PASSWORD"`

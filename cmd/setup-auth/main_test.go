@@ -30,6 +30,44 @@ func (m *mockBrowserAuth) WithHeadless(_ bool) browserAuth {
 	return m
 }
 
+type mockCredentialRegistrar struct {
+	xsrfToken      string
+	hgLogin        string
+	registeredUser string
+	registerErr    error
+}
+
+func (m *mockCredentialRegistrar) SetCookies(xsrfToken, hgLogin string) {
+	m.xsrfToken = xsrfToken
+	m.hgLogin = hgLogin
+}
+
+func (m *mockCredentialRegistrar) Register(userName string) (*webauthn.Credential, error) {
+	m.registeredUser = userName
+	if m.registerErr != nil {
+		return nil, m.registerErr
+	}
+
+	return &webauthn.Credential{ID: "credential-id"}, nil
+}
+
+func stubCredentialRegistrarFactory(t *testing.T, registrar credentialRegistrar, err error) {
+	t.Helper()
+
+	oldFactory := defaultCredentialRegistrarFactory
+	defaultCredentialRegistrarFactory = func(_, _ string) (credentialRegistrar, error) {
+		if err != nil {
+			return nil, err
+		}
+
+		return registrar, nil
+	}
+
+	t.Cleanup(func() {
+		defaultCredentialRegistrarFactory = oldFactory
+	})
+}
+
 // setupVPSUploadTest é um helper para testes de VPS upload.
 func setupVPSUploadTest(t *testing.T, inputs []string) (error, string) {
 	t.Helper()
@@ -191,12 +229,14 @@ func TestCopyTokensToVPS(t *testing.T) {
 }
 
 func TestConstants(t *testing.T) {
-	assert.Equal(t, "https://app.hourglass-app.com/api/v0.2", defaultBaseURL)
+	assert.Equal(t, "https://app.hourglass-app.com", defaultBaseURL)
 	assert.Equal(t, ".hourglass-rpa", defaultConfigDir)
 	assert.Equal(t, "auth-tokens.json", defaultTokensFile)
 }
 
 func TestRun(t *testing.T) {
+	stubCredentialRegistrarFactory(t, &mockCredentialRegistrar{}, nil)
+
 	t.Run("home directory error", func(t *testing.T) {
 		mockErr := errors.New("no home directory")
 		opts := setupOptions{
@@ -302,6 +342,8 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunWithValidTokens(t *testing.T) {
+	stubCredentialRegistrarFactory(t, &mockCredentialRegistrar{}, nil)
+
 	tempDir := t.TempDir()
 	configDir := filepath.Join(tempDir, defaultConfigDir)
 	err := os.MkdirAll(configDir, 0700)
@@ -355,6 +397,8 @@ func TestRunWithValidTokens(t *testing.T) {
 }
 
 func TestRunWithExpiredTokens(t *testing.T) {
+	stubCredentialRegistrarFactory(t, &mockCredentialRegistrar{}, nil)
+
 	oldBrowserAuth := newBrowserAuth
 	defer func() { newBrowserAuth = oldBrowserAuth }()
 
@@ -425,6 +469,8 @@ func TestRunWithExpiredTokens(t *testing.T) {
 }
 
 func TestRunWithNewAuthentication(t *testing.T) {
+	stubCredentialRegistrarFactory(t, &mockCredentialRegistrar{}, nil)
+
 	oldBrowserAuth := newBrowserAuth
 	defer func() { newBrowserAuth = oldBrowserAuth }()
 
@@ -692,6 +738,8 @@ func TestAskVPSUpload(t *testing.T) {
 }
 
 func TestRunWithReAuthAndVPSUpload(t *testing.T) {
+	stubCredentialRegistrarFactory(t, &mockCredentialRegistrar{}, nil)
+
 	oldBrowserAuth := newBrowserAuth
 	defer func() { newBrowserAuth = oldBrowserAuth }()
 
@@ -811,6 +859,18 @@ func TestWebauthnBrowserAuthFactory(t *testing.T) {
 	factory := webauthnBrowserAuthFactory{}
 	auth := factory.NewBrowserAuth("http://localhost")
 	assert.NotNil(t, auth)
+}
+
+func TestNewBrowserAuthVar(t *testing.T) {
+	auth := newBrowserAuth("http://localhost")
+	assert.NotNil(t, auth)
+}
+
+func TestDefaultCredentialRegistrarFactory(t *testing.T) {
+	tempDir := t.TempDir()
+	registrar, err := defaultCredentialRegistrarFactory(filepath.Join(tempDir, "credentials.json"), "https://example.com")
+	require.NoError(t, err)
+	assert.NotNil(t, registrar)
 }
 
 func TestConsoleUserInput(t *testing.T) {
@@ -956,6 +1016,8 @@ func TestConsoleUserInputConfirmReadError(t *testing.T) {
 }
 
 func TestSetupRunnerRunErrorBranches(t *testing.T) {
+	stubCredentialRegistrarFactory(t, &mockCredentialRegistrar{}, nil)
+
 	t.Run("re-auth confirmation read error", func(t *testing.T) {
 		validTokens := &webauthn.AuthTokens{
 			HGLogin:   "test",
@@ -1039,6 +1101,34 @@ func TestSetupRunnerRunErrorBranches(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read transfer confirmation")
 	})
+
+	t.Run("register credential failure", func(t *testing.T) {
+		runner := &setupRunner{
+			fs: &mockFileSystem{
+				userHomeDir:   "/home/test",
+				readFileError: os.ErrNotExist,
+			},
+			userInput: &mockUserInput{confirmResult: false},
+			browserAuthFact: functionBrowserAuthFactory{newFn: func(_ string) browserAuth {
+				return &mockBrowserAuth{tokens: &webauthn.AuthTokens{
+					HGLogin:   "new",
+					XSRFToken: "new",
+					ExpiresAt: time.Now().Add(time.Hour),
+				}}
+			}},
+			authFactory: func(_, _ string) (credentialRegistrar, error) {
+				return &mockCredentialRegistrar{registerErr: errors.New("register failed")}, nil
+			},
+			scpClient:  &mockSCPClient{},
+			baseURL:    defaultBaseURL,
+			configDir:  defaultConfigDir,
+			tokensFile: defaultTokensFile,
+		}
+
+		err := runner.run()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to register webauthn credential")
+	})
 }
 
 func TestSaveTokensMarshalErrorBranch(t *testing.T) {
@@ -1077,6 +1167,131 @@ func TestSetupRunnerAskVPSUploadSuccessDefaultPath(t *testing.T) {
 	output, _ := io.ReadAll(pr)
 	assert.Contains(t, string(output), "Tokens transferred successfully")
 	assert.Contains(t, string(output), "~/.hourglass-rpa/auth-tokens.json")
+}
+
+func TestSetupRunnerAskVPSUploadWithCredentialsSuccess(t *testing.T) {
+	scpClient := &mockSCPClient{}
+	runner := newSetupRunner()
+	runner.userInput = &mockUserInputV2{
+		results: []string{"user@host", ""},
+		errors:  []error{nil, nil},
+	}
+	runner.scpClient = scpClient
+
+	err := runner.askVPSUploadWithCredentials("/tmp/auth-tokens.json", "/tmp/webauthn-credentials.json")
+	require.NoError(t, err)
+	require.Len(t, scpClient.calls, 2)
+	assert.Equal(t, "/tmp/auth-tokens.json", scpClient.calls[0].localPath)
+	assert.Equal(t, "~/.hourglass-rpa/auth-tokens.json", scpClient.calls[0].remotePath)
+	assert.Equal(t, "/tmp/webauthn-credentials.json", scpClient.calls[1].localPath)
+	assert.Equal(t, "~/.hourglass-rpa/webauthn-credentials.json", scpClient.calls[1].remotePath)
+}
+
+func TestSetupRunnerAskVPSUploadConfirmReadError(t *testing.T) {
+	runner := newSetupRunner()
+	runner.userInput = &mockUserInput{confirmError: errors.New("confirm error")}
+
+	err := runner.askVPSUpload("/tmp/tokens.json")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read transfer confirmation")
+}
+
+func TestSetupRunnerRegisterWebAuthnCredentialFactoryError(t *testing.T) {
+	runner := newSetupRunner()
+	runner.authFactory = func(string, string) (credentialRegistrar, error) {
+		return nil, errors.New("factory error")
+	}
+
+	err := runner.registerWebAuthnCredential("/tmp/credentials.json", &webauthn.AuthTokens{
+		HGLogin:   "hglogin",
+		XSRFToken: "xsrf",
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create authenticator")
+}
+
+func TestSetupRunnerAskVPSUploadWithCredentialsErrors(t *testing.T) {
+	t.Run("confirm read error", func(t *testing.T) {
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInput{confirmError: errors.New("confirm error")}
+
+		err := runner.askVPSUploadWithCredentials("/tmp/auth-tokens.json", "/tmp/webauthn-credentials.json")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read transfer confirmation")
+	})
+
+	t.Run("vps host read error", func(t *testing.T) {
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInput{
+			confirmResult: true,
+			readLineError: errors.New("read host error"),
+		}
+
+		err := runner.askVPSUploadWithCredentials("/tmp/auth-tokens.json", "/tmp/webauthn-credentials.json")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read VPS host")
+	})
+
+	t.Run("empty vps host", func(t *testing.T) {
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInput{
+			confirmResult:  true,
+			readLineResult: "",
+		}
+
+		err := runner.askVPSUploadWithCredentials("/tmp/auth-tokens.json", "/tmp/webauthn-credentials.json")
+		assert.NoError(t, err)
+	})
+
+	t.Run("vps target path read error", func(t *testing.T) {
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInputV2{
+			results: []string{"user@host"},
+			errors:  []error{nil, errors.New("read target path error")},
+		}
+		runner.scpClient = &mockSCPClient{}
+
+		err := runner.askVPSUploadWithCredentials("/tmp/auth-tokens.json", "/tmp/webauthn-credentials.json")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read VPS target path")
+	})
+
+	t.Run("token copy error", func(t *testing.T) {
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInputV2{
+			results: []string{"user@host", ""},
+			errors:  []error{nil, nil},
+		}
+		runner.scpClient = &mockSCPClient{err: errors.New("copy error")}
+
+		err := runner.askVPSUploadWithCredentials("/tmp/auth-tokens.json", "/tmp/webauthn-credentials.json")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "copy error")
+	})
+
+	t.Run("credential copy error", func(t *testing.T) {
+		scpClient := &mockSCPClient{}
+		runner := newSetupRunner()
+		runner.userInput = &mockUserInputV2{
+			results: []string{"user@host", ""},
+			errors:  []error{nil, nil},
+		}
+		runner.scpClient = scpClient
+		scpClient.err = nil
+
+		callCount := 0
+		runner.scpClient = SCPClientFunc(func(localPath, remoteHost, remotePath string) error {
+			callCount++
+			if callCount == 1 {
+				return nil
+			}
+			return errors.New("credential copy error")
+		})
+
+		err := runner.askVPSUploadWithCredentials("/tmp/auth-tokens.json", "/tmp/webauthn-credentials.json")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "credential copy error")
+	})
 }
 
 func TestBrowserAuthAdapterAuthenticate(t *testing.T) {
@@ -1180,11 +1395,30 @@ func (m *mockUserInputV2) ReadLine() (string, error) {
 	return result, err
 }
 
-type mockSCPClient struct{}
+type scpCopyCall struct {
+	localPath  string
+	remoteHost string
+	remotePath string
+}
 
-func (m *mockSCPClient) CopyFile(_, remoteHost, _ string) error {
-	_ = remoteHost
-	return nil
+type SCPClientFunc func(localPath, remoteHost, remotePath string) error
+
+func (f SCPClientFunc) CopyFile(localPath, remoteHost, remotePath string) error {
+	return f(localPath, remoteHost, remotePath)
+}
+
+type mockSCPClient struct {
+	calls []scpCopyCall
+	err   error
+}
+
+func (m *mockSCPClient) CopyFile(localPath, remoteHost, remotePath string) error {
+	m.calls = append(m.calls, scpCopyCall{
+		localPath:  localPath,
+		remoteHost: remoteHost,
+		remotePath: remotePath,
+	})
+	return m.err
 }
 
 type mockUserInput struct {

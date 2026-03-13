@@ -18,7 +18,7 @@ type UsersResponse struct {
 	Users []User `json:"users"`
 }
 
-// AVAttendant represents a mechanical assignment (Áudio/Vídeo & Indicadores).
+// AVAttendant represents a mechanical assignment (Audio/Video & Indicators).
 type AVAttendant struct {
 	ID        int       `json:"id"`
 	Type      string    `json:"type"`     // e.g., "video", "console", "mics", "attendant", "security_attendant", "stage"

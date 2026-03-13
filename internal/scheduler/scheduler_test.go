@@ -25,16 +25,16 @@ func (m *mockAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error)
 	if result, ok := m.results[section]; ok {
 		return result, nil
 	}
-	return &domain.JobResult{Secao: section, Total: 0}, nil
+	return &domain.JobResult{Section: section, Total: 0}, nil
 }
 
 type mockStorage struct {
 	mu    sync.Mutex
-	saved []domain.Rejeicao
+	saved []domain.Rejection
 	err   error
 }
 
-func (m *mockStorage) Save(ctx context.Context, rejections []domain.Rejeicao) error {
+func (m *mockStorage) Save(ctx context.Context, rejections []domain.Rejection) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -77,7 +77,7 @@ func TestScheduler_sendNotifications_EmptyRejections(t *testing.T) {
 		cache: cache.New(),
 	}
 
-	err := s.sendNotifications([]domain.Rejeicao{}, 0)
+	err := s.sendNotifications([]domain.Rejection{}, 0)
 	if err != nil {
 		t.Errorf("sendNotifications with empty rejections should return nil, got: %v", err)
 	}
@@ -88,8 +88,8 @@ func TestScheduler_sendNotifications_WithChanges(t *testing.T) {
 		cache: cache.New(),
 	}
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	err := s.sendNotifications(rejections, time.Second)
@@ -103,8 +103,8 @@ func TestScheduler_sendNotifications_NoChanges(t *testing.T) {
 		cache: cache.New(),
 	}
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	s.cache.HasChanges(rejections)
@@ -187,7 +187,7 @@ func TestScheduler_runAnalysis_ResultError(t *testing.T) {
 	sentryClient := &sentry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
-			"Partes Mecânicas": {Secao: "Partes Mecânicas", Error: errors.New("result error")},
+			"Mechanical Parts": {Section: "Mechanical Parts", Error: errors.New("result error")},
 		},
 	}
 	store := &mockStorage{}
@@ -207,10 +207,10 @@ func TestScheduler_runAnalysis_WithRejections(t *testing.T) {
 	sentryClient := &sentry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
-			"Campo": {
-				Secao:     "Campo",
-				Total:     1,
-				Rejeicoes: []domain.Rejeicao{{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"}},
+			"Field Ministry": {
+				Section:    "Field Ministry",
+				Total:      1,
+				Rejections: []domain.Rejection{{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"}},
 			},
 		},
 	}
@@ -235,7 +235,7 @@ func TestScheduler_runAnalysis_NoRejections(t *testing.T) {
 	sentryClient := &sentry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
-			"Campo": {Secao: "Campo", Total: 0, Rejeicoes: []domain.Rejeicao{}},
+			"Field Ministry": {Section: "Field Ministry", Total: 0, Rejections: []domain.Rejection{}},
 		},
 	}
 	mockStore := &mockStorage{}
@@ -259,15 +259,15 @@ func TestScheduler_runAnalysis_MultipleSections(t *testing.T) {
 	sentryClient := &sentry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
-			"Campo": {
-				Secao:     "Campo",
-				Total:     1,
-				Rejeicoes: []domain.Rejeicao{{Secao: "Campo", Quem: "John", OQue: "Test1", PraQuando: "01/03/2026"}},
+			"Field Ministry": {
+				Section:    "Field Ministry",
+				Total:      1,
+				Rejections: []domain.Rejection{{Section: "Field Ministry", Who: "John", What: "Test1", When: "01/03/2026"}},
 			},
-			"Partes Mecânicas": {
-				Secao:     "Partes Mecânicas",
-				Total:     1,
-				Rejeicoes: []domain.Rejeicao{{Secao: "Partes Mecânicas", Quem: "Jane", OQue: "Test2", PraQuando: "02/03/2026"}},
+			"Mechanical Parts": {
+				Section:    "Mechanical Parts",
+				Total:      1,
+				Rejections: []domain.Rejection{{Section: "Mechanical Parts", Who: "Jane", What: "Test2", When: "02/03/2026"}},
 			},
 		},
 	}
@@ -292,10 +292,10 @@ func TestScheduler_runAnalysis_StorageError(t *testing.T) {
 	sentryClient := &sentry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
-			"Campo": {
-				Secao:     "Campo",
-				Total:     1,
-				Rejeicoes: []domain.Rejeicao{{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"}},
+			"Field Ministry": {
+				Section:    "Field Ministry",
+				Total:      1,
+				Rejections: []domain.Rejection{{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"}},
 			},
 		},
 	}

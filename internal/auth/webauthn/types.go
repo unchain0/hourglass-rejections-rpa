@@ -18,6 +18,19 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+var (
+	osMkdirAllTypes            = os.MkdirAll
+	osReadFileTypes            = os.ReadFile
+	osWriteFileTypes           = os.WriteFile
+	jsonMarshalIndentTypes     = json.MarshalIndent
+	ecdsaGenerateKey           = ecdsa.GenerateKey
+	x509MarshalPKCS8PrivateKey = x509.MarshalPKCS8PrivateKey
+	ioReadFullTypes            = io.ReadFull
+	cborMarshalTypes           = cbor.Marshal
+	x509ParsePKCS8PrivateKey   = x509.ParsePKCS8PrivateKey
+	ecdsaSignASN1Types         = ecdsa.SignASN1
+)
+
 type Credential struct {
 	ID         string    `json:"id"`
 	PrivateKey []byte    `json:"private_key"`
@@ -42,7 +55,7 @@ type Storage struct {
 
 func NewStorage(path string) (*Storage, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := osMkdirAllTypes(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create credentials directory: %w", err)
 	}
 
@@ -50,7 +63,7 @@ func NewStorage(path string) (*Storage, error) {
 }
 
 func (s *Storage) Load() (*StoredCredentials, error) {
-	data, err := os.ReadFile(s.path)
+	data, err := osReadFileTypes(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &StoredCredentials{
@@ -73,27 +86,27 @@ func (s *Storage) Load() (*StoredCredentials, error) {
 func (s *Storage) Save(creds *StoredCredentials) error {
 	creds.UpdatedAt = time.Now()
 
-	data, err := json.MarshalIndent(creds, "", "  ")
+	data, err := jsonMarshalIndentTypes(creds, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
 
-	return os.WriteFile(s.path, data, 0600)
+	return osWriteFileTypes(s.path, data, 0600)
 }
 
 func GenerateCredential(rpID, userID, userName string) (*Credential, error) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	privateKey, err := ecdsaGenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate key pair: %w", err)
 	}
 
-	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	privateKeyBytes, err := x509MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal private key: %w", err)
 	}
 
 	credentialID := make([]byte, 16)
-	if _, err := io.ReadFull(rand.Reader, credentialID); err != nil {
+	if _, err := ioReadFullTypes(rand.Reader, credentialID); err != nil {
 		return nil, fmt.Errorf("failed to generate credential ID: %w", err)
 	}
 
@@ -125,7 +138,7 @@ func LoadCredentialFromPEM(pemPath, credentialID, rpID, userID, userName string)
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
 
-	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	privateKey, err := x509ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
@@ -135,7 +148,7 @@ func LoadCredentialFromPEM(pemPath, credentialID, rpID, userID, userName string)
 		return nil, fmt.Errorf("private key is not ECDSA")
 	}
 
-	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(ecdsaKey)
+	privateKeyBytes, err := x509MarshalPKCS8PrivateKey(ecdsaKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal private key: %w", err)
 	}
@@ -182,11 +195,11 @@ func createCOSEPublicKey(pubKey ecdsa.PublicKey) ([]byte, error) {
 		Y:   yPadded,
 	}
 
-	return cbor.Marshal(coseKey)
+	return cborMarshalTypes(coseKey)
 }
 
 func (c *Credential) GetPrivateKey() (*ecdsa.PrivateKey, error) {
-	key, err := x509.ParsePKCS8PrivateKey(c.PrivateKey)
+	key, err := x509ParsePKCS8PrivateKey(c.PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
@@ -209,7 +222,7 @@ func (c *Credential) Sign(challenge, clientDataHash []byte) ([]byte, error) {
 		return nil, fmt.Errorf("get private key: %w", err)
 	}
 
-	signature, err := ecdsa.SignASN1(rand.Reader, privateKey, clientDataHash[:])
+	signature, err := ecdsaSignASN1Types(rand.Reader, privateKey, clientDataHash[:])
 	if err != nil {
 		return nil, fmt.Errorf("sign: %w", err)
 	}
@@ -232,6 +245,10 @@ type AuthTokens struct {
 	HGLogin   string    `json:"hg_login"`
 	XSRFToken string    `json:"xsrf_token"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (t *AuthTokens) IsUsable() bool {
+	return t != nil && t.HGLogin != "" && t.XSRFToken != ""
 }
 
 func (t *AuthTokens) IsExpired() bool {

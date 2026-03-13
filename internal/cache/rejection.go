@@ -10,7 +10,7 @@ import (
 
 type RejectionCache struct {
 	mu         sync.RWMutex
-	lastResult []domain.Rejeicao
+	lastResult []domain.Rejection
 	lastCheck  time.Time
 }
 
@@ -18,7 +18,7 @@ func New() *RejectionCache {
 	return &RejectionCache{}
 }
 
-func (c *RejectionCache) HasChanges(newRejections []domain.Rejeicao) bool {
+func (c *RejectionCache) HasChanges(newRejections []domain.Rejection) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -41,7 +41,7 @@ func (c *RejectionCache) HasChanges(newRejections []domain.Rejeicao) bool {
 
 	for i, new := range newRejections {
 		old := c.lastResult[i]
-		if new.Secao != old.Secao || new.Quem != old.Quem || new.OQue != old.OQue {
+		if new.Section != old.Section || new.Who != old.Who || new.What != old.What {
 			c.lastResult = newRejections
 			c.lastCheck = time.Now()
 			return true

@@ -29,7 +29,7 @@ type Notifier interface {
 	StopBot() error
 	SetCheckNowCallback(callback notifier.CheckNowCallback)
 	SendNoRejectionsMessage(chatID int64, message string) error
-	SendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error
+	SendRejectionsNotification(chatID int64, rejections []domain.Rejection) error
 }
 
 type BotRunner struct {
@@ -197,7 +197,7 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 		return b.sendNoRejectionsMessage(targetChatID, i18n.Localize(lang, "no_sections_selected", nil))
 	}
 
-	var allRejections []domain.Rejeicao
+	var allRejections []domain.Rejection
 	for _, section := range userSections {
 		select {
 		case <-ctx.Done():
@@ -235,14 +235,14 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 			continue
 		}
 
-		logger.Info("section analyzed", "section", section, "rejeicoes_count", len(result.Rejeicoes), "duration", time.Since(sectionStart))
-		if len(result.Rejeicoes) > 0 {
-			allRejections = append(allRejections, result.Rejeicoes...)
+		logger.Info("section analyzed", "section", section, "rejections_count", len(result.Rejections), "duration", time.Since(sectionStart))
+		if len(result.Rejections) > 0 {
+			allRejections = append(allRejections, result.Rejections...)
 		}
 	}
 
 	totalDuration := time.Since(start)
-	logger.Info("analysis complete", "chat_id", targetChatID, "total_rejeicoes", len(allRejections), "duration", totalDuration)
+	logger.Info("analysis complete", "chat_id", targetChatID, "total_rejections", len(allRejections), "duration", totalDuration)
 
 	if len(allRejections) == 0 {
 		logger.Info("no rejections found, sending message", "chat_id", targetChatID)
@@ -285,7 +285,7 @@ func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error 
 	return tgBot.SendNoRejectionsMessage(chatID, message)
 }
 
-func (b *BotRunner) sendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error {
+func (b *BotRunner) sendRejectionsNotification(chatID int64, rejections []domain.Rejection) error {
 	if b.notifier != nil {
 		return b.notifier.SendRejectionsNotification(chatID, rejections)
 	}

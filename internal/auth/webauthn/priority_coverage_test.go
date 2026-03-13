@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -530,28 +529,6 @@ func TestPriority_FinishAuthenticationErrorPaths(t *testing.T) {
 }
 
 func TestPriority_TokenManagerAuthenticateWithFallbackNativeSuccess(t *testing.T) {
-	server := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/auth/webauthn/login/begin":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"publicKey":{"challenge":"c","timeout":60000,"rpId":"hourglass-app.com"}}`))
-		case "/auth/webauthn/login/finish":
-			http.SetCookie(w, &http.Cookie{Name: "hglogin", Value: "native-hg"})
-			http.SetCookie(w, &http.Cookie{Name: "X-Hourglass-XSRF-Token", Value: "native-xsrf"})
-			w.WriteHeader(http.StatusOK)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	})
-	httpServer := &http.Server{Handler: server}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	go func() { _ = httpServer.Serve(listener) }()
-	t.Cleanup(func() {
-		_ = httpServer.Shutdown(context.Background())
-	})
-
-	baseURL := "http://" + listener.Addr().String()
 	tempDir := t.TempDir()
 	storagePath := filepath.Join(tempDir, "credentials.json")
 
@@ -564,8 +541,34 @@ func TestPriority_TokenManagerAuthenticateWithFallbackNativeSuccess(t *testing.T
 	stored.Credentials = append(stored.Credentials, *cred)
 	require.NoError(t, storage.Save(stored))
 
-	tm, err := NewTokenManager(storagePath, baseURL)
+	tm, err := NewTokenManager(storagePath, "https://example.com")
 	require.NoError(t, err)
+	tm.browserAuth = nil
+	tm.authenticator.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/auth/webauthn/login/begin":
+			header := make(http.Header)
+			header.Add("Set-Cookie", "hglogin=begin-native")
+			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=begin-native-xsrf")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"publicKey":{"challenge":"c","timeout":60000,"rpId":"hourglass-app.com"}}`)),
+				Header:     header,
+			}, nil
+		case "/auth/webauthn/login/finish":
+			header := make(http.Header)
+			header.Add("Set-Cookie", "hglogin=native-hg")
+			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=native-xsrf")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     header,
+			}, nil
+		default:
+			t.Fatalf("unexpected request to %s", req.URL.Path)
+			return nil, nil
+		}
+	}}
 
 	tokens, err := tm.authenticateWithFallback()
 	require.NoError(t, err)

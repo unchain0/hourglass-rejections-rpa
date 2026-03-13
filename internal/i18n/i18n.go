@@ -1,14 +1,15 @@
-// Package i18n provides internationalization support for the application.
 package i18n
 
 import (
 	"embed"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 )
 
 //go:embed locales/*.toml
@@ -23,7 +24,6 @@ var loadMessageFile = func(path string) error {
 	return err
 }
 
-// Init initializes the i18n bundle with all supported languages.
 func Init() error {
 	initOnce.Do(func() {
 		bundle = i18n.NewBundle(language.English)
@@ -56,7 +56,6 @@ func resetForTesting() {
 	bundle = nil
 }
 
-// GetLocalizer returns a localizer for the given language tag.
 func GetLocalizer(langTag string) *i18n.Localizer {
 	if bundle == nil {
 		_ = Init()
@@ -67,7 +66,6 @@ func GetLocalizer(langTag string) *i18n.Localizer {
 	return i18n.NewLocalizer(bundle, langTag)
 }
 
-// Localize translates a message ID to the specified language.
 func Localize(lang string, messageID string, templateData map[string]interface{}) string {
 	localizer := GetLocalizer(lang)
 	msg, err := localizer.Localize(&i18n.LocalizeConfig{
@@ -78,4 +76,27 @@ func Localize(lang string, messageID string, templateData map[string]interface{}
 		return messageID
 	}
 	return msg
+}
+
+var dateFormats = map[string]string{
+	"en":    "01/02/2006",
+	"pt-BR": "02/01/2006",
+	"es":    "02/01/2006",
+	"fr":    "02/01/2006",
+}
+
+// FormatDate formats an ISO date string (YYYY-MM-DD) according to the specified language locale.
+func FormatDate(isoDate string, lang string) string {
+	t, err := time.Parse("2006-01-02", isoDate)
+	if err != nil {
+		return isoDate
+	}
+
+	format, ok := dateFormats[lang]
+	if !ok {
+		format = dateFormats["en"]
+	}
+
+	p := message.NewPrinter(language.MustParse(lang))
+	return p.Sprintf("%s", t.Format(format))
 }

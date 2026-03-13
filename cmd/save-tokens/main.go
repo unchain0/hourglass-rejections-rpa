@@ -147,10 +147,10 @@ func printSuccess(tokensPath string, tokens *webauthn.AuthTokens) {
 	fmt.Println()
 	fmt.Printf("💾 Arquivo: %s\n", tokensPath)
 	fmt.Println()
-	fmt.Println("🚀 Agora você pode copiar esse arquivo para a VPS:")
+	fmt.Println("🚀 Agora você pode copiar esse arquivo para a VPS para uso imediato:")
 	fmt.Printf("   scp %s user@vps:~/.hourglass-rpa/\n", tokensPath)
 	fmt.Println()
-	fmt.Println("✅ E o sistema funcionará automaticamente na VPS!")
+	fmt.Println("💡 Para renovação automática na VPS, execute também: make setup-auth")
 }
 
 func main() {

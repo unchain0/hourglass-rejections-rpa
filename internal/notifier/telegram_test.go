@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,9 +64,9 @@ func newClosedPrefManager(t *testing.T) *preferences.PreferenceManager {
 	return pm
 }
 
-func newMockTelegramServer(t *testing.T) *httptest.Server {
+func newMockTelegramServer(t *testing.T) *testServer {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		var result any
@@ -91,14 +90,14 @@ func newMockTelegramServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-func newTestBotWithServer(t *testing.T, srv *httptest.Server) *bot.Bot {
+func newTestBotWithServer(t *testing.T, srv *testServer) *bot.Bot {
 	t.Helper()
 	b, err := bot.New("test-token:fake", bot.WithServerURL(srv.URL))
 	require.NoError(t, err)
 	return b
 }
 
-func newTestNotifierWithServer(t *testing.T, srv *httptest.Server, whitelist []int64) *TelegramNotifier {
+func newTestNotifierWithServer(t *testing.T, srv *testServer, whitelist []int64) *TelegramNotifier {
 	t.Helper()
 	return &TelegramNotifier{
 		bot:       newTestBotWithServer(t, srv),
@@ -111,10 +110,10 @@ func newTestNotifierWithServer(t *testing.T, srv *httptest.Server, whitelist []i
 
 func TestAllSections(t *testing.T) {
 	expected := []string{
-		"Partes Mecânicas",
-		"Campo",
-		"Testemunho Público",
-		"Reunião Meio de Semana",
+		"Mechanical Parts",
+		"Field Ministry",
+		"Public Witnessing",
+		"Midweek Meeting",
 	}
 	assert.Equal(t, expected, domain.AllSections)
 }
@@ -246,8 +245,8 @@ func TestSendRejectionsNotification_Empty(t *testing.T) {
 
 func TestSendRejectionsNotification_Unauthorized(t *testing.T) {
 	tn := newTestNotifier(t, []int64{111})
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "Test", OQue: "Test", PraQuando: "01/01/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "Test", What: "Test", When: "01/01/2026"},
 	}
 	err := tn.SendRejectionsNotification(222, rejections)
 	assert.Error(t, err)
@@ -257,48 +256,48 @@ func TestSendRejectionsNotification_Unauthorized(t *testing.T) {
 // --- containsSection ---
 
 func TestContainsSection_Found(t *testing.T) {
-	sections := []string{"Campo", "Partes Mecânicas"}
-	assert.True(t, containsSection(sections, "Campo"))
+	sections := []string{"Field Ministry", "Mechanical Parts"}
+	assert.True(t, containsSection(sections, "Field Ministry"))
 }
 
 func TestContainsSection_NotFound(t *testing.T) {
-	sections := []string{"Campo", "Partes Mecânicas"}
+	sections := []string{"Field Ministry", "Mechanical Parts"}
 	assert.False(t, containsSection(sections, "Vida e Ministério"))
 }
 
 func TestContainsSection_Empty(t *testing.T) {
-	assert.False(t, containsSection([]string{}, "Campo"))
-	assert.False(t, containsSection(nil, "Campo"))
+	assert.False(t, containsSection([]string{}, "Field Ministry"))
+	assert.False(t, containsSection(nil, "Field Ministry"))
 }
 
 // --- removeSection ---
 
 func TestRemoveSection_Exists(t *testing.T) {
-	sections := []string{"Campo", "Partes Mecânicas", "Testemunho"}
-	result := removeSection(sections, "Partes Mecânicas")
-	assert.Equal(t, []string{"Campo", "Testemunho"}, result)
+	sections := []string{"Field Ministry", "Mechanical Parts", "Testemunho"}
+	result := removeSection(sections, "Mechanical Parts")
+	assert.Equal(t, []string{"Field Ministry", "Testemunho"}, result)
 }
 
 func TestRemoveSection_NotExists(t *testing.T) {
-	sections := []string{"Campo", "Partes Mecânicas"}
+	sections := []string{"Field Ministry", "Mechanical Parts"}
 	result := removeSection(sections, "Vida")
 	assert.Equal(t, sections, result)
 }
 
 func TestRemoveSection_Empty(t *testing.T) {
-	result := removeSection([]string{}, "Campo")
+	result := removeSection([]string{}, "Field Ministry")
 	assert.Equal(t, []string{}, result)
 }
 
 func TestRemoveSection_SingleElement(t *testing.T) {
-	sections := []string{"Campo"}
-	result := removeSection(sections, "Campo")
+	sections := []string{"Field Ministry"}
+	result := removeSection(sections, "Field Ministry")
 	assert.Equal(t, []string{}, result)
 }
 
 func TestRemoveSection_NoMutation(t *testing.T) {
-	original := []string{"Campo", "Partes Mecânicas", "Testemunho"}
-	_ = removeSection(original, "Partes Mecânicas")
+	original := []string{"Field Ministry", "Mechanical Parts", "Testemunho"}
+	_ = removeSection(original, "Mechanical Parts")
 	assert.Equal(t, 3, len(original))
 }
 
@@ -324,7 +323,7 @@ func TestBuildConfigKeyboard_SomeSections(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	prefs := &preferences.UserPreference{
 		ChatID:       12345,
-		SectionsJSON: `["Campo","Partes Mecânicas"]`,
+		SectionsJSON: `["Field Ministry","Mechanical Parts"]`,
 	}
 
 	keyboard := tn.buildConfigKeyboard(prefs, "en")
@@ -340,7 +339,7 @@ func TestBuildConfigKeyboard_AllSections(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	prefs := &preferences.UserPreference{
 		ChatID:       12345,
-		SectionsJSON: `["Partes Mecânicas","Campo","Testemunho Público","Reunião Meio de Semana"]`,
+		SectionsJSON: `["Mechanical Parts","Field Ministry","Public Witnessing","Midweek Meeting"]`,
 	}
 
 	keyboard := tn.buildConfigKeyboard(prefs, "en")
@@ -457,7 +456,7 @@ func TestHandleStats(t *testing.T) {
 	_, _ = pm.GetOrCreate(54321, "otheruser")
 
 	_ = tn.SendNoRejectionsMessage(12345, "ok")
-	_ = tn.SendRejectionsNotification(12345, []domain.Rejeicao{{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"}})
+	_ = tn.SendRejectionsNotification(12345, []domain.Rejection{{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"}})
 
 	update := &models.Update{
 		Message: &models.Message{
@@ -500,7 +499,7 @@ func TestHandleWhoAmI(t *testing.T) {
 	b := newTestBotWithServer(t, srv)
 
 	_, _ = pm.GetOrCreate(12345, "testuser")
-	_ = pm.UpdateSections(12345, []string{"Campo", "Partes Mecânicas"})
+	_ = pm.UpdateSections(12345, []string{"Field Ministry", "Mechanical Parts"})
 	_ = pm.UpdateLanguage(12345, "es")
 
 	update := &models.Update{
@@ -624,7 +623,7 @@ func TestHandleSectionToggle_NilPrefManager(t *testing.T) {
 		CallbackQuery: &models.CallbackQuery{
 			ID:   "test-id",
 			From: models.User{ID: 12345, Username: "testuser"},
-			Data: "section_Campo",
+			Data: "section_Field Ministry",
 		},
 	}
 
@@ -667,7 +666,7 @@ func TestHandleSectionToggle_ToggleOn(t *testing.T) {
 		CallbackQuery: &models.CallbackQuery{
 			ID:   "test-id",
 			From: models.User{ID: 12345, Username: "testuser"},
-			Data: "section_Campo",
+			Data: "section_Field Ministry",
 			Message: models.MaybeInaccessibleMessage{
 				Message: &models.Message{
 					ID:   1,
@@ -688,13 +687,13 @@ func TestHandleSectionToggle_ToggleOff(t *testing.T) {
 
 	// Create user with section
 	_, _ = pm.GetOrCreate(12345, "testuser")
-	_ = pm.UpdateSections(12345, []string{"Campo"})
+	_ = pm.UpdateSections(12345, []string{"Field Ministry"})
 
 	update := &models.Update{
 		CallbackQuery: &models.CallbackQuery{
 			ID:   "test-id",
 			From: models.User{ID: 12345, Username: "testuser"},
-			Data: "section_Campo",
+			Data: "section_Field Ministry",
 			Message: models.MaybeInaccessibleMessage{
 				Message: &models.Message{
 					ID:   1,
@@ -806,7 +805,7 @@ func TestHandleSectionToggle_NilMessage(t *testing.T) {
 		CallbackQuery: &models.CallbackQuery{
 			ID:   "test-id",
 			From: models.User{ID: 12345, Username: "testuser"},
-			Data: "section_Campo",
+			Data: "section_Field Ministry",
 		},
 	}
 
@@ -849,14 +848,14 @@ func TestSendNoRejectionsMessage_Authorized(t *testing.T) {
 
 func TestSendRejectionsNotification_EmptyRejections(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	err := tn.SendRejectionsNotification(12345, []domain.Rejeicao{})
+	err := tn.SendRejectionsNotification(12345, []domain.Rejection{})
 	assert.NoError(t, err)
 }
 
 func TestSendRejectionsNotification_NotAuthorized(t *testing.T) {
 	tn := newTestNotifier(t, []int64{111, 222})
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 	err := tn.SendRejectionsNotification(999, rejections)
 	assert.Error(t, err)
@@ -865,8 +864,8 @@ func TestSendRejectionsNotification_NotAuthorized(t *testing.T) {
 
 func TestSendRejectionsNotification_Authorized(t *testing.T) {
 	tn := newTestNotifier(t, nil)
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 	err := tn.SendRejectionsNotification(12345, rejections)
 	// Will fail because bot is not connected, but tests the authorization path
@@ -990,7 +989,7 @@ func TestHandleSectionToggle_Unauthorized(t *testing.T) {
 		CallbackQuery: &models.CallbackQuery{
 			ID:   "test-id",
 			From: models.User{ID: 12345, Username: "testuser"},
-			Data: "section_Campo",
+			Data: "section_Field Ministry",
 		},
 	}
 
@@ -1046,7 +1045,7 @@ func TestHandleSave_WithSections(t *testing.T) {
 	b := newTestBot(t)
 
 	_, _ = pm.GetOrCreate(12345, "testuser")
-	_ = pm.UpdateSections(12345, []string{"Campo", "Partes Mecânicas"})
+	_ = pm.UpdateSections(12345, []string{"Field Ministry", "Mechanical Parts"})
 
 	update := &models.Update{
 		CallbackQuery: &models.CallbackQuery{
@@ -1127,7 +1126,7 @@ func TestHandleStatus_Disabled(t *testing.T) {
 
 	_, _ = pm.GetOrCreate(12345, "testuser")
 	_ = pm.ToggleEnabled(12345, false)
-	_ = pm.UpdateSections(12345, []string{"Campo"})
+	_ = pm.UpdateSections(12345, []string{"Field Ministry"})
 
 	update := &models.Update{
 		Message: &models.Message{
@@ -1210,8 +1209,8 @@ func TestSendRejectionsNotification_Success(t *testing.T) {
 	defer srv.Close()
 	tn := newTestNotifierWithServer(t, srv, nil)
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 	err := tn.SendRejectionsNotification(12345, rejections)
 	assert.NoError(t, err)
@@ -1283,7 +1282,7 @@ func TestHandleSectionToggle_GetOrCreateError(t *testing.T) {
 		CallbackQuery: &models.CallbackQuery{
 			ID:   "test-id",
 			From: models.User{ID: 12345, Username: "testuser"},
-			Data: "section_Campo",
+			Data: "section_Field Ministry",
 			Message: models.MaybeInaccessibleMessage{
 				Message: &models.Message{ID: 1, Chat: models.Chat{ID: 12345}},
 			},
@@ -1549,7 +1548,7 @@ func TestHandleWhoAmI_WithPreferences(t *testing.T) {
 	b := newTestBotWithServer(t, srv)
 
 	_, _ = pm.GetOrCreate(12345, "testuser")
-	_ = pm.UpdateSections(12345, []string{"Campo", "Partes Mecânicas"})
+	_ = pm.UpdateSections(12345, []string{"Field Ministry", "Mechanical Parts"})
 	_ = pm.UpdateLanguage(12345, "pt-BR")
 
 	update := &models.Update{
@@ -1583,7 +1582,7 @@ func TestSendRejectionsNotification_RecordsStatsWhenEnabled(t *testing.T) {
 	tn := newTestNotifierWithServer(t, srv, nil)
 	tn.stats = newBotStats()
 
-	rejections := []domain.Rejeicao{{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"}}
+	rejections := []domain.Rejection{{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"}}
 	err := tn.SendRejectionsNotification(12345, rejections)
 	require.NoError(t, err)
 
@@ -1615,7 +1614,7 @@ func TestHandlers_ReturnEarlyWhenRateLimited(t *testing.T) {
 	chatID := int64(12345)
 
 	now := time.Now()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		tn.rateLimiter.attempts[chatID] = append(tn.rateLimiter.attempts[chatID], now)
 	}
 
@@ -1629,12 +1628,16 @@ func TestHandlers_ReturnEarlyWhenRateLimited(t *testing.T) {
 	tn.handleCheckNow(context.Background(), b, msgUpdate)
 	tn.handleLanguage(context.Background(), b, msgUpdate)
 
-	cbUpdate := &models.Update{CallbackQuery: &models.CallbackQuery{ID: "cb", From: models.User{ID: chatID, Username: "user"}, Data: "section_Campo"}}
+	cbUpdate := &models.Update{CallbackQuery: &models.CallbackQuery{ID: "cb", From: models.User{ID: chatID, Username: "user"}, Data: "section_Field Ministry"}}
 	tn.handleSectionToggle(context.Background(), b, cbUpdate)
 	tn.handleSave(context.Background(), b, cbUpdate)
 	tn.handleCancel(context.Background(), b, cbUpdate)
 	cbUpdate.CallbackQuery.Data = "lang_en"
 	tn.handleLanguageSelect(context.Background(), b, cbUpdate)
+}
+
+func TestTranslateSectionName_UnknownSection(t *testing.T) {
+	assert.Equal(t, "Unknown", translateSectionName("en", "Unknown"))
 }
 
 func TestHandleLanguage_NilMessage(t *testing.T) {

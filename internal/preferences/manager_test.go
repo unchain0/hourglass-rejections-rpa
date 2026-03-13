@@ -184,7 +184,7 @@ func TestPreferenceManager_UpdateSections(t *testing.T) {
 	}
 	pm := NewPreferenceManager(store)
 
-	err := pm.UpdateSections(123, []string{"Campo", "Partes Mecânicas"})
+	err := pm.UpdateSections(123, []string{"Field Ministry", "Mechanical Parts"})
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -203,7 +203,7 @@ func TestPreferenceManager_UpdateSections_GetError(t *testing.T) {
 	}
 	pm := NewPreferenceManager(store)
 
-	err := pm.UpdateSections(123, []string{"Campo"})
+	err := pm.UpdateSections(123, []string{"Field Ministry"})
 	if err == nil || err.Error() != "get error" {
 		t.Errorf("expected get error, got %v", err)
 	}
@@ -217,7 +217,7 @@ func TestPreferenceManager_UpdateSections_NotFound(t *testing.T) {
 	}
 	pm := NewPreferenceManager(store)
 
-	err := pm.UpdateSections(123, []string{"Campo"})
+	err := pm.UpdateSections(123, []string{"Field Ministry"})
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -235,7 +235,7 @@ func TestPreferenceManager_UpdateSections_SaveError(t *testing.T) {
 	}
 	pm := NewPreferenceManager(store)
 
-	err := pm.UpdateSections(123, []string{"Campo"})
+	err := pm.UpdateSections(123, []string{"Field Ministry"})
 	if err == nil || err.Error() != "save error" {
 		t.Errorf("expected save error, got %v", err)
 	}

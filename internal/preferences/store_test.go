@@ -60,7 +60,7 @@ func TestStore_SaveAndGet(t *testing.T) {
 		Username: "testuser",
 		Enabled:  true,
 	}
-	pref.SetSections([]string{"Campo", "Partes Mecânicas"})
+	pref.SetSections([]string{"Field Ministry", "Mechanical Parts"})
 
 	err = store.Save(pref)
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestStore_SaveAndGet(t *testing.T) {
 	assert.Equal(t, int64(123), retrieved.ChatID)
 	assert.Equal(t, "testuser", retrieved.Username)
 	assert.True(t, retrieved.Enabled)
-	assert.Equal(t, []string{"Campo", "Partes Mecânicas"}, retrieved.Sections())
+	assert.Equal(t, []string{"Field Ministry", "Mechanical Parts"}, retrieved.Sections())
 }
 
 func TestStore_Update(t *testing.T) {
@@ -82,17 +82,17 @@ func TestStore_Update(t *testing.T) {
 	defer store.Close()
 
 	pref := &UserPreference{ChatID: 123, Username: "testuser"}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 	require.NoError(t, store.Save(pref))
 
 	pref.Username = "updated"
-	pref.SetSections([]string{"Campo", "Testemunho"})
+	pref.SetSections([]string{"Field Ministry", "Testemunho"})
 	require.NoError(t, store.Save(pref))
 
 	retrieved, err := store.Get(123)
 	require.NoError(t, err)
 	assert.Equal(t, "updated", retrieved.Username)
-	assert.Equal(t, []string{"Campo", "Testemunho"}, retrieved.Sections())
+	assert.Equal(t, []string{"Field Ministry", "Testemunho"}, retrieved.Sections())
 }
 
 func TestStore_Delete(t *testing.T) {
@@ -154,7 +154,7 @@ func TestCleanupExpiredData(t *testing.T) {
 	defer store.Close()
 
 	pref := &UserPreference{ChatID: 123, Username: "testuser"}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 	require.NoError(t, store.Save(pref))
 
 	count, err := store.CleanupExpiredData()

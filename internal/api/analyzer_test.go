@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -30,8 +29,18 @@ func TestAPIAnalyzer_SetCongregationID(t *testing.T) {
 	assert.Equal(t, 12345, analyzer.congregationID)
 }
 
+func TestAPIAnalyzer_SetLanguage(t *testing.T) {
+	client := NewClient()
+	analyzer := NewAPIAnalyzer(client)
+
+	assert.Equal(t, "en", analyzer.language)
+
+	analyzer.SetLanguage("pt-BR")
+	assert.Equal(t, "pt-BR", analyzer.language)
+}
+
 func TestAPIAnalyzer_AnalyzeSection_UnknownSection(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(UsersResponse{Users: []User{}})
 	}))
@@ -47,167 +56,8 @@ func TestAPIAnalyzer_AnalyzeSection_UnknownSection(t *testing.T) {
 	assert.Contains(t, result.Error.Error(), "unknown section")
 }
 
-func TestAPIAnalyzer_AnalyzeSection_PartesMecanicas(t *testing.T) {
-	users := []User{
-		{ID: 1, Firstname: "João", Lastname: "Silva", Descriptor: "João Silva"},
-	}
-
-	notifications := []Notification{
-		// Declined - should be detected as rejection
-		{
-			ID:             1,
-			CongregationID: 48092,
-			Date:           "2026-03-01",
-			Type:           "avattendant",
-			Status:         "declined",
-			Assignee:       1,
-			Part:           123,
-		},
-		// Pending - should NOT be detected
-		{
-			ID:             2,
-			CongregationID: 48092,
-			Date:           "2026-03-02",
-			Type:           "avattendant",
-			Status:         "pending",
-			Assignee:       1,
-			Part:           124,
-		},
-		// Complete - should NOT be detected
-		{
-			ID:             3,
-			CongregationID: 48092,
-			Date:           "2026-03-03",
-			Type:           "avattendant",
-			Status:         "complete",
-			Assignee:       1,
-			Part:           125,
-		},
-	}
-
-	startRange := time.Now().Format("2006-01-02")
-	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
-	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/ava", startRange, endRange)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/fsreport/users":
-			json.NewEncoder(w).Encode(UsersResponse{Users: users})
-		case expectedPath:
-			json.NewEncoder(w).Encode(notifications)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClient()
-	client.baseURL = server.URL
-	analyzer := NewAPIAnalyzer(client)
-
-	result, err := analyzer.AnalyzeSection("Partes Mecânicas")
-	require.NoError(t, err)
-	require.NoError(t, result.Error)
-	assert.Equal(t, "Partes Mecânicas", result.Secao)
-	assert.Equal(t, 1, result.Total) // Only 1 declined
-	assert.Len(t, result.Rejeicoes, 1)
-	assert.Equal(t, "João Silva", result.Rejeicoes[0].Quem)
-	assert.Contains(t, result.Rejeicoes[0].OQue, "avattendant")
-}
-
-func TestAPIAnalyzer_AnalyzeSection_Campo(t *testing.T) {
-	users := []User{
-		{ID: 1, Firstname: "Maria", Lastname: "Santos", Descriptor: "Maria Santos"},
-	}
-
-	notifications := []Notification{
-		// Declined - should be detected
-		{
-			ID:             1,
-			CongregationID: 48092,
-			Date:           "2026-03-01",
-			Type:           "fm",
-			Status:         "declined",
-			Assignee:       1,
-			Part:           100,
-		},
-	}
-
-	startRange := time.Now().Format("2006-01-02")
-	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
-	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/fm", startRange, endRange)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/fsreport/users":
-			json.NewEncoder(w).Encode(UsersResponse{Users: users})
-		case expectedPath:
-			json.NewEncoder(w).Encode(notifications)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClient()
-	client.baseURL = server.URL
-	analyzer := NewAPIAnalyzer(client)
-
-	result, err := analyzer.AnalyzeSection("Campo")
-	require.NoError(t, err)
-	require.NoError(t, result.Error)
-	assert.Equal(t, "Campo", result.Secao)
-	assert.Equal(t, 1, result.Total)
-	assert.Equal(t, "Maria Santos", result.Rejeicoes[0].Quem)
-}
-
-func TestAPIAnalyzer_AnalyzeSection_TestemunhoPublico(t *testing.T) {
-	users := []User{
-		{ID: 1, Firstname: "Pedro", Lastname: "Souza", Descriptor: "Pedro Souza"},
-	}
-
-	notifications := []Notification{
-		// Declined - should be detected
-		{
-			ID:             1,
-			CongregationID: 48092,
-			Date:           "2026-03-01",
-			Type:           "pubwit",
-			Status:         "declined",
-			Assignee:       1,
-			Part:           200,
-		},
-	}
-
-	startRange := time.Now().Format("2006-01-02")
-	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
-	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/pubwit", startRange, endRange)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/fsreport/users":
-			json.NewEncoder(w).Encode(UsersResponse{Users: users})
-		case expectedPath:
-			json.NewEncoder(w).Encode(notifications)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClient()
-	client.baseURL = server.URL
-	analyzer := NewAPIAnalyzer(client)
-
-	result, err := analyzer.AnalyzeSection("Testemunho Público")
-	require.NoError(t, err)
-	require.NoError(t, result.Error)
-	assert.Equal(t, "Testemunho Público", result.Secao)
-	assert.Equal(t, 1, result.Total)
-}
-
 func TestAPIAnalyzer_LoadUsersError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -216,7 +66,7 @@ func TestAPIAnalyzer_LoadUsersError(t *testing.T) {
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
 
-	result, err := analyzer.AnalyzeSection("Partes Mecânicas")
+	result, err := analyzer.AnalyzeSection("Mechanical Parts")
 	require.NoError(t, err)
 	assert.Error(t, result.Error)
 	assert.Contains(t, result.Error.Error(), "failed to load users")
@@ -229,7 +79,7 @@ func TestAPIAnalyzer_GetNotificationsError(t *testing.T) {
 	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
 	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/ava", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -245,7 +95,7 @@ func TestAPIAnalyzer_GetNotificationsError(t *testing.T) {
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
 
-	result, err := analyzer.AnalyzeSection("Partes Mecânicas")
+	result, err := analyzer.AnalyzeSection("Mechanical Parts")
 	require.NoError(t, err)
 	assert.Error(t, result.Error)
 }
@@ -261,7 +111,7 @@ func TestAPIAnalyzer_AnalyzeAllSections(t *testing.T) {
 	pathMm := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
 	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -282,10 +132,10 @@ func TestAPIAnalyzer_AnalyzeAllSections(t *testing.T) {
 	results, err := analyzer.AnalyzeAllSections()
 	require.NoError(t, err)
 	assert.Len(t, results, 4)
-	assert.Equal(t, "Partes Mecânicas", results[0].Secao)
-	assert.Equal(t, "Campo", results[1].Secao)
-	assert.Equal(t, "Testemunho Público", results[2].Secao)
-	assert.Equal(t, "Reunião Meio de Semana", results[3].Secao)
+	assert.Equal(t, "Mechanical Parts", results[0].Section)
+	assert.Equal(t, "Field Ministry", results[1].Section)
+	assert.Equal(t, "Public Witnessing", results[2].Section)
+	assert.Equal(t, "Midweek Meeting", results[3].Section)
 }
 
 func TestAPIAnalyzer_GetUserName(t *testing.T) {
@@ -294,7 +144,7 @@ func TestAPIAnalyzer_GetUserName(t *testing.T) {
 		{ID: 2, Firstname: "Maria", Lastname: "Santos"}, // No descriptor
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(UsersResponse{Users: users})
 	}))
 	defer server.Close()
@@ -321,7 +171,7 @@ func TestAPIAnalyzer_UserCacheReuse(t *testing.T) {
 	callCount := 0
 	users := []User{{ID: 1, Firstname: "Test"}}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/fsreport/users" {
 			callCount++
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -336,18 +186,18 @@ func TestAPIAnalyzer_UserCacheReuse(t *testing.T) {
 	analyzer := NewAPIAnalyzer(client)
 
 	// First call should load users
-	analyzer.AnalyzeSection("Partes Mecânicas")
+	analyzer.AnalyzeSection("Mechanical Parts")
 	assert.Equal(t, 1, callCount)
 
 	// Second call should reuse cache
-	analyzer.AnalyzeSection("Partes Mecânicas")
+	analyzer.AnalyzeSection("Mechanical Parts")
 	assert.Equal(t, 1, callCount) // Should not increase
 }
 
 func TestAPIAnalyzer_EmptyResponses(t *testing.T) {
 	users := []User{{ID: 1, Firstname: "Test"}}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -361,10 +211,10 @@ func TestAPIAnalyzer_EmptyResponses(t *testing.T) {
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
 
-	result, err := analyzer.AnalyzeSection("Partes Mecânicas")
+	result, err := analyzer.AnalyzeSection("Mechanical Parts")
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.Total)
-	assert.Empty(t, result.Rejeicoes)
+	assert.Empty(t, result.Rejections)
 }
 
 func TestAPIAnalyzer_SectionAliases(t *testing.T) {
@@ -376,7 +226,7 @@ func TestAPIAnalyzer_SectionAliases(t *testing.T) {
 	pathFm := fmt.Sprintf("/scheduling/notifications/%s_%s/fm", startRange, endRange)
 	pathPubwit := fmt.Sprintf("/scheduling/notifications/%s_%s/pubwit", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -442,7 +292,7 @@ func TestAPIAnalyzer_MultipleDeclined(t *testing.T) {
 	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
 	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/pubwit", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -457,119 +307,17 @@ func TestAPIAnalyzer_MultipleDeclined(t *testing.T) {
 	client := NewClient()
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
+	analyzer.SetLanguage("pt-BR")
 
-	result, err := analyzer.AnalyzeSection("Testemunho Público")
+	result, err := analyzer.AnalyzeSection("Public Witnessing")
 	require.NoError(t, err)
 	require.NoError(t, result.Error)
-	assert.Equal(t, 2, result.Total) // Only 2 declined
-	assert.Len(t, result.Rejeicoes, 2)
-	assert.Equal(t, "João Silva", result.Rejeicoes[0].Quem)
-	assert.Equal(t, "Maria Santos", result.Rejeicoes[1].Quem)
-}
-
-func TestAPIAnalyzer_AnalyzeAllSections_WithError(t *testing.T) {
-	users := []User{{ID: 1, Firstname: "Test"}}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/fsreport/users":
-			json.NewEncoder(w).Encode(UsersResponse{Users: users})
-		default:
-			// Return error for all notification endpoints
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClient()
-	client.baseURL = server.URL
-	analyzer := NewAPIAnalyzer(client)
-
-	results, err := analyzer.AnalyzeAllSections()
-	require.NoError(t, err)
-	assert.Len(t, results, 4)
-	// All sections should have errors
-	for _, result := range results {
-		assert.Error(t, result.Error)
-	}
-}
-
-func TestAPIAnalyzer_SetDaysToLookAhead(t *testing.T) {
-	client := NewClient()
-	analyzer := NewAPIAnalyzer(client)
-
-	analyzer.SetDaysToLookAhead(365)
-	assert.Equal(t, 365, analyzer.daysToLookAhead)
-}
-
-func TestGetMidweekFlagName(t *testing.T) {
-	tests := []struct {
-		flag     int
-		expected string
-	}{
-		{10, "Leitor do EBC"},
-		{11, "Leitor do EBC"},
-		{20, "Orador/Dirigente"},
-		{30, "Estudante"},
-		{40, "Ajudante"},
-		{50, "Designação Especial"},
-		{60, "Outra Designação"},
-		{99, "Designação (flag 99)"},
-		{0, "Designação (flag 0)"},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("flag_%d", tt.flag), func(t *testing.T) {
-			result := getMidweekFlagName(tt.flag)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestGetFriendlyTypeName(t *testing.T) {
-	tests := []struct {
-		typeName string
-		expected string
-	}{
-		{"video", "Vídeo"},
-		{"console", "Console"},
-		{"mics", "Microfone"},
-		{"attendant", "Atendente"},
-		{"ava", "Áudio/Vídeo & Indicadores"},
-		{"pubwit", "Testemunho Público"},
-		{"fm", "Reunião de Campo"},
-		{"unknown", "unknown"},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.typeName, func(t *testing.T) {
-			result := getFriendlyTypeName(tt.typeName)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestFormatDateToBrazilian(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"2026-03-02", "02/03/2026"},
-		{"2024-12-31", "31/12/2024"},
-		{"2020-01-01", "01/01/2020"},
-		{"invalid", "invalid"},
-		{"2026/03/02", "2026/03/02"},
-		{"", ""},
-		{"2026-03", "2026-03"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := formatDateToBrazilian(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	assert.Equal(t, 2, result.Total)
+	assert.Len(t, result.Rejections, 2)
+	assert.Equal(t, "João Silva", result.Rejections[0].Who)
+	assert.Equal(t, "Maria Santos", result.Rejections[1].Who)
+	assert.Equal(t, "01/03/2026", result.Rejections[0].When)
+	assert.Equal(t, "02/03/2026", result.Rejections[1].When)
 }
 
 func TestAPIAnalyzer_AnalyzeMidweekMeetings(t *testing.T) {
@@ -577,9 +325,9 @@ func TestAPIAnalyzer_AnalyzeMidweekMeetings(t *testing.T) {
 
 	// Create meetings with parts
 	meetings := []Meeting{{
-		TGW: []MeetingPart{{ID: 100, Title: "Leitura da Bíblia"}},
-		FM:  []MeetingPart{{ID: 101, Title: "Apresentação"}},
-		LAC: []MeetingPart{{ID: 102, Title: "Discussão"}},
+		TGW: []MeetingPart{{ID: 100, Title: "Bible Reading"}},
+		FM:  []MeetingPart{{ID: 101, Title: "Presentation"}},
+		LAC: []MeetingPart{{ID: 102, Title: "Discussion"}},
 	}}
 
 	notifications := []Notification{
@@ -620,7 +368,7 @@ func TestAPIAnalyzer_AnalyzeMidweekMeetings(t *testing.T) {
 	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
 	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -638,11 +386,11 @@ func TestAPIAnalyzer_AnalyzeMidweekMeetings(t *testing.T) {
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
 
-	rejeicoes, err := analyzer.analyzeMidweekMeetings()
+	rejections, err := analyzer.analyzeMidweekMeetings()
 	require.NoError(t, err)
-	assert.Len(t, rejeicoes, 2)
-	assert.Equal(t, "Leitura da Bíblia", rejeicoes[0].OQue)
-	assert.Equal(t, "Apresentação", rejeicoes[1].OQue)
+	assert.Len(t, rejections, 2)
+	assert.Equal(t, "Bible Reading", rejections[0].What)
+	assert.Equal(t, "Presentation", rejections[1].What)
 }
 
 func TestAPIAnalyzer_AnalyzeMidweekMeetings_GetNotificationsError(t *testing.T) {
@@ -652,7 +400,7 @@ func TestAPIAnalyzer_AnalyzeMidweekMeetings_GetNotificationsError(t *testing.T) 
 	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
 	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -691,7 +439,7 @@ func TestAPIAnalyzer_AnalyzeMidweekMeetings_GetMeetingsError(t *testing.T) {
 	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
 	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -735,7 +483,7 @@ func TestAPIAnalyzer_AnalyzeMidweekMeetings_FallbackFlagName(t *testing.T) {
 	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
 	meetingPath := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/fsreport/users":
 			json.NewEncoder(w).Encode(UsersResponse{Users: users})
@@ -753,8 +501,65 @@ func TestAPIAnalyzer_AnalyzeMidweekMeetings_FallbackFlagName(t *testing.T) {
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
 
-	rejeicoes, err := analyzer.analyzeMidweekMeetings()
+	rejections, err := analyzer.analyzeMidweekMeetings()
 	require.NoError(t, err)
-	assert.Len(t, rejeicoes, 1)
-	assert.Equal(t, "Estudante", rejeicoes[0].OQue)
+	assert.Len(t, rejections, 1)
+	assert.Equal(t, "Student", rejections[0].What)
+}
+
+func TestAPIAnalyzer_Deduplication(t *testing.T) {
+	users := []User{
+		{ID: 1, Firstname: "Naraiana", Lastname: "Pacheco", Descriptor: "Naraiana Pacheco"},
+	}
+
+	notifications := []Notification{
+		{
+			ID:             1,
+			CongregationID: 48092,
+			Date:           "2026-03-13",
+			Type:           "pubwit",
+			Status:         "declined",
+			Assignee:       1,
+			Part:           100,
+		},
+		{
+			ID:             2,
+			CongregationID: 48092,
+			Date:           "2026-03-13",
+			Type:           "pubwit",
+			Status:         "declined",
+			Assignee:       1,
+			Part:           100,
+		},
+	}
+
+	startRange := time.Now().Format("2006-01-02")
+	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
+	expectedPath := fmt.Sprintf("/scheduling/notifications/%s_%s/pubwit", startRange, endRange)
+
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/fsreport/users":
+			json.NewEncoder(w).Encode(UsersResponse{Users: users})
+		case expectedPath:
+			json.NewEncoder(w).Encode(notifications)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	analyzer := NewAPIAnalyzer(client)
+	analyzer.SetLanguage("pt-BR")
+
+	result, err := analyzer.AnalyzeSection("Public Witnessing")
+	require.NoError(t, err)
+	require.NoError(t, result.Error)
+	assert.Equal(t, 1, result.Total, "should deduplicate identical rejections")
+	assert.Len(t, result.Rejections, 1)
+	assert.Equal(t, "Naraiana Pacheco", result.Rejections[0].Who)
+	assert.Equal(t, "Public Witnessing", result.Rejections[0].What)
+	assert.Equal(t, "13/03/2026", result.Rejections[0].When)
 }

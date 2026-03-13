@@ -45,10 +45,10 @@ func TestClient_RecordJobCompletion_Disabled(t *testing.T) {
 	client := &Client{enabled: false}
 
 	result := &domain.JobResult{
-		Secao:     "Test Section",
-		Total:     10,
-		Duration:  5 * time.Minute,
-		Rejeicoes: []domain.Rejeicao{},
+		Section:    "Test Section",
+		Total:      10,
+		Duration:   5 * time.Minute,
+		Rejections: []domain.Rejection{},
 	}
 
 	// Should not error when disabled
@@ -62,9 +62,9 @@ func TestClient_RecordDailyStats_Disabled(t *testing.T) {
 	client := &Client{enabled: false}
 
 	stats := &domain.DailyStats{
-		Date:      time.Now(),
-		TotalJobs: 6,
-		TotalRej:  42,
+		Date:            time.Now(),
+		TotalJobs:       6,
+		TotalRejections: 42,
 		Sections: map[string]int{
 			"Section1": 20,
 			"Section2": 22,
@@ -134,10 +134,10 @@ func TestClient_RecordJobCompletion_Enabled(t *testing.T) {
 	}
 
 	result := &domain.JobResult{
-		Secao:     "Test Section",
-		Total:     10,
-		Duration:  5 * time.Minute,
-		Rejeicoes: []domain.Rejeicao{},
+		Section:    "Test Section",
+		Total:      10,
+		Duration:   5 * time.Minute,
+		Rejections: []domain.Rejection{},
 	}
 
 	err := client.RecordJobCompletion(result)
@@ -169,9 +169,9 @@ func TestClient_RecordDailyStats_Enabled(t *testing.T) {
 	}
 
 	stats := &domain.DailyStats{
-		Date:      time.Now(),
-		TotalJobs: 6,
-		TotalRej:  42,
+		Date:            time.Now(),
+		TotalJobs:       6,
+		TotalRejections: 42,
 		Sections: map[string]int{
 			"Section1": 20,
 			"Section2": 22,

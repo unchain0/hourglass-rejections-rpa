@@ -144,8 +144,8 @@ For **VPS/Server deployment**, the system can automatically manage authenticatio
 ### How It Works
 
 1. You authenticate **once** on your local machine using the browser
-2. Tokens are saved and copied to your VPS
-3. The system automatically renews tokens before they expire (8-hour lifetime)
+2. Tokens **and** a WebAuthn credential are saved and copied to your VPS
+3. The main daemon automatically renews tokens before they expire (8-hour lifetime)
 4. No manual intervention needed on the VPS
 
 ### Quick Setup
@@ -155,16 +155,17 @@ For **VPS/Server deployment**, the system can automatically manage authenticatio
 Install Chrome/Chromium if not already installed, then run:
 
 ```bash
-make save-tokens
+make setup-auth
 ```
 
 This will:
 - Open a Chrome window
 - Navigate to Hourglass login page
 - Extract authentication tokens after you log in
-- Save tokens to `~/.hourglass-rpa/auth-tokens.json`
+- Register a WebAuthn credential for headless renewal
+- Save `auth-tokens.json` and `webauthn-credentials.json` in `~/.hourglass-rpa/`
 
-#### 2. Copy Tokens to Your VPS
+#### 2. Copy Authentication Files to Your VPS
 
 **Option A - If your VPS uses SSH keys:**
 ```bash
@@ -181,9 +182,14 @@ make copy-to-vps-password VPS=user@your-vps.com
 # Show token content
 cat ~/.hourglass-rpa/auth-tokens.json
 
+# Copy the WebAuthn credential too
+cat ~/.hourglass-rpa/webauthn-credentials.json
+
 # Copy the output, then on your VPS:
 mkdir -p ~/.hourglass-rpa
 nano ~/.hourglass-rpa/auth-tokens.json
+# Paste and save (Ctrl+X, Y, Enter)
+nano ~/.hourglass-rpa/webauthn-credentials.json
 # Paste and save (Ctrl+X, Y, Enter)
 ```
 
@@ -196,10 +202,10 @@ On your VPS, create/edit the `.env` file:
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_WHITELIST=your_chat_id
 
-# Optional - Token paths (defaults work fine)
+# Optional - Authentication file paths (defaults work fine)
 TOKENS_PATH=/home/user/.hourglass-rpa/auth-tokens.json
+WEBAUTHN_CREDENTIALS_PATH=/home/user/.hourglass-rpa/webauthn-credentials.json
 AUTO_REFRESH_TOKENS=true
-REFRESH_INTERVAL=6h
 ```
 
 #### 4. Run the Application
@@ -208,7 +214,7 @@ REFRESH_INTERVAL=6h
 ./rpa
 ```
 
-The application will automatically load tokens and refresh them as needed.
+The application will automatically load the persisted tokens and renew them via WebAuthn when needed.
 
 ### Coolify Deployment
 
@@ -218,25 +224,26 @@ When deploying to Coolify:
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_WHITELIST`
    - `TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json`
+   - `WEBAUTHN_CREDENTIALS_PATH=/home/rpa/.hourglass-rpa/webauthn-credentials.json`
+   - `AUTO_REFRESH_TOKENS=true`
 
 2. **Mount Volume**:
    - Host: `/home/user/.hourglass-rpa`
    - Container: `/home/rpa/.hourglass-rpa`
 
-3. **Copy tokens to server** before deploying:
+3. **Copy authentication files to server** before deploying:
    ```bash
    scp ~/.hourglass-rpa/auth-tokens.json user@coolify-server:/home/user/.hourglass-rpa/
+   scp ~/.hourglass-rpa/webauthn-credentials.json user@coolify-server:/home/user/.hourglass-rpa/
    ```
 
 4. Deploy normally through Coolify dashboard
 
-**Note:** With this method, you'll need to manually update tokens when they expire (every ~8 hours).
-
 ### Security Notes
 
 - Tokens are stored with `0600` permissions (owner-only)
-- Each environment needs its own token file
-- Back up your tokens file - losing it requires re-authentication
+- Each environment needs its own token and credential files
+- Back up both files - losing them requires re-authentication
 - Tokens are renewed automatically before expiry (1-hour threshold)
 
 ## 🎮 Usage
@@ -411,4 +418,3 @@ Coolify will automatically detect the `docker-compose.yml` and build.
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-

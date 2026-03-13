@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"hourglass-rejections-rpa/internal/api"
 	"hourglass-rejections-rpa/internal/config"
 	"hourglass-rejections-rpa/internal/sentry"
@@ -185,6 +186,8 @@ func TestParseWhitelist_AllInvalid(t *testing.T) {
 }
 
 func TestRun_InvalidArgs(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
+
 	opts := runOptions{
 		args:   []string{"-invalid-flag"},
 		getenv: func(string) string { return "" },
@@ -198,6 +201,8 @@ func TestRun_InvalidArgs(t *testing.T) {
 }
 
 func TestRun_HelpFlag(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
+
 	opts := runOptions{
 		args:   []string{"-h"},
 		getenv: func(string) string { return "" },
@@ -211,6 +216,8 @@ func TestRun_HelpFlag(t *testing.T) {
 }
 
 func TestRun_OnceMode(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
+
 	tmpDir := t.TempDir()
 	origWd, _ := os.Getwd()
 	os.Chdir(tmpDir)
@@ -235,6 +242,8 @@ OUTPUT_DIR=/tmp
 }
 
 func TestRun_FullMode(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -251,6 +260,8 @@ func TestRun_FullMode(t *testing.T) {
 }
 
 func TestRun_OnceModeSuccess(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
+
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 
@@ -298,6 +309,8 @@ func TestMain_WithError(t *testing.T) {
 }
 
 func TestMain_Success(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
+
 	origFn := runOnceFn
 	origArgs := os.Args
 	origExit := osExit
@@ -473,6 +486,164 @@ func TestSetupDependencies_InvalidTokensFile(t *testing.T) {
 	}
 }
 
+func TestSetupDependencies_EnableWebAuthnTokenManager(t *testing.T) {
+	tmpDir := t.TempDir()
+	credentialsPath := filepath.Join(tmpDir, "webauthn-credentials.json")
+	require.NoError(t, os.WriteFile(credentialsPath, []byte("{}"), 0o600))
+
+	cfg := &config.Config{
+		AutoRefreshTokens:       true,
+		WebAuthnCredentialsPath: credentialsPath,
+		TokensPath:              filepath.Join(tmpDir, "auth-tokens.json"),
+	}
+
+	apiClient, analyzer, store := setupDependencies(cfg)
+	require.NotNil(t, apiClient)
+	require.NotNil(t, analyzer)
+	require.NotNil(t, store)
+}
+
+func TestResolveTokensPath(t *testing.T) {
+	t.Run("uses config path", func(t *testing.T) {
+		cfg := &config.Config{TokensPath: "/tmp/from-config.json"}
+		assert.Equal(t, "/tmp/from-config.json", resolveTokensPath(cfg))
+	})
+
+	t.Run("uses env tokens path", func(t *testing.T) {
+		t.Setenv("TOKENS_PATH", "/tmp/from-env.json")
+		cfg := &config.Config{}
+		assert.Equal(t, "/tmp/from-env.json", resolveTokensPath(cfg))
+	})
+
+	t.Run("uses webauthn env tokens path", func(t *testing.T) {
+		t.Setenv("WEBAUTHN_TOKENS_PATH", "/tmp/from-webauthn-env.json")
+		cfg := &config.Config{}
+		assert.Equal(t, "/tmp/from-webauthn-env.json", resolveTokensPath(cfg))
+	})
+}
+
+func TestResolveWebAuthnCredentialsPath(t *testing.T) {
+	t.Run("uses config path", func(t *testing.T) {
+		cfg := &config.Config{WebAuthnCredentialsPath: "/tmp/from-config.json"}
+		assert.Equal(t, "/tmp/from-config.json", resolveWebAuthnCredentialsPath(cfg))
+	})
+
+	t.Run("uses env path", func(t *testing.T) {
+		t.Setenv("WEBAUTHN_CREDENTIALS_PATH", "/tmp/from-env.json")
+		cfg := &config.Config{}
+		assert.Equal(t, "/tmp/from-env.json", resolveWebAuthnCredentialsPath(cfg))
+	})
+
+	t.Run("falls back to home directory", func(t *testing.T) {
+		homeDir := t.TempDir()
+		t.Setenv("HOME", homeDir)
+		t.Setenv("WEBAUTHN_CREDENTIALS_PATH", "")
+		cfg := &config.Config{}
+		assert.Equal(t, filepath.Join(homeDir, ".hourglass-rpa", "webauthn-credentials.json"), resolveWebAuthnCredentialsPath(cfg))
+	})
+
+	t.Run("returns empty when home is unavailable", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		t.Setenv("HOMEDRIVE", "")
+		t.Setenv("HOMEPATH", "")
+		t.Setenv("WEBAUTHN_CREDENTIALS_PATH", "")
+		cfg := &config.Config{}
+		assert.Empty(t, resolveWebAuthnCredentialsPath(cfg))
+	})
+}
+
+func TestEnableWebAuthnTokenManager(t *testing.T) {
+	t.Run("disabled by config", func(t *testing.T) {
+		client := api.NewClient()
+		cfg := &config.Config{AutoRefreshTokens: false}
+		assert.False(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
+	t.Run("credentials missing", func(t *testing.T) {
+		client := api.NewClient()
+		cfg := &config.Config{
+			AutoRefreshTokens:       true,
+			WebAuthnCredentialsPath: filepath.Join(t.TempDir(), "missing.json"),
+		}
+		assert.False(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
+	t.Run("credentials path unavailable", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		t.Setenv("HOMEDRIVE", "")
+		t.Setenv("HOMEPATH", "")
+		t.Setenv("WEBAUTHN_CREDENTIALS_PATH", "")
+
+		client := api.NewClient()
+		cfg := &config.Config{AutoRefreshTokens: true}
+		assert.False(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
+	t.Run("credentials path stat error", func(t *testing.T) {
+		client := api.NewClient()
+		cfg := &config.Config{
+			AutoRefreshTokens:       true,
+			WebAuthnCredentialsPath: string([]byte{0}),
+		}
+		assert.False(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
+	t.Run("enable success", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		credentialsPath := filepath.Join(tmpDir, "webauthn-credentials.json")
+		require.NoError(t, os.WriteFile(credentialsPath, []byte("{}"), 0o600))
+
+		client := api.NewClient()
+		client.SetWebAuthnTokensPath(filepath.Join(tmpDir, "auth-tokens.json"))
+		cfg := &config.Config{
+			AutoRefreshTokens:       true,
+			WebAuthnCredentialsPath: credentialsPath,
+		}
+		assert.True(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
+	t.Run("enable failure", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		credentialsPath := filepath.Join(tmpDir, "webauthn-credentials.json")
+		require.NoError(t, os.WriteFile(credentialsPath, []byte("{}"), 0o600))
+
+		origEnable := enableWebAuthnClient
+		enableWebAuthnClient = func(apiClient *api.Client, credentialsPath string) error {
+			return fmt.Errorf("boom")
+		}
+		defer func() { enableWebAuthnClient = origEnable }()
+
+		client := api.NewClient()
+		cfg := &config.Config{
+			AutoRefreshTokens:       true,
+			WebAuthnCredentialsPath: credentialsPath,
+		}
+		assert.False(t, enableWebAuthnTokenManager(client, cfg))
+	})
+}
+
+func TestRun_TokenManagerStartError(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "true")
+	tmpDir := t.TempDir()
+	credentialsPath := filepath.Join(tmpDir, "webauthn-credentials.json")
+	require.NoError(t, os.WriteFile(credentialsPath, []byte("{}"), 0o600))
+
+	t.Setenv("WEBAUTHN_CREDENTIALS_PATH", credentialsPath)
+	t.Setenv("WEBAUTHN_TOKENS_PATH", tmpDir)
+
+	opts := runOptions{
+		args:   []string{"-once"},
+		getenv: os.Getenv,
+		exit:   func(int) {},
+	}
+
+	err := run(context.Background(), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start token manager")
+}
+
 func TestRunOnceMode(t *testing.T) {
 	cfg := &config.Config{}
 	sentryClient := &sentry.Client{}
@@ -543,6 +714,7 @@ func TestRunFullMode_WithTimeout(t *testing.T) {
 
 func TestRun_ConfigLoadError(t *testing.T) {
 	t.Setenv("TIMEOUT", "not-a-duration")
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
 
 	opts := runOptions{
 		args:   []string{"-once"},
@@ -557,6 +729,8 @@ func TestRun_ConfigLoadError(t *testing.T) {
 }
 
 func TestRun_SentryEnabled(t *testing.T) {
+	t.Setenv("AUTO_REFRESH_TOKENS", "false")
+
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 

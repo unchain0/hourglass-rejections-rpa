@@ -45,14 +45,14 @@ func (c *Client) RecordJobCompletion(result *domain.JobResult) error {
 	}
 
 	metrics := fmt.Sprintf(`
-# HELP hourglass_rejeicoes_total Total de rejeições
-# TYPE hourglass_rejeicoes_total gauge
-hourglass_rejeicoes_total{secao="%s"} %d
+# HELP hourglass_rejections_total Total rejections
+# TYPE hourglass_rejections_total gauge
+hourglass_rejections_total{section="%s"} %d
 
-# HELP hourglass_job_duration_seconds Duração do job em segundos
+# HELP hourglass_job_duration_seconds Job duration in seconds
 # TYPE hourglass_job_duration_seconds histogram
-hourglass_job_duration_seconds{secao="%s"} %f
-`, result.Secao, result.Total, result.Secao, result.Duration.Seconds())
+hourglass_job_duration_seconds{section="%s"} %f
+`, result.Section, result.Total, result.Section, result.Duration.Seconds())
 
 	return c.pushMetrics(metrics)
 }
@@ -64,21 +64,20 @@ func (c *Client) RecordDailyStats(stats *domain.DailyStats) error {
 	}
 
 	metrics := fmt.Sprintf(`
-# HELP hourglass_daily_jobs_total Total de jobs executados no dia
+# HELP hourglass_daily_jobs_total Total jobs executed today
 # TYPE hourglass_daily_jobs_total gauge
 hourglass_daily_jobs_total %d
 
-# HELP hourglass_daily_rejeicoes_total Total de rejeições no dia
-# TYPE hourglass_daily_rejeicoes_total gauge
-hourglass_daily_rejeicoes_total %d
-`, stats.TotalJobs, stats.TotalRej)
+# HELP hourglass_daily_rejections_total Total rejections today
+# TYPE hourglass_daily_rejections_total gauge
+hourglass_daily_rejections_total %d
+`, stats.TotalJobs, stats.TotalRejections)
 
-	// Add per-section metrics
 	for section, count := range stats.Sections {
 		metrics += fmt.Sprintf(`
-# HELP hourglass_section_rejeicoes_total Rejeições por seção
-# TYPE hourglass_section_rejeicoes_total gauge
-hourglass_section_rejeicoes_total{secao="%s"} %d
+# HELP hourglass_section_rejections_total Rejections by section
+# TYPE hourglass_section_rejections_total gauge
+hourglass_section_rejections_total{section="%s"} %d
 `, section, count)
 	}
 

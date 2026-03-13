@@ -40,7 +40,7 @@ type MockNotifier struct {
 	StopBotFunc                    func() error
 	SetCheckNowCallbackFunc        func(callback notifier.CheckNowCallback)
 	SendNoRejectionsMessageFunc    func(chatID int64, message string) error
-	SendRejectionsNotificationFunc func(chatID int64, rejections []domain.Rejeicao) error
+	SendRejectionsNotificationFunc func(chatID int64, rejections []domain.Rejection) error
 }
 
 func (m *MockNotifier) StartBot(ctx context.Context, prefManager *preferences.PreferenceManager) error {
@@ -70,7 +70,7 @@ func (m *MockNotifier) SendNoRejectionsMessage(chatID int64, message string) err
 	return nil
 }
 
-func (m *MockNotifier) SendRejectionsNotification(chatID int64, rejections []domain.Rejeicao) error {
+func (m *MockNotifier) SendRejectionsNotification(chatID int64, rejections []domain.Rejection) error {
 	if m.SendRejectionsNotificationFunc != nil {
 		return m.SendRejectionsNotificationFunc(chatID, rejections)
 	}
@@ -413,7 +413,7 @@ func TestRunOnceForUser_ContextCanceled(t *testing.T) {
 	}
 
 	pref := &preferences.UserPreference{}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 
 	mockStore := &MockPreferenceStore{
 		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
@@ -486,7 +486,7 @@ func TestRunOnceForUser_AnalyzeError(t *testing.T) {
 	runner.WithAnalyzer(mockAnalyzer)
 
 	pref := &preferences.UserPreference{}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 
 	mockStore := &MockPreferenceStore{
 		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
@@ -524,7 +524,7 @@ func TestRunOnceForUser_AnalyzeError_WithSentryClient(t *testing.T) {
 	runner.WithAnalyzer(mockAnalyzer)
 
 	pref := &preferences.UserPreference{}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 
 	mockStore := &MockPreferenceStore{
 		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
@@ -562,7 +562,7 @@ func TestRunOnceForUser_ResultError(t *testing.T) {
 	runner.WithAnalyzer(mockAnalyzer)
 
 	pref := &preferences.UserPreference{}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 
 	mockStore := &MockPreferenceStore{
 		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
@@ -598,13 +598,13 @@ func TestRunOnceForUser_NoRejections(t *testing.T) {
 
 	mockAnalyzer := &MockAnalyzer{
 		AnalyzeSectionFunc: func(section string) (*domain.JobResult, error) {
-			return &domain.JobResult{Rejeicoes: []domain.Rejeicao{}}, nil
+			return &domain.JobResult{Rejections: []domain.Rejection{}}, nil
 		},
 	}
 	runner.WithAnalyzer(mockAnalyzer)
 
 	pref := &preferences.UserPreference{}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 
 	mockStore := &MockPreferenceStore{
 		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
@@ -627,7 +627,7 @@ func TestRunOnceForUser_WithRejections(t *testing.T) {
 
 	called := false
 	mockNotifier := &MockNotifier{
-		SendRejectionsNotificationFunc: func(chatID int64, rejections []domain.Rejeicao) error {
+		SendRejectionsNotificationFunc: func(chatID int64, rejections []domain.Rejection) error {
 			called = true
 			if len(rejections) != 1 {
 				t.Errorf("expected 1 rejection, got %d", len(rejections))
@@ -639,13 +639,13 @@ func TestRunOnceForUser_WithRejections(t *testing.T) {
 
 	mockAnalyzer := &MockAnalyzer{
 		AnalyzeSectionFunc: func(section string) (*domain.JobResult, error) {
-			return &domain.JobResult{Rejeicoes: []domain.Rejeicao{{Secao: "Campo"}}}, nil
+			return &domain.JobResult{Rejections: []domain.Rejection{{Section: "Field Ministry"}}}, nil
 		},
 	}
 	runner.WithAnalyzer(mockAnalyzer)
 
 	pref := &preferences.UserPreference{}
-	pref.SetSections([]string{"Campo"})
+	pref.SetSections([]string{"Field Ministry"})
 
 	mockStore := &MockPreferenceStore{
 		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
@@ -754,7 +754,7 @@ func TestSendRejectionsNotification_Success(t *testing.T) {
 	origNewTelegramNotifier := newTelegramNotifier
 	newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (Notifier, error) {
 		return &MockNotifier{
-			SendRejectionsNotificationFunc: func(chatID int64, rejections []domain.Rejeicao) error {
+			SendRejectionsNotificationFunc: func(chatID int64, rejections []domain.Rejection) error {
 				called = true
 				return nil
 			},

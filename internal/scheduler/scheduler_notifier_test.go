@@ -34,8 +34,8 @@ func TestScheduler_sendNotifications_WithNotifier(t *testing.T) {
 		notifier: mockNotifier,
 	}
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	err := s.sendNotifications(rejections, time.Second)
@@ -54,8 +54,8 @@ func TestScheduler_sendNotifications_NoNotifier(t *testing.T) {
 		notifier: nil,
 	}
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	err := s.sendNotifications(rejections, time.Second)
@@ -72,8 +72,8 @@ func TestScheduler_sendNotifications_NotifierError(t *testing.T) {
 		sentryClient: &sentry.Client{},
 	}
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 	}
 
 	err := s.sendNotifications(rejections, time.Second)
@@ -89,10 +89,10 @@ func TestScheduler_sendNotifications_MultipleSections(t *testing.T) {
 		notifier: mockNotifier,
 	}
 
-	rejections := []domain.Rejeicao{
-		{Secao: "Campo", Quem: "John", OQue: "Test", PraQuando: "01/03/2026"},
-		{Secao: "Partes Mecânicas", Quem: "Jane", OQue: "Video", PraQuando: "02/03/2026"},
-		{Secao: "Campo", Quem: "Bob", OQue: "Console", PraQuando: "03/03/2026"},
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
+		{Section: "Mechanical Parts", Who: "Jane", What: "Video", When: "02/03/2026"},
+		{Section: "Field Ministry", Who: "Bob", What: "Console", When: "03/03/2026"},
 	}
 
 	err := s.sendNotifications(rejections, time.Second)
