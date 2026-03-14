@@ -601,3 +601,65 @@ func TestAPIAnalyzer_Deduplication(t *testing.T) {
 	assert.Equal(t, "Public Witnessing", result.Rejections[0].What)
 	assert.Equal(t, "13/03/2026", result.Rejections[0].When)
 }
+
+func TestAPIAnalyzer_SetDaysToLookAhead(t *testing.T) {
+	client := NewClient()
+	analyzer := NewAPIAnalyzer(client)
+
+	analyzer.SetDaysToLookAhead(365)
+	assert.Equal(t, 365, analyzer.daysToLookAhead)
+
+	analyzer.SetDaysToLookAhead(730)
+	assert.Equal(t, 730, analyzer.daysToLookAhead)
+}
+
+func TestGetFriendlyTypeName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"ava", "Audio/Video & Indicators"},
+		{"video", "Video"},
+		{"console", "Console"},
+		{"mics", "Microphone"},
+		{"attendant", "Attendant"},
+		{"pubwit", "Public Witnessing"},
+		{"fm", "Field Ministry Meeting"},
+		{"unknown", "unknown"},
+		{"", ""},
+		{"custom", "custom"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := getFriendlyTypeName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetMidweekFlagName(t *testing.T) {
+	tests := []struct {
+		flag     int
+		expected string
+	}{
+		{10, "Bible Reading"},
+		{11, "Bible Reading"},
+		{20, "Speaker/Chairman"},
+		{30, "Student"},
+		{40, "Assistant"},
+		{50, "Special Assignment"},
+		{60, "Other Assignment"},
+		{0, "Assignment (flag 0)"},
+		{99, "Assignment (flag 99)"},
+		{-1, "Assignment (flag -1)"},
+		{100, "Assignment (flag 100)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("flag_%d", tt.flag), func(t *testing.T) {
+			result := getMidweekFlagName(tt.flag)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

@@ -97,15 +97,15 @@ other = "❌ Rechazos Detectados en Hourglass"
 
 [assignments_rejected_count]
 description = "Cantidad de asignaciones rechazadas"
-other = "{{.Count}} asignación(es) rechazada(s):"
+other = "{{.Count}} asignaciones rechazadas:"
 
 [rejection_number]
 description = "Índice de rechazo"
 other = "Rechazo #{{.Index}}:"
 
 [who_label]
-description = "Etiqueta del campo Quién"
-other = "Quién:"
+description = "Etiqueta del campo Nombre"
+other = "Nombre:"
 
 [section_label]
 description = "Etiqueta del campo Sección"
@@ -173,7 +173,7 @@ other = "No"
 
 [rejections_detected]
 description = "Mensaje principal de notificación de rechazos"
-other = "<b>❌ Rechazos Detectados en Hourglass</b>\n\n<b>{{.Count}}</b> asignación(es) rechazada(s):\n\n{{range .Rejections}}<b>Rechazo #{{.Number}}:</b>\n👤 <b>Quién:</b> {{.Who}}\n📋 <b>Sección:</b> {{.Section}}\n📝 <b>Asignación:</b> {{.What}}\n📅 <b>Fecha:</b> {{.When}}\n\n{{end}}"
+other = "<b>❌ Rechazos Detectados en Hourglass</b>\n\n<b>{{.Count}}</b> asignaciones rechazadas:\n\n{{range .Rejections}}<b>Rechazo #{{.Number}}:</b>\n👤 <b>Nombre:</b> {{.Who}}\n📋 <b>Sección:</b> {{.Section}}\n📝 <b>Asignación:</b> {{.What}}\n📅 <b>Fecha:</b> {{.When}}\n\n{{end}}"
 
 [section_partes_mecanicas]
 description = "Sección de Partes Mecánicas"
@@ -181,7 +181,7 @@ other = "Partes Mecánicas"
 
 [section_campo]
 description = "Sección de Campo"
-other = "Campo"
+other = "Ministerio del Campo"
 
 [section_testemunho_publico]
 description = "Sección de Testimonio Público"

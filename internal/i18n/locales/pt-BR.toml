@@ -97,19 +97,19 @@ other = "❌ Rejeições Detectadas no Hourglass"
 
 [assignments_rejected_count]
 description = "Quantidade de atribuições rejeitadas"
-other = "{{.Count}} atribuição(ões) rejeitada(s):"
+other = "{{.Count}} atribuições rejeitadas:"
 
 [rejection_number]
 description = "Índice de rejeição"
 other = "Rejeição #{{.Index}}:"
 
 [who_label]
-description = "Rótulo do campo Quem"
-other = "Quem:"
+description = "Rótulo do campo Nome"
+other = "Nome:"
 
 [section_label]
-description = "Rótulo do campo Seção"
-other = "Seção:"
+description = "Rótulo do campo Área"
+other = "Área:"
 
 [assignment_label]
 description = "Rótulo do campo Atribuição"
@@ -173,7 +173,7 @@ other = "Não"
 
 [rejections_detected]
 description = "Main rejections notification message"
-other = "<b>❌ Rejeições Detectadas no Hourglass</b>\n\n<b>{{.Count}}</b> atribuição(ões) rejeitada(s):\n\n{{range .Rejections}}<b>Rejeição #{{.Number}}:</b>\n👤 <b>Quem:</b> {{.Who}}\n📋 <b>Seção:</b> {{.Section}}\n📝 <b>Atribuição:</b> {{.What}}\n📅 <b>Data:</b> {{.When}}\n\n{{end}}"
+other = "<b>❌ Rejeições Detectadas no Hourglass</b>\n\n<b>{{.Count}}</b> atribuições rejeitadas:\n\n{{range .Rejections}}<b>Rejeição #{{.Number}}:</b>\n👤 <b>Nome:</b> {{.Who}}\n📋 <b>Área:</b> {{.Section}}\n📝 <b>Atribuição:</b> {{.What}}\n📅 <b>Data:</b> {{.When}}\n\n{{end}}"
 
 [section_partes_mecanicas]
 description = "Mechanical Parts section"
@@ -181,7 +181,7 @@ other = "Partes Mecânicas"
 
 [section_campo]
 description = "Field section"
-other = "Campo"
+other = "Ministério de Campo"
 
 [section_testemunho_publico]
 description = "Public Witnessing section"

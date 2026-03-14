@@ -53,33 +53,49 @@ func TestBrowserAuthConstructors(t *testing.T) {
 
 func TestBrowserAuthTimingHelpers(t *testing.T) {
 	t.Run("getPollInterval defaults", func(t *testing.T) {
+		t.Setenv("CI", "")
+		t.Setenv("GITHUB_ACTIONS", "")
+		t.Setenv("TEST_TIMEOUT_SHORT", "")
 		assert.Equal(t, defaultPollInterval, getPollInterval())
 	})
 
 	t.Run("getPollInterval uses test interval", func(t *testing.T) {
+		t.Setenv("CI", "")
+		t.Setenv("GITHUB_ACTIONS", "")
 		t.Setenv("TEST_TIMEOUT_SHORT", "1")
 		assert.Equal(t, testPollInterval, getPollInterval())
 	})
 
 	t.Run("getAuthAttemptTimeout defaults", func(t *testing.T) {
+		t.Setenv("CI", "")
+		t.Setenv("GITHUB_ACTIONS", "")
+		t.Setenv("TEST_TIMEOUT_SHORT", "")
 		assert.Equal(t, defaultAuthTimeout, getAuthAttemptTimeout())
 	})
 
 	t.Run("getAuthAttemptTimeout uses ci timeout", func(t *testing.T) {
 		t.Setenv("CI", "true")
+		t.Setenv("TEST_TIMEOUT_SHORT", "")
 		assert.Equal(t, shortTestAuthTimeout, getAuthAttemptTimeout())
 	})
 
 	t.Run("getAuthAttemptTimeout uses short timeout", func(t *testing.T) {
+		t.Setenv("CI", "")
+		t.Setenv("GITHUB_ACTIONS", "")
 		t.Setenv("TEST_TIMEOUT_SHORT", "1")
 		assert.Equal(t, testAuthTimeout, getAuthAttemptTimeout())
 	})
 
 	t.Run("getRetryDelay defaults", func(t *testing.T) {
+		t.Setenv("CI", "")
+		t.Setenv("GITHUB_ACTIONS", "")
+		t.Setenv("TEST_TIMEOUT_SHORT", "")
 		assert.Equal(t, 2*time.Second, getRetryDelay(2))
 	})
 
 	t.Run("getRetryDelay uses test delay", func(t *testing.T) {
+		t.Setenv("CI", "")
+		t.Setenv("TEST_TIMEOUT_SHORT", "")
 		t.Setenv("GITHUB_ACTIONS", "true")
 		assert.Equal(t, 100*time.Millisecond, getRetryDelay(3))
 	})

@@ -97,15 +97,15 @@ other = "❌ Rejets détectés dans Hourglass"
 
 [assignments_rejected_count]
 description = "Nombre d'affectations rejetées"
-other = "{{.Count}} affectation(s) rejetée(s) :"
+other = "{{.Count}} affectations rejetées :"
 
 [rejection_number]
 description = "Index du rejet"
 other = "Rejet #{{.Index}} :"
 
 [who_label]
-description = "Libellé du champ Qui"
-other = "Qui :"
+description = "Libellé du champ Nom"
+other = "Nom :"
 
 [section_label]
 description = "Libellé du champ Section"
@@ -173,7 +173,7 @@ other = "Non"
 
 [rejections_detected]
 description = "Message principal de notification de rejets"
-other = "<b>❌ Rejets détectés dans Hourglass</b>\n\n<b>{{.Count}}</b> affectation(s) rejetée(s) :\n\n{{range .Rejections}}<b>Rejet #{{.Number}} :</b>\n👤 <b>Qui :</b> {{.Who}}\n📋 <b>Section :</b> {{.Section}}\n📝 <b>Affectation :</b> {{.What}}\n📅 <b>Date :</b> {{.When}}\n\n{{end}}"
+other = "<b>❌ Rejets détectés dans Hourglass</b>\n\n<b>{{.Count}}</b> affectations rejetées :\n\n{{range .Rejections}}<b>Rejet #{{.Number}} :</b>\n👤 <b>Nom :</b> {{.Who}}\n📋 <b>Section :</b> {{.Section}}\n📝 <b>Affectation :</b> {{.What}}\n📅 <b>Date :</b> {{.When}}\n\n{{end}}"
 
 [section_partes_mecanicas]
 description = "Section des Pièces Mécaniques"

@@ -95,8 +95,10 @@ func FormatDate(isoDate string, lang string) string {
 	format, ok := dateFormats[lang]
 	if !ok {
 		format = dateFormats["en"]
+		lang = "en"
 	}
 
-	p := message.NewPrinter(language.MustParse(lang))
+	tag := language.MustParse(lang)
+	p := message.NewPrinter(tag)
 	return p.Sprintf("%s", t.Format(format))
 }

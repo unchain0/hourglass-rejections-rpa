@@ -1636,8 +1636,55 @@ func TestHandlers_ReturnEarlyWhenRateLimited(t *testing.T) {
 	tn.handleLanguageSelect(context.Background(), b, cbUpdate)
 }
 
-func TestTranslateSectionName_UnknownSection(t *testing.T) {
-	assert.Equal(t, "Unknown", translateSectionName("en", "Unknown"))
+func TestTranslateSectionName(t *testing.T) {
+	tests := []struct {
+		name        string
+		lang        string
+		sectionName string
+		shouldPass  bool
+	}{
+		{
+			name:        "Partes Mecânicas",
+			lang:        "pt-BR",
+			sectionName: "Partes Mecânicas",
+			shouldPass:  true,
+		},
+		{
+			name:        "Campo",
+			lang:        "pt-BR",
+			sectionName: "Campo",
+			shouldPass:  true,
+		},
+		{
+			name:        "Testemunho Público",
+			lang:        "pt-BR",
+			sectionName: "Testemunho Público",
+			shouldPass:  true,
+		},
+		{
+			name:        "Reunião Meio de Semana",
+			lang:        "pt-BR",
+			sectionName: "Reunião Meio de Semana",
+			shouldPass:  true,
+		},
+		{
+			name:        "Unknown section returns as-is",
+			lang:        "en",
+			sectionName: "UnknownSection",
+			shouldPass:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := translateSectionName(tt.lang, tt.sectionName)
+			if tt.shouldPass {
+				assert.NotEmpty(t, result)
+			} else {
+				assert.Equal(t, tt.sectionName, result)
+			}
+		})
+	}
 }
 
 func TestHandleLanguage_NilMessage(t *testing.T) {

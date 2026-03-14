@@ -97,7 +97,7 @@ other = "❌ Rejections Detected in Hourglass"
 
 [assignments_rejected_count]
 description = "Number of assignments rejected"
-other = "{{.Count}} assignment(s) rejected:"
+other = "{{.Count}} assignments rejected:"
 
 [rejection_number]
 description = "Rejection index"
@@ -173,7 +173,7 @@ other = "No"
 
 [rejections_detected]
 description = "Main rejections notification message"
-other = "<b>❌ Rejections Detected in Hourglass</b>\n\n<b>{{.Count}}</b> assignment(s) rejected:\n\n{{range .Rejections}}<b>Rejection #{{.Number}}:</b>\n👤 <b>Who:</b> {{.Who}}\n📋 <b>Section:</b> {{.Section}}\n📝 <b>Assignment:</b> {{.What}}\n📅 <b>Date:</b> {{.When}}\n\n{{end}}"
+other = "<b>❌ Rejections Detected in Hourglass</b>\n\n<b>{{.Count}}</b> assignments rejected:\n\n{{range .Rejections}}<b>Rejection #{{.Number}}:</b>\n👤 <b>Who:</b> {{.Who}}\n📋 <b>Section:</b> {{.Section}}\n📝 <b>Assignment:</b> {{.What}}\n📅 <b>Date:</b> {{.When}}\n\n{{end}}"
 
 [section_partes_mecanicas]
 description = "Mechanical Parts section"

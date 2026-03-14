@@ -292,3 +292,80 @@ func TestLocalize_RejectionsTemplate(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatDate(t *testing.T) {
+	tests := []struct {
+		name     string
+		isoDate  string
+		lang     string
+		expected string
+	}{
+		{
+			name:     "English format",
+			isoDate:  "2024-03-14",
+			lang:     "en",
+			expected: "03/14/2024",
+		},
+		{
+			name:     "Portuguese format",
+			isoDate:  "2024-03-14",
+			lang:     "pt-BR",
+			expected: "14/03/2024",
+		},
+		{
+			name:     "Spanish format",
+			isoDate:  "2024-03-14",
+			lang:     "es",
+			expected: "14/03/2024",
+		},
+		{
+			name:     "French format",
+			isoDate:  "2024-03-14",
+			lang:     "fr",
+			expected: "14/03/2024",
+		},
+		{
+			name:     "Unknown language defaults to English",
+			isoDate:  "2024-03-14",
+			lang:     "unknown",
+			expected: "03/14/2024",
+		},
+		{
+			name:     "Empty language defaults to English",
+			isoDate:  "2024-03-14",
+			lang:     "",
+			expected: "03/14/2024",
+		},
+		{
+			name:     "Invalid date returns original",
+			isoDate:  "invalid-date",
+			lang:     "en",
+			expected: "invalid-date",
+		},
+		{
+			name:     "Empty date returns original",
+			isoDate:  "",
+			lang:     "en",
+			expected: "",
+		},
+		{
+			name:     "Different date English",
+			isoDate:  "2023-12-25",
+			lang:     "en",
+			expected: "12/25/2023",
+		},
+		{
+			name:     "Different date Portuguese",
+			isoDate:  "2023-12-25",
+			lang:     "pt-BR",
+			expected: "25/12/2023",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatDate(tt.isoDate, tt.lang)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
