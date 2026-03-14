@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,6 +249,43 @@ func TestAPIAnalyzer_SectionAliases(t *testing.T) {
 		result, err := analyzer.AnalyzeSection(section)
 		require.NoError(t, err)
 		require.NoError(t, result.Error)
+	}
+}
+
+func TestAPIAnalyzer_PortugueseSectionNames(t *testing.T) {
+	users := []User{{ID: 1, Firstname: "Test"}}
+
+	startRange := time.Now().Format("2006-01-02")
+	endRange := time.Now().AddDate(0, 0, 730).Format("2006-01-02")
+	pathAva := fmt.Sprintf("/scheduling/notifications/%s_%s/ava", startRange, endRange)
+	pathFm := fmt.Sprintf("/scheduling/notifications/%s_%s/fm", startRange, endRange)
+	pathPubwit := fmt.Sprintf("/scheduling/notifications/%s_%s/pubwit", startRange, endRange)
+	pathMm := fmt.Sprintf("/scheduling/notifications/%s_%s/mm", startRange, endRange)
+	pathMeetings := fmt.Sprintf("/scheduling/mm/meeting/%s_%s", startRange, endRange)
+
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/fsreport/users":
+			json.NewEncoder(w).Encode(UsersResponse{Users: users})
+		case r.URL.Path == pathAva, r.URL.Path == pathFm, r.URL.Path == pathPubwit, r.URL.Path == pathMm:
+			json.NewEncoder(w).Encode([]Notification{})
+		case strings.HasPrefix(r.URL.Path, pathMeetings):
+			json.NewEncoder(w).Encode([]Meeting{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	analyzer := NewAPIAnalyzer(client)
+
+	sections := []string{"Partes Mecânicas", "Campo", "Testemunho Público", "Reunião Meio de Semana"}
+	for _, section := range sections {
+		result, err := analyzer.AnalyzeSection(section)
+		require.NoError(t, err)
+		require.NoError(t, result.Error, "Section %s should be recognized", section)
 	}
 }
 

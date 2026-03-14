@@ -65,13 +65,13 @@ func (a *APIAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error) 
 	var err error
 
 	switch section {
-	case "Mechanical Parts", "avattendant":
+	case "Mechanical Parts", "avattendant", "Partes Mecânicas":
 		rejections, err = a.analyzeMechanicalParts()
-	case "Field Ministry", "fsMeeting":
+	case "Field Ministry", "fsMeeting", "Campo":
 		rejections, err = a.analyzeFieldMinistry()
-	case "Public Witnessing", "publicWitnessing":
+	case "Public Witnessing", "publicWitnessing", "Testemunho Público":
 		rejections, err = a.analyzePublicWitnessing()
-	case "Midweek Meeting", "midweekMeeting":
+	case "Midweek Meeting", "midweekMeeting", "Reunião Meio de Semana":
 		rejections, err = a.analyzeMidweekMeetings()
 	default:
 		return &domain.JobResult{
