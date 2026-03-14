@@ -190,3 +190,31 @@ other = "Public Witnessing"
 [section_reuniao_meio_semana]
 description = "Midweek Meeting section"
 other = "Midweek Meeting"
+
+[assignment_audio_video_indicators]
+description = "Audio/Video & Indicators assignment"
+other = "Audio/Video & Indicators"
+
+[assignment_video]
+description = "Video assignment"
+other = "Video"
+
+[assignment_console]
+description = "Console assignment"
+other = "Console"
+
+[assignment_microphone]
+description = "Microphone assignment"
+other = "Microphone"
+
+[assignment_attendant]
+description = "Attendant assignment"
+other = "Attendant"
+
+[assignment_public_witnessing]
+description = "Public Witnessing assignment"
+other = "Public Witnessing"
+
+[assignment_field_ministry_meeting]
+description = "Field Ministry Meeting assignment"
+other = "Field Ministry Meeting"

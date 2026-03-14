@@ -190,3 +190,31 @@ other = "Témoignage Public"
 [section_reuniao_meio_semana]
 description = "Section de la Réunion de Semaine"
 other = "Réunion de Semaine"
+
+[assignment_audio_video_indicators]
+description = "Affectation Audio/Vidéo et Indicateurs"
+other = "Audio/Vidéo et Indicateurs"
+
+[assignment_video]
+description = "Affectation Vidéo"
+other = "Vidéo"
+
+[assignment_console]
+description = "Affectation Console"
+other = "Console"
+
+[assignment_microphone]
+description = "Affectation Microphone"
+other = "Microphone"
+
+[assignment_attendant]
+description = "Affectation Assistant"
+other = "Assistant"
+
+[assignment_public_witnessing]
+description = "Affectation Témoignage Public"
+other = "Témoignage Public"
+
+[assignment_field_ministry_meeting]
+description = "Affectation Réunion de Terrain"
+other = "Réunion de Terrain"

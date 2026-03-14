@@ -190,3 +190,31 @@ other = "Testimonio Público"
 [section_reuniao_meio_semana]
 description = "Sección de Reunión de Entre Semana"
 other = "Reunión de Entre Semana"
+
+[assignment_audio_video_indicators]
+description = "Asignación de Audio/Video e Indicadores"
+other = "Audio/Video e Indicadores"
+
+[assignment_video]
+description = "Asignación de Video"
+other = "Video"
+
+[assignment_console]
+description = "Asignación de Consola"
+other = "Consola"
+
+[assignment_microphone]
+description = "Asignación de Micrófono"
+other = "Micrófono"
+
+[assignment_attendant]
+description = "Asignación de Asistente"
+other = "Asistente"
+
+[assignment_public_witnessing]
+description = "Asignación de Testimonio Público"
+other = "Testimonio Público"
+
+[assignment_field_ministry_meeting]
+description = "Asignación de Reunión de Ministerio del Campo"
+other = "Reunión de Ministerio del Campo"
