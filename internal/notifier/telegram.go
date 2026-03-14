@@ -185,7 +185,7 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 		rejectionsList = append(rejectionsList, map[string]interface{}{
 			"Number":  i + 1,
 			"Who":     html.EscapeString(r.Who),
-			"Section": html.EscapeString(r.Section),
+			"Section": html.EscapeString(translateSectionName(lang, r.Section)),
 			"What":    html.EscapeString(r.What),
 			"When":    html.EscapeString(r.When),
 		})
@@ -555,13 +555,13 @@ func (t *TelegramNotifier) handleStats(ctx context.Context, b *bot.Bot, update *
 func translateSectionName(lang, sectionName string) string {
 	sectionKey := ""
 	switch sectionName {
-	case "Partes Mecânicas":
+	case "Partes Mecânicas", "Mechanical Parts":
 		sectionKey = "section_partes_mecanicas"
-	case "Campo":
+	case "Campo", "Field Ministry":
 		sectionKey = "section_campo"
-	case "Testemunho Público":
+	case "Testemunho Público", "Public Witnessing":
 		sectionKey = "section_testemunho_publico"
-	case "Reunião Meio de Semana":
+	case "Reunião Meio de Semana", "Midweek Meeting":
 		sectionKey = "section_reuniao_meio_semana"
 	default:
 		return sectionName
