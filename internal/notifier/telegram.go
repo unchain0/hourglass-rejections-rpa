@@ -186,7 +186,7 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 			"Number":  i + 1,
 			"Who":     html.EscapeString(r.Who),
 			"Section": html.EscapeString(translateSectionName(lang, r.Section)),
-			"What":    html.EscapeString(r.What),
+			"What":    html.EscapeString(translateAssignmentType(lang, r.What)),
 			"When":    html.EscapeString(r.When),
 		})
 	}
@@ -567,6 +567,29 @@ func translateSectionName(lang, sectionName string) string {
 		return sectionName
 	}
 	return i18n.Localize(lang, sectionKey, nil)
+}
+
+func translateAssignmentType(lang, assignmentType string) string {
+	assignmentKey := ""
+	switch assignmentType {
+	case "Audio/Video & Indicators":
+		assignmentKey = "assignment_audio_video_indicators"
+	case "Video":
+		assignmentKey = "assignment_video"
+	case "Console":
+		assignmentKey = "assignment_console"
+	case "Microphone":
+		assignmentKey = "assignment_microphone"
+	case "Attendant":
+		assignmentKey = "assignment_attendant"
+	case "Public Witnessing":
+		assignmentKey = "assignment_public_witnessing"
+	case "Field Ministry Meeting":
+		assignmentKey = "assignment_field_ministry_meeting"
+	default:
+		return assignmentType
+	}
+	return i18n.Localize(lang, assignmentKey, nil)
 }
 
 func (t *TelegramNotifier) handleWhoAmI(ctx context.Context, b *bot.Bot, update *models.Update) {

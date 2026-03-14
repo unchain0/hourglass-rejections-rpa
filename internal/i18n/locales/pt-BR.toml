@@ -190,3 +190,32 @@ other = "Testemunho Público"
 [section_reuniao_meio_semana]
 description = "Midweek Meeting section"
 other = "Reunião Meio de Semana"
+
+# Assignment types (Atribuições)
+[assignment_audio_video_indicators]
+description = "Audio/Video & Indicators assignment"
+other = "Áudio/Vídeo e Indicadores"
+
+[assignment_video]
+description = "Video assignment"
+other = "Vídeo"
+
+[assignment_console]
+description = "Console assignment"
+other = "Console"
+
+[assignment_microphone]
+description = "Microphone assignment"
+other = "Microfone"
+
+[assignment_attendant]
+description = "Attendant assignment"
+other = "Atendente"
+
+[assignment_public_witnessing]
+description = "Public Witnessing assignment"
+other = "Testemunho Público"
+
+[assignment_field_ministry_meeting]
+description = "Field Ministry Meeting assignment"
+other = "Reunião de Ministério de Campo"
