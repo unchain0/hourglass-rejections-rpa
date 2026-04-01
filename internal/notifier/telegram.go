@@ -586,6 +586,18 @@ func translateAssignmentType(lang, assignmentType string) string {
 		assignmentKey = "assignment_public_witnessing"
 	case "Field Ministry Meeting":
 		assignmentKey = "assignment_field_ministry_meeting"
+	case "Bible Reading":
+		assignmentKey = "assignment_bible_reading"
+	case "Speaker/Chairman":
+		assignmentKey = "assignment_speaker_chairman"
+	case "Student":
+		assignmentKey = "assignment_student"
+	case "Assistant":
+		assignmentKey = "assignment_assistant"
+	case "Special Assignment":
+		assignmentKey = "assignment_special_assignment"
+	case "Other Assignment":
+		assignmentKey = "assignment_other_assignment"
 	default:
 		return assignmentType
 	}

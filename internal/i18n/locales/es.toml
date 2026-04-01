@@ -218,3 +218,27 @@ other = "Testimonio Público"
 [assignment_field_ministry_meeting]
 description = "Asignación de Reunión de Ministerio del Campo"
 other = "Reunión de Ministerio del Campo"
+
+[assignment_bible_reading]
+description = "Asignación de Lectura de la Biblia"
+other = "Lectura de la Biblia"
+
+[assignment_speaker_chairman]
+description = "Asignación de Orador/Presidente"
+other = "Orador/Presidente"
+
+[assignment_student]
+description = "Asignación de Estudiante"
+other = "Estudiante"
+
+[assignment_assistant]
+description = "Asignación de Ayudante"
+other = "Ayudante"
+
+[assignment_special_assignment]
+description = "Asignación Especial"
+other = "Asignación Especial"
+
+[assignment_other_assignment]
+description = "Otra Asignación"
+other = "Otra Asignación"

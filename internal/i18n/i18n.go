@@ -1,3 +1,4 @@
+// Package i18n loads localized message bundles and helper formatters used across the application.
 package i18n
 
 import (
@@ -24,6 +25,7 @@ var loadMessageFile = func(path string) error {
 	return err
 }
 
+// Init loads the embedded translation files into the shared message bundle once.
 func Init() error {
 	initOnce.Do(func() {
 		bundle = i18n.NewBundle(language.English)
@@ -56,6 +58,7 @@ func resetForTesting() {
 	bundle = nil
 }
 
+// GetLocalizer returns a localizer for the requested language tag, defaulting to English.
 func GetLocalizer(langTag string) *i18n.Localizer {
 	if bundle == nil {
 		_ = Init()
@@ -66,6 +69,7 @@ func GetLocalizer(langTag string) *i18n.Localizer {
 	return i18n.NewLocalizer(bundle, langTag)
 }
 
+// Localize resolves a message ID for the requested language and falls back to the ID on errors.
 func Localize(lang string, messageID string, templateData map[string]interface{}) string {
 	localizer := GetLocalizer(lang)
 	msg, err := localizer.Localize(&i18n.LocalizeConfig{

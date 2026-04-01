@@ -218,3 +218,27 @@ other = "Public Witnessing"
 [assignment_field_ministry_meeting]
 description = "Field Ministry Meeting assignment"
 other = "Field Ministry Meeting"
+
+[assignment_bible_reading]
+description = "Bible Reading assignment"
+other = "Bible Reading"
+
+[assignment_speaker_chairman]
+description = "Speaker/Chairman assignment"
+other = "Speaker/Chairman"
+
+[assignment_student]
+description = "Student assignment"
+other = "Student"
+
+[assignment_assistant]
+description = "Assistant assignment"
+other = "Assistant"
+
+[assignment_special_assignment]
+description = "Special Assignment assignment"
+other = "Special Assignment"
+
+[assignment_other_assignment]
+description = "Other Assignment assignment"
+other = "Other Assignment"

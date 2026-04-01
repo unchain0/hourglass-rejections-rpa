@@ -1687,6 +1687,47 @@ func TestTranslateSectionName(t *testing.T) {
 	}
 }
 
+func TestTranslateAssignmentType(t *testing.T) {
+	tests := []struct {
+		name           string
+		lang           string
+		assignmentType string
+		expected       string
+	}{
+		{
+			name:           "speaker chairman in portuguese",
+			lang:           "pt-BR",
+			assignmentType: "Speaker/Chairman",
+			expected:       "Orador/Presidente",
+		},
+		{
+			name:           "bible reading in portuguese",
+			lang:           "pt-BR",
+			assignmentType: "Bible Reading",
+			expected:       "Leitura da Bíblia",
+		},
+		{
+			name:           "student in english stays english",
+			lang:           "en",
+			assignmentType: "Student",
+			expected:       "Student",
+		},
+		{
+			name:           "unknown returns as is",
+			lang:           "pt-BR",
+			assignmentType: "Unknown Assignment",
+			expected:       "Unknown Assignment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := translateAssignmentType(tt.lang, tt.assignmentType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestHandleLanguage_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	b := newTestBot(t)

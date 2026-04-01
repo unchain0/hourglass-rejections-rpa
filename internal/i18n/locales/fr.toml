@@ -218,3 +218,27 @@ other = "Témoignage Public"
 [assignment_field_ministry_meeting]
 description = "Affectation Réunion de Terrain"
 other = "Réunion de Terrain"
+
+[assignment_bible_reading]
+description = "Affectation Lecture de la Bible"
+other = "Lecture de la Bible"
+
+[assignment_speaker_chairman]
+description = "Affectation Orateur/Président"
+other = "Orateur/Président"
+
+[assignment_student]
+description = "Affectation Étudiant"
+other = "Étudiant"
+
+[assignment_assistant]
+description = "Affectation Assistant"
+other = "Assistant"
+
+[assignment_special_assignment]
+description = "Affectation Spéciale"
+other = "Affectation Spéciale"
+
+[assignment_other_assignment]
+description = "Autre Affectation"
+other = "Autre Affectation"
