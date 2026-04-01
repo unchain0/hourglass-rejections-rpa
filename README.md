@@ -1,420 +1,176 @@
-# Hourglass Rejections RPA 🤖
+# Hourglass Rejections RPA
 
-[![CI](https://github.com/unchain0/hourglass-rejections-rpa/actions/workflows/ci.yml/badge.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://golang.org)
-[![Coverage](https://img.shields.io/badge/coverage-87.6%25-brightgreen.svg)](https://github.com/unchain0/hourglass-rejections-rpa/actions)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.yml)
+Lightweight Go automation that checks Hourglass for rejected assignments, stores the results as JSON/CSV, and delivers notifications through a Telegram bot with per-user preferences.
 
-Automated system to monitor assignment rejections in Hourglass. Runs 2x daily (9 AM and 5 PM) and sends Telegram notifications when rejections are detected in: Mechanical Parts, Field Ministry, and Public Witnessing sections.
+## What it does
 
-- **Official REST API**: Uses Hourglass API directly (no browser)
-- **Secure Authentication**: XSRF Token + Session Cookie
-- **Interactive Telegram Bot**: Configure preferences via bot commands
-- **Per-User Filtering**: Each user receives only their selected sections
-- **Smart Scheduling**: Cron jobs for 9 AM and 5 PM daily
-- **Multiple Formats**: Exports data in JSON and CSV
-- **Maximum Range**: Searches for rejections up to 2 years (730 days)
-- **98.1% Coverage**: Comprehensive unit tests
+- reads Hourglass through the official API
+- sends Telegram notifications only when there are new changes
+- lets each user choose which sections they want to follow
+- persists results in `./outputs` and preferences in SQLite by default
+- supports static tokens or automatic token renewal with WebAuthn
 
-## 📋 Prerequisites
+This repository is a good fit if you want a self-hosted monitor for Hourglass rejections with a bot interface. It is a bad fit if you need a generic browser scraper or a multi-tenant SaaS service.
 
-- Go 1.26+ (for development)
-- Docker (for deployment)
-- Telegram account (for notifications)
+## Quickstart
 
-## 🔧 Installation
+### Option 1: start the daemon with static tokens
 
-### Via Docker (Recommended)
+1. Copy the environment template.
 
-```bash
-docker-compose up -d
-```
+   ```bash
+   cp .env.example .env
+   ```
 
-### Via Go (Development)
+2. Fill at least these variables in `.env`:
 
-```bash
-go install github.com/unchain0/hourglass-rejections-rpa/cmd/rpa@latest
-```
+   ```env
+   TELEGRAM_BOT_TOKEN=your_bot_token
+   TELEGRAM_WHITELIST=123456789
+   HOURGLASS_XSRF_TOKEN=your_xsrf_token
+   HOURGLASS_HGLOGIN_COOKIE=your_hglogin_cookie
+   ```
 
-### Local Build (Manual)
+3. Start the app.
 
-Build the binary manually from source:
+   ```bash
+   make run
+   ```
 
-```bash
-# Clone the repository
-git clone https://github.com/unchain0/hourglass-rejections-rpa.git
-cd hourglass-rejections-rpa
+Success means the app starts without errors and the bot is ready to accept `/start`.
 
-# Download dependencies
-go mod download
+### Option 2: set up automatic token renewal
 
-# Build the binary
-go build -o rpa ./cmd/rpa
-
-# Make it executable (Linux/macOS)
-chmod +x rpa
-
-# Run it
-./rpa -once
-```
-
-**Requirements:**
-- Go 1.24 or higher
-- Git
-
-**Build for different platforms:**
-```bash
-# Linux
-GOOS=linux GOARCH=amd64 go build -o rpa-linux ./cmd/rpa
-
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o rpa-macos ./cmd/rpa
-
-# Windows
-GOOS=windows GOARCH=amd64 go build -o rpa.exe ./cmd/rpa
-```
-
-## ⚙️ Configuration
-
-Copy the `.env.example` file to `.env` and configure:
-
-```bash
-cp .env.example .env
-```
-
-### Required Variables
-
-```env
-# Hourglass API (required)
-HOURGLASS_XSRF_TOKEN=your_token_here
-HOURGLASS_HGLOGIN_COOKIE=your_cookie_here
-
-# Telegram Bot (required for notifications)
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-
-# Authorized users whitelist (optional)
-TELEGRAM_WHITELIST=123456789,987654321
-```
-
-### Optional Variables
-
-```env
-# User Preferences (for per-user filtering)
-USER_PREFS_FILE=data/preferences.json
-
-# Sentry (error tracking)
-SENTRY_DSN=https://xxxxxx@xxx.ingest.sentry.io/xxxxx
-SENTRY_ENVIRONMENT=production
-
-# Grafana (metrics)
-GRAFANA_API_KEY=glc_xxxxxxxx
-
-# General settings
-LOG_LEVEL=info
-TZ=America/Sao_Paulo
-OUTPUT_DIR=./outputs
-```
-
-## 🔑 Getting Credentials
-
-### XSRF Token and Cookie
-
-1. Log in to [Hourglass](https://app.hourglass-app.com) via browser
-2. Open DevTools (F12) → Network
-3. Perform any action in the system
-4. Look for a request starting with `api/v0.2/`
-5. In the request headers, copy:
-   - `X-Hourglass-XSRF-Token`
-   - Cookie `hglogin`
-
-### Telegram Bot
-
-1. Send `/newbot` to [@BotFather](https://t.me/BotFather)
-2. Follow instructions to create the bot
-3. Copy the provided token (format: `123456789:ABCdef...`)
-4. Send a message to your bot
-5. Access: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-6. Look for your `chat.id` in the response
-
-## 🔐 VPS Setup (Automatic Token Renewal)
-
-For **VPS/Server deployment**, the system can automatically manage authentication tokens without manual intervention.
-
-### How It Works
-
-1. You authenticate **once** on your local machine using the browser
-2. Tokens **and** a WebAuthn credential are saved and copied to your VPS
-3. The main daemon automatically renews tokens before they expire (8-hour lifetime)
-4. No manual intervention needed on the VPS
-
-### Quick Setup
-
-#### 1. On Your Local Machine (with browser)
-
-Install Chrome/Chromium if not already installed, then run:
+If this will run on a VPS or long-lived container, generate persisted auth files first:
 
 ```bash
 make setup-auth
 ```
 
-This will:
-- Open a Chrome window
-- Navigate to Hourglass login page
-- Extract authentication tokens after you log in
-- Register a WebAuthn credential for headless renewal
-- Save `auth-tokens.json` and `webauthn-credentials.json` in `~/.hourglass-rpa/`
+That command creates `auth-tokens.json` and `webauthn-credentials.json` under `~/.hourglass-rpa/`. Point `TOKENS_PATH` and `WEBAUTHN_CREDENTIALS_PATH` at those files, then start the main daemon with `make run` or Docker Compose.
 
-#### 2. Copy Authentication Files to Your VPS
+## Requirements
 
-**Option A - If your VPS uses SSH keys:**
+- Go 1.26 for local development
+- Telegram bot token from [@BotFather](https://t.me/BotFather)
+- Hourglass authentication, either:
+  - `HOURGLASS_XSRF_TOKEN` + `HOURGLASS_HGLOGIN_COOKIE`, or
+  - persisted token files plus WebAuthn credentials
+- Chromium/Chrome available when you use the auth setup tools
+
+## Main workflows
+
+### Run the daemon
+
 ```bash
+make run
+```
+
+The main binary starts both the Telegram bot and the scheduler. The scheduler checks more frequently during the day and less frequently overnight.
+
+### Start with Docker Compose
+
+```bash
+docker-compose up -d
+```
+
+The default compose file starts the main `rpa` service with persisted data and token volumes.
+
+### Prepare authentication for servers
+
+```bash
+make setup-auth
 make copy-to-vps VPS=user@your-vps.com
 ```
 
-**Option B - If your VPS uses password authentication:**
-```bash
-make copy-to-vps-password VPS=user@your-vps.com
-```
+Useful helper binaries are also available through the Makefile:
 
-**Option C - Manual copy:**
-```bash
-# Show token content
-cat ~/.hourglass-rpa/auth-tokens.json
+- `make save-tokens` for manual token capture
+- `make token-refresh` for a standalone refresh attempt
 
-# Copy the WebAuthn credential too
-cat ~/.hourglass-rpa/webauthn-credentials.json
+## Configuration
 
-# Copy the output, then on your VPS:
-mkdir -p ~/.hourglass-rpa
-nano ~/.hourglass-rpa/auth-tokens.json
-# Paste and save (Ctrl+X, Y, Enter)
-nano ~/.hourglass-rpa/webauthn-credentials.json
-# Paste and save (Ctrl+X, Y, Enter)
-```
+The full variable list lives in `.env.example`. In practice, these are the keys most people need first:
 
-#### 3. Configure Environment Variables
-
-On your VPS, create/edit the `.env` file:
-
-```bash
-# Required - Telegram
+```env
 TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_WHITELIST=your_chat_id
+TELEGRAM_WHITELIST=123456789,987654321
+HOURGLASS_XSRF_TOKEN=your_xsrf_token
+HOURGLASS_HGLOGIN_COOKIE=your_hglogin_cookie
 
-# Optional - Authentication file paths (defaults work fine)
+# or use persisted auth files instead of static tokens
 TOKENS_PATH=/home/user/.hourglass-rpa/auth-tokens.json
 WEBAUTHN_CREDENTIALS_PATH=/home/user/.hourglass-rpa/webauthn-credentials.json
-AUTO_REFRESH_TOKENS=true
+
+OUTPUT_DIR=./outputs
+SQLITE_DB_PATH=data/hourglass.db
+LOG_LEVEL=info
+TZ=America/Sao_Paulo
 ```
 
-#### 4. Run the Application
+Important notes:
+
+- `AUTO_REFRESH_TOKENS` defaults to `true`.
+- preferences use SQLite by default
+- results are written as both JSON and CSV
+- Sentry and Grafana settings are optional
+
+## Telegram bot commands
+
+The bot currently registers these commands:
+
+| Command | Purpose |
+| --- | --- |
+| `/start` | Show the welcome message |
+| `/configure` | Choose which sections each user follows |
+| `/status` | Show current preferences |
+| `/stats` | Show bot statistics |
+| `/whoami` | Show account details |
+| `/language` | Change the bot language |
+| `/help` | List available commands |
+| `/checknow` | Trigger an immediate check |
+
+## Development
+
+Common local commands:
 
 ```bash
-./rpa
+make fmt
+make lint
+make test
+make ci
+make build
 ```
 
-The application will automatically load the persisted tokens and renew them via WebAuthn when needed.
+After the daemon is running, use `/checknow` in Telegram for an immediate manual check.
 
-### Coolify Deployment
+This repository builds four binaries from `cmd/`:
 
-When deploying to Coolify:
+- `rpa`
+- `save-tokens`
+- `token-refresh`
+- `setup-auth`
 
-1. **Set Environment Variables** in Coolify dashboard:
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_WHITELIST`
-   - `TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json`
-   - `WEBAUTHN_CREDENTIALS_PATH=/home/rpa/.hourglass-rpa/webauthn-credentials.json`
-   - `AUTO_REFRESH_TOKENS=true`
+## Project layout
 
-2. **Mount Volume**:
-   - Host: `/home/user/.hourglass-rpa`
-   - Container: `/home/rpa/.hourglass-rpa`
-
-3. **Copy authentication files to server** before deploying:
-   ```bash
-   scp ~/.hourglass-rpa/auth-tokens.json user@coolify-server:/home/user/.hourglass-rpa/
-   scp ~/.hourglass-rpa/webauthn-credentials.json user@coolify-server:/home/user/.hourglass-rpa/
-   ```
-
-4. Deploy normally through Coolify dashboard
-
-### Security Notes
-
-- Tokens are stored with `0600` permissions (owner-only)
-- Each environment needs its own token and credential files
-- Back up both files - losing them requires re-authentication
-- Tokens are renewed automatically before expiry (1-hour threshold)
-
-## 🎮 Usage
-
-### Single Run Mode
-
-To run once immediately:
-
-```bash
-./rpa -once
+```text
+cmd/                    entrypoints for the daemon and auth utilities
+internal/api/           Hourglass API client and analysis logic
+internal/auth/webauthn/ browser-assisted auth and token renewal
+internal/bot/           Telegram bot runner
+internal/notifier/      Telegram notification handlers
+internal/preferences/   per-user preference storage
+internal/scheduler/     periodic execution and notification dispatch
+internal/storage/       JSON and CSV output writers
 ```
 
-### Scheduled Mode (Production)
+## Additional project docs
 
-To start the scheduler (9 AM and 5 PM):
+- `AGENTS.md` for a high-level maintainer map
+- `internal/api/AGENTS.md` for API client details
+- `internal/auth/webauthn/AGENTS.md` for auth and token renewal internals
+- `internal/notifier/AGENTS.md` for Telegram notifier details
 
-```bash
-./rpa
-```
+## License
 
-### Docker
-
-```bash
-# Build and run
-docker build -t hourglass-rejections-rpa .
-docker run --env-file .env hourglass-rejections-rpa -once
-```
-
-## 🤖 Telegram Bot Commands
-
-After sending a message to your bot, you can use these commands:
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Welcome message and instructions |
-| `/configure` | Configure which sections to receive notifications for |
-| `/status` | Show your current preferences |
-| `/help` | List all available commands |
-| `/checknow` | Trigger immediate check |
-| `/language` | Change bot language (English/Portuguese) |
-
-### User Preferences
-
-Users can customize which sections they receive notifications for:
-
-1. Send `/configure` to the bot
-2. Click on sections to toggle them on/off (✅/❌)
-3. Click "Save" to save your preferences
-4. You'll only receive notifications for selected sections
-
-Available sections:
-- Partes Mecânicas (Mechanical Parts)
-- Campo (Field Ministry)
-- Testemunho Público (Public Witnessing)
-- Reunião Meio de Semana (Midweek Meeting)
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Detailed coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
-## 🌐 Internationalization (i18n)
-
-This project supports multi-language functionality with a comprehensive 143-key i18n system supporting `pt-BR` (Portuguese-Brazil) and `en-US` (English-US).
-
-### Changing Language
-
-Users can switch the bot language by sending the `/language` command:
-
-```
-/language
-```
-
-The bot will present a language selection menu allowing you to choose between English and Portuguese. All subsequent bot messages and notifications will be displayed in your selected language.
-
-## 📊 Project Structure
-
-```
-.
-├── cmd/rpa/              # Entry point
-├── internal/
-│   ├── api/              # Hourglass API client
-│   ├── config/           # Configuration
-│   ├── domain/           # Models and interfaces
-│   ├── notifier/         # Telegram notifications
-│   ├── preferences/      # User preferences storage
-│   ├── scheduler/        # Cron scheduling
-│   ├── storage/          # JSON/CSV persistence
-│   ├── logger/           # Structured logging
-│   ├── sentry/           # Error tracking
-│   └── metrics/          # Grafana metrics
-├── .github/workflows/    # CI/CD
-├── Dockerfile            # Container (34.8MB)
-├── docker-compose.yml    # Orchestration
-├── go.mod               # Dependencies
-└── README.md            # Documentation
-```
-
-## 📝 Output Format
-
-### JSON
-
-```json
-[
-  {
-    "section": "Mechanical Parts",
-    "who": "John Smith",
-    "what": "Audio/Video & Indicators",
-    "when": "09/03/2026",
-    "timestamp": "2026-03-01T19:30:00Z"
-  }
-]
-```
-
-### CSV
-
-```csv
-section,who,what,when,timestamp
-Mechanical Parts,John Smith,Audio/Video & Indicators,09/03/2026,2026-03-01T19:30:00Z
-```
-
-### Telegram Notification
-
-```
-❌ Rejections Detected in Hourglass
-
-1 assignment(s) rejected:
-
-Rejection #1:
-👤 Who: John Smith
-📋 Section: Mechanical Parts
-📝 Assignment: Audio/Video & Indicators
-📅 Date: 09/03/2026
-```
-
-## 🔒 Security
-
-- ✅ Tokens in environment variables (never committed)
-- ✅ `.env` file in `.gitignore`
-- ✅ Non-root container execution
-- ✅ Whitelist for access control
-- ✅ No credential storage in code
-
-## 🐳 Deploy with Coolify
-
-This project is compatible with [Coolify](https://coolify.io):
-
-1. Connect your Git repository
-2. Select "Docker Compose" type
-3. Configure environment variables in the panel
-4. Automatic deployment!
-
-Coolify will automatically detect the `docker-compose.yml` and build.
-
-## 🛠️ Technologies
-
-- **Go 1.26** - Main language
-- **go-telegram/bot** - Telegram integration
-- **robfig/cron** - Scheduling
-- **charmbracelet/log** - Logging
-- **Docker** - Containerization
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
