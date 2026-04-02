@@ -1,3 +1,4 @@
+// Package main provides a command-line tool for refreshing authentication tokens.
 package main
 
 import (
@@ -103,7 +104,7 @@ func (tr *tokenRefresher) Run() error {
 	} else {
 		fmt.Println("✅ Tokens renovados com sucesso!")
 	}
-	fmt.Printf("📅 Validade atual: %s\n", refreshedTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
+	fmt.Printf("📅 Validated atual: %s\n", refreshedTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
 
 	return nil
 }

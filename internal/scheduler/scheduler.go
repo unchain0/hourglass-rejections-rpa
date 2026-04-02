@@ -1,3 +1,4 @@
+// Package scheduler provides job scheduling and execution functionality.
 package scheduler
 
 import (
@@ -13,14 +14,17 @@ import (
 	"hourglass-rejections-rpa/internal/sentry"
 )
 
+// Analyzer defines the interface for analyzing sections.
 type Analyzer interface {
 	AnalyzeSection(section string) (*domain.JobResult, error)
 }
 
+// Storage defines the interface for storing rejections.
 type Storage interface {
 	Save(ctx context.Context, rejections []domain.Rejection) error
 }
 
+// Scheduler manages periodic analysis and notification jobs.
 type Scheduler struct {
 	cfg          *config.Config
 	sentryClient *sentry.Client
@@ -32,10 +36,12 @@ type Scheduler struct {
 	runAnalysisFn func(ctx context.Context) error
 }
 
+// SetNotifier sets the notifier for sending notifications.
 func (s *Scheduler) SetNotifier(n domain.Notifier) {
 	s.notifier = n
 }
 
+// New creates a new Scheduler instance.
 func New(cfg *config.Config, sentryClient *sentry.Client, analyzer Analyzer, store Storage) *Scheduler {
 	return &Scheduler{
 		cfg:          cfg,
@@ -46,6 +52,7 @@ func New(cfg *config.Config, sentryClient *sentry.Client, analyzer Analyzer, sto
 	}
 }
 
+// Run starts the scheduler with the configured intervals.
 func (s *Scheduler) Run(ctx context.Context) error {
 	logger := slog.Default()
 	logger.Info("starting smart scheduler", "business_hours", "30min", "night_hours", "2h")

@@ -1,3 +1,4 @@
+// Package main provides a command-line tool for saving authentication tokens.
 package main
 
 import (

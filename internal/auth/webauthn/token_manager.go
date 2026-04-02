@@ -330,7 +330,7 @@ func (tm *TokenManager) SaveTokens(tokens *AuthTokens) error {
 
 	slog.Debug("renaming temp file to final path", "from", tempPath, "to", tm.tokensPath)
 	if err := osRenameTokenManager(tempPath, tm.tokensPath); err != nil {
-		osRemoveTokenManager(tempPath)
+		_ = osRemoveTokenManager(tempPath)
 		return fmt.Errorf("failed to rename tokens file: %w", err)
 	}
 

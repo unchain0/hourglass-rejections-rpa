@@ -103,7 +103,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to initialize preference store: %w", err)
 		}
 		if closer, ok := prefStore.(interface{ Close() error }); ok {
-			defer closer.Close()
+			defer func() { _ = closer.Close() }()
 		}
 	}
 

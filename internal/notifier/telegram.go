@@ -393,7 +393,7 @@ func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update 
 
 	pref, err := t.prefManager.GetOrCreate(chatID, username)
 	if err != nil {
-		b.SendMessage(ctx, &bot.SendMessageParams{
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
 			Text:      i18n.Localize(lang, "configure_error", nil),
 			ParseMode: models.ParseModeHTML,
@@ -401,7 +401,7 @@ func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update 
 		return
 	}
 
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        i18n.Localize(lang, "choose_sections", nil),
 		ParseMode:   models.ParseModeHTML,
@@ -438,7 +438,7 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 
 	pref, err := t.prefManager.GetOrCreate(chatID, username)
 	if err != nil {
-		b.SendMessage(ctx, &bot.SendMessageParams{
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
 			Text:      i18n.Localize(lang, "configure_error", nil),
 			ParseMode: models.ParseModeHTML,
@@ -469,7 +469,7 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 		"NotificationStatus": notificationStatus,
 	})
 
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      msg,
 		ParseMode: models.ParseModeHTML,
@@ -490,7 +490,7 @@ func (t *TelegramNotifier) handleHelp(ctx context.Context, b *bot.Bot, update *m
 	lang := t.getUserLanguage(chatID)
 	text := i18n.Localize(lang, "help_commands", nil)
 
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      text,
 		ParseMode: models.ParseModeHTML,
@@ -668,7 +668,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 	}
 
 	if !t.IsAuthorized(chatID) {
-		b.SendMessage(ctx, &bot.SendMessageParams{
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
 			Text:      i18n.Localize(lang, "unauthorized", nil),
 			ParseMode: models.ParseModeHTML,
@@ -676,7 +676,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 		return
 	}
 
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      i18n.Localize(lang, "check_now_requested", nil),
 		ParseMode: models.ParseModeHTML,
@@ -687,7 +687,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 	t.mu.Unlock()
 
 	if callback == nil {
-		b.SendMessage(ctx, &bot.SendMessageParams{
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
 			Text:      i18n.Localize(lang, "check_now_unavailable", nil),
 			ParseMode: models.ParseModeHTML,
@@ -697,7 +697,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 
 	go func() {
 		if err := callback(ctx, chatID); err != nil {
-			b.SendMessage(ctx, &bot.SendMessageParams{
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:    chatID,
 				Text:      i18n.Localize(lang, "verification_error", map[string]interface{}{"Error": html.EscapeString(err.Error())}),
 				ParseMode: models.ParseModeHTML,
@@ -765,7 +765,7 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 
 	// Update the inline keyboard
 	if update.CallbackQuery.Message.Message != nil {
-		b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
+		_, _ = b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
 			ChatID:      chatID,
 			MessageID:   update.CallbackQuery.Message.Message.ID,
 			ReplyMarkup: t.buildConfigKeyboard(pref, lang),
@@ -860,7 +860,7 @@ func (t *TelegramNotifier) handleCancel(ctx context.Context, b *bot.Bot, update 
 
 	// Replace the keyboard message with cancellation
 	if update.CallbackQuery.Message.Message != nil {
-		b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    chatID,
 			MessageID: update.CallbackQuery.Message.Message.ID,
 			Text:      i18n.Localize(lang, "configuration_cancelled", nil),

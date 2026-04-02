@@ -1,3 +1,4 @@
+// Package logger provides slog logger construction helpers.
 package logger
 
 import (
@@ -37,7 +38,7 @@ func New(cfg Config) *slog.Logger {
 	default:
 		dir := filepath.Dir(cfg.Output)
 		if dir != "" && dir != "." {
-			os.MkdirAll(dir, 0755)
+			_ = os.MkdirAll(dir, 0750)
 		}
 		output = &lumberjack.Logger{
 			Filename:   cfg.Output,

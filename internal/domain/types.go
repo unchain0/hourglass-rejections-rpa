@@ -39,5 +39,5 @@ type Cookie struct {
 	Path     string    `json:"path"`
 	Expires  time.Time `json:"expires"`
 	Secure   bool      `json:"secure"`
-	HttpOnly bool      `json:"http_only"`
+	HTTPOnly bool      `json:"http_only"`
 }

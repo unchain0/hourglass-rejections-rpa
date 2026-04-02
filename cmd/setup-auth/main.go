@@ -23,6 +23,7 @@ const (
 	defaultTokensFile = "auth-tokens.json"
 )
 
+// FileSystem abstracts filesystem operations used by setup.
 type FileSystem interface {
 	UserHomeDir() (string, error)
 	MkdirAll(path string, perm os.FileMode) error
@@ -30,6 +31,7 @@ type FileSystem interface {
 	WriteFile(path string, data []byte, perm os.FileMode) error
 }
 
+// BrowserAuthFactory creates browser-based authenticators.
 type BrowserAuthFactory interface {
 	NewBrowserAuth(baseURL string) browserAuth
 }
@@ -44,11 +46,13 @@ type credentialRegistrar interface {
 	Register(userName string) (*webauthn.Credential, error)
 }
 
+// UserInput abstracts interactive console input.
 type UserInput interface {
 	Confirm(prompt string) (bool, error)
 	ReadLine() (string, error)
 }
 
+// SCPClient copies local files to a remote host over SCP.
 type SCPClient interface {
 	CopyFile(localPath, remoteHost, remotePath string) error
 }

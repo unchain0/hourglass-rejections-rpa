@@ -51,8 +51,8 @@ linters-settings:
       - closer.Close
 issues:
   exclude-use-default: false
-  exclude-rules:
-    - path: _test\.go
+  rules:
+    - path: '(.+)_test\.go'
       linters:
         - dupl
         - errcheck
@@ -61,7 +61,8 @@ issues:
         - goconst
         - revive
         - unparam
-    - path: internal/auth/webauthn/
+        - misspell
+    - path: 'internal/auth/webauthn/'
       linters:
         - errcheck
         - gosec
@@ -70,56 +71,56 @@ issues:
         - dupl
         - revive
         - unparam
-    - path: internal/testutil/
+    - path: 'internal/testutil/'
       linters:
         - revive
-    - path: internal/cache/
+    - path: 'internal/cache/'
       linters:
         - revive
-    - path: internal/config/
+    - path: 'internal/config/'
       linters:
         - revive
-    - path: internal/logger/
+    - path: 'internal/logger/'
       linters:
         - revive
         - goconst
         - errcheck
         - gosec
-    - path: internal/sentry/
+    - path: 'internal/sentry/'
       linters:
         - revive
-    - path: internal/scheduler/
+    - path: 'internal/scheduler/'
       linters:
         - revive
         - gocognit
-    - path: internal/storage/
+    - path: 'internal/storage/'
       linters:
         - revive
         - errcheck
-    - path: internal/notifier/
-      linters:
-        - errcheck
-        - gocognit
-        - revive
-    - path: internal/bot/
+    - path: 'internal/notifier/'
       linters:
         - errcheck
         - gocognit
         - revive
-    - path: internal/api/
+    - path: 'internal/bot/'
+      linters:
+        - errcheck
+        - gocognit
+        - revive
+    - path: 'internal/api/'
       linters:
         - dupl
         - revive
-    - path: internal/domain/
+    - path: 'internal/domain/'
       linters:
         - revive
-    - path: internal/metrics/
+    - path: 'internal/metrics/'
       linters:
         - revive
-    - path: internal/preferences/
+    - path: 'internal/preferences/'
       linters:
         - revive
-    - path: cmd/
+    - path: 'cmd/'
       linters:
         - revive
         - gosec

@@ -1,3 +1,4 @@
+// Package api provides models for the Hourglass API.
 package api
 
 import "time"
@@ -70,11 +71,16 @@ type Participant struct {
 type AssignmentStatus string
 
 const (
-	StatusAceito     AssignmentStatus = "Aceito"
-	StatusEsperando  AssignmentStatus = "Esperando"
-	StatusAusencia   AssignmentStatus = "Ausencia"
+	// StatusAceito represents an accepted assignment.
+	StatusAceito AssignmentStatus = "Aceito"
+	// StatusEsperando represents a waiting assignment.
+	StatusEsperando AssignmentStatus = "Esperando"
+	// StatusAusencia represents an absence.
+	StatusAusencia AssignmentStatus = "Ausencia"
+	// StatusNaoEnviado represents a not sent assignment.
 	StatusNaoEnviado AssignmentStatus = "NaoEnviado"
-	StatusRecusado   AssignmentStatus = "Recusado"
+	// StatusRecusado represents a rejected assignment.
+	StatusRecusado AssignmentStatus = "Recusado"
 )
 
 // Notification represents a notification/assignment status from Hourglass.
@@ -94,7 +100,10 @@ type Notification struct {
 type NotificationStatus string
 
 const (
-	StatusPending  NotificationStatus = "pending"
+	// StatusPending represents a pending notification.
+	StatusPending NotificationStatus = "pending"
+	// StatusComplete represents a completed notification.
 	StatusComplete NotificationStatus = "complete"
+	// StatusDeclined represents a declined notification.
 	StatusDeclined NotificationStatus = "declined"
 )

@@ -23,11 +23,13 @@ var (
 	}
 )
 
+// FileStorage persists rejection outputs and authentication cookies on disk.
 type FileStorage struct {
 	outputDir  string
 	cookieFile string
 }
 
+// New creates a FileStorage using paths from Config.
 func New(cfg *config.Config) *FileStorage {
 	return &FileStorage{
 		outputDir:  cfg.OutputDir,
@@ -35,6 +37,7 @@ func New(cfg *config.Config) *FileStorage {
 	}
 }
 
+// Save persists rejections to JSON and CSV files.
 func (fs *FileStorage) Save(ctx context.Context, rejections []domain.Rejection) error {
 	if err := os.MkdirAll(fs.outputDir, 0750); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
@@ -79,10 +82,10 @@ func (fs *FileStorage) saveCSV(filename string, rejections []domain.Rejection) e
 	if err != nil {
 		return fmt.Errorf("failed to create temp CSV file: %w", err)
 	}
-	defer os.Remove(tmp)
+	defer func() { _ = os.Remove(tmp) }()
 
 	if err := fs.writeCSV(file, rejections); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 
@@ -122,6 +125,7 @@ func (fs *FileStorage) writeCSV(w io.Writer, rejections []domain.Rejection) erro
 	return nil
 }
 
+// LoadCookies reads cookies from the configured cookie file.
 func (fs *FileStorage) LoadCookies() ([]domain.Cookie, error) {
 	data, err := os.ReadFile(fs.cookieFile)
 	if err != nil {
@@ -139,6 +143,7 @@ func (fs *FileStorage) LoadCookies() ([]domain.Cookie, error) {
 	return cookies, nil
 }
 
+// SaveCookies writes cookies to the configured cookie file.
 func (fs *FileStorage) SaveCookies(cookies []domain.Cookie) error {
 	data, err := jsonMarshalIndent(cookies, "", "  ")
 	if err != nil {

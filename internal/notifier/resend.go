@@ -123,7 +123,7 @@ func (r *ResendNotifier) sendEmail(subject, htmlBody string) error {
 	if err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("resend API returned status %d", resp.StatusCode)

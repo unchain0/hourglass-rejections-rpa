@@ -41,6 +41,7 @@ func (a *APIAnalyzer) SetDaysToLookAhead(days int) {
 	a.daysToLookAhead = days
 }
 
+// SetLanguage sets the language for the analyzer.
 func (a *APIAnalyzer) SetLanguage(lang string) {
 	a.language = lang
 }

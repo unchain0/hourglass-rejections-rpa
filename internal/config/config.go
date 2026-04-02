@@ -1,3 +1,4 @@
+// Package config provides environment-based application configuration.
 package config
 
 import (
@@ -6,6 +7,7 @@ import (
 	"github.com/caarlos0/env/v11"
 )
 
+// Config holds runtime configuration loaded from environment variables.
 type Config struct {
 	HourglassURL    string        `env:"HOURGLASS_URL" envDefault:"https://app.hourglass-app.com"`
 	CookieFile      string        `env:"COOKIE_FILE" envDefault:"cookies.json"`
@@ -35,6 +37,7 @@ type Config struct {
 	TelegramWhitelist string `env:"TELEGRAM_WHITELIST"`
 }
 
+// Load parses environment variables and returns a Config instance.
 func Load() (*Config, error) {
 	cfg := &Config{}
 	if err := env.Parse(cfg); err != nil {

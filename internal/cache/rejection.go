@@ -1,3 +1,4 @@
+// Package cache provides in-memory caching utilities for rejection checks.
 package cache
 
 import (
@@ -8,16 +9,19 @@ import (
 	"hourglass-rejections-rpa/internal/domain"
 )
 
+// RejectionCache stores the latest rejection snapshot and comparison time.
 type RejectionCache struct {
 	mu         sync.RWMutex
 	lastResult []domain.Rejection
 	lastCheck  time.Time
 }
 
+// New creates a new RejectionCache.
 func New() *RejectionCache {
 	return &RejectionCache{}
 }
 
+// HasChanges reports whether the provided rejections differ from the cached result.
 func (c *RejectionCache) HasChanges(newRejections []domain.Rejection) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -55,6 +59,7 @@ func (c *RejectionCache) HasChanges(newRejections []domain.Rejection) bool {
 	return false
 }
 
+// LastCheck returns the timestamp of the most recent cache comparison.
 func (c *RejectionCache) LastCheck() time.Time {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

@@ -71,7 +71,7 @@ func TestCookie(t *testing.T) {
 		Path:     "/",
 		Expires:  time.Now().Add(time.Hour),
 		Secure:   true,
-		HttpOnly: true,
+		HTTPOnly: true,
 	}
 
 	assert.Equal(t, "test_cookie", c.Name)
@@ -79,5 +79,5 @@ func TestCookie(t *testing.T) {
 	assert.Equal(t, "example.com", c.Domain)
 	assert.Equal(t, "/", c.Path)
 	assert.True(t, c.Secure)
-	assert.True(t, c.HttpOnly)
+	assert.True(t, c.HTTPOnly)
 }

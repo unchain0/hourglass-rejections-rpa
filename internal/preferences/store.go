@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// PreferenceStore defines the interface for user preference storage.
 type PreferenceStore interface {
 	Get(chatID int64) (*UserPreference, error)
 	Save(pref *UserPreference) error
@@ -44,6 +45,7 @@ type AuditLog struct {
 	Purpose   string    `gorm:"size:100"`
 }
 
+// JobExecution tracks the execution history of scheduled jobs.
 type JobExecution struct {
 	ID         uint      `gorm:"primaryKey"`
 	JobName    string    `gorm:"index;not null"`
@@ -63,6 +65,7 @@ type DiscoveredChat struct {
 	MessageCount int       `gorm:"default:1"`
 }
 
+// Sections returns the user's preferred sections as a slice.
 func (u *UserPreference) Sections() []string {
 	var sections []string
 	if err := json.Unmarshal([]byte(u.SectionsJSON), &sections); err != nil {
@@ -71,11 +74,13 @@ func (u *UserPreference) Sections() []string {
 	return sections
 }
 
+// SetSections sets the user's preferred sections from a slice.
 func (u *UserPreference) SetSections(sections []string) {
 	data, _ := json.Marshal(sections)
 	u.SectionsJSON = string(data)
 }
 
+// Store provides persistent storage for user preferences.
 type Store struct {
 	db *gorm.DB
 }
@@ -134,6 +139,7 @@ func setSecurePermissions(dbPath string) error {
 	return os.Chmod(dbPath, 0600)
 }
 
+// Get retrieves a user's preferences by chat ID.
 func (s *Store) Get(chatID int64) (*UserPreference, error) {
 	var pref UserPreference
 	result := s.db.Where("chat_id = ?", chatID).First(&pref)
@@ -147,6 +153,7 @@ func (s *Store) Get(chatID int64) (*UserPreference, error) {
 	return &pref, result.Error
 }
 
+// Save persists a user's preferences to the database.
 func (s *Store) Save(pref *UserPreference) error {
 	// Set data retention period (GDPR: 90 days default)
 	if pref.DataRetention.IsZero() {
@@ -166,6 +173,7 @@ func (s *Store) Save(pref *UserPreference) error {
 	return nil
 }
 
+// Delete removes a user's preferences from the database.
 func (s *Store) Delete(chatID int64) error {
 	var pref UserPreference
 	if err := s.db.Where("chat_id = ?", chatID).First(&pref).Error; err != nil {
@@ -177,6 +185,7 @@ func (s *Store) Delete(chatID int64) error {
 	return s.db.Where("chat_id = ?", chatID).Delete(&UserPreference{}).Error
 }
 
+// List returns all user preferences.
 func (s *Store) List() ([]UserPreference, error) {
 	var prefs []UserPreference
 	result := s.db.Find(&prefs)
@@ -199,6 +208,7 @@ func (s *Store) logAccess(userID uint, action, purpose string) {
 	})
 }
 
+// RecordJobExecution logs a job execution result.
 func (s *Store) RecordJobExecution(jobName string, success bool, errorMsg string) error {
 	return s.db.Create(&JobExecution{
 		JobName:    jobName,
@@ -208,6 +218,7 @@ func (s *Store) RecordJobExecution(jobName string, success bool, errorMsg string
 	}).Error
 }
 
+// GetLastExecution returns the last execution time for a job.
 func (s *Store) GetLastExecution(jobName string) (*time.Time, error) {
 	var exec JobExecution
 	result := s.db.Where("job_name = ?", jobName).Order("executed_at DESC").First(&exec)
@@ -267,6 +278,7 @@ func (s *Store) ListDiscoveredChats() ([]DiscoveredChat, error) {
 	return chats, result.Error
 }
 
+// Close closes the database connection.
 func (s *Store) Close() error {
 	sqlDB, err := s.db.DB()
 	if err != nil {

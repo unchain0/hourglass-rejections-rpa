@@ -66,10 +66,12 @@ func normalizeAPIBaseURL(baseURL string) string {
 	return trimmed
 }
 
+// SetBaseURL sets the base URL for API requests.
 func (c *Client) SetBaseURL(baseURL string) {
 	c.baseURL = normalizeAPIBaseURL(baseURL)
 }
 
+// SetWebAuthnTokensPath sets the path for storing WebAuthn tokens.
 func (c *Client) SetWebAuthnTokensPath(tokensPath string) {
 	c.webAuthnTokensPath = tokensPath
 }
@@ -107,6 +109,7 @@ func NewClientWithWebAuthn(credentialsPath string, sentryCapture func(error, map
 	return client, nil
 }
 
+// EnableWebAuthn enables WebAuthn authentication with the given credentials path.
 func (c *Client) EnableWebAuthn(credentialsPath string, sentryCapture func(error, map[string]interface{})) error {
 	tokenManager, err := c.newTokenManager(credentialsPath, sentryCapture)
 	if err != nil {
@@ -140,6 +143,7 @@ func (c *Client) newTokenManager(credentialsPath string, sentryCapture func(erro
 	return webauthn.NewTokenManager(credentialsPath, c.baseURL, opts...)
 }
 
+// StartTokenManager starts the token manager for automatic token renewal.
 func (c *Client) StartTokenManager(ctx context.Context) error {
 	if c.tokenManager == nil {
 		return nil
@@ -147,6 +151,7 @@ func (c *Client) StartTokenManager(ctx context.Context) error {
 	return c.tokenManager.Start(ctx)
 }
 
+// StopTokenManager stops the token manager.
 func (c *Client) StopTokenManager() {
 	if c.tokenManager != nil {
 		c.tokenManager.Stop()
@@ -173,6 +178,7 @@ func (c *Client) updateTokens(tokens *webauthn.AuthTokens) {
 	c.xsrfToken = tokens.XSRFToken
 }
 
+// UpdateTokensFromManager updates the client's tokens from the token manager.
 func (c *Client) UpdateTokensFromManager(tokens *webauthn.AuthTokens) {
 	c.updateTokens(tokens)
 }
@@ -208,7 +214,7 @@ func (c *Client) GetUsers() ([]User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -244,7 +250,7 @@ func (c *Client) GetAVAttendants(start, end string) ([]AVAttendant, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -262,51 +268,34 @@ func (c *Client) GetAVAttendants(start, end string) ([]AVAttendant, error) {
 // GetMeetings retrieves meeting schedules for a date range.
 // Endpoint: GET /api/v0.2/scheduling/mm/meeting/{start}_{end}?lgroup={lgroup}&no_subs=true
 func (c *Client) GetMeetings(start, end string, lgroup int) ([]Meeting, error) {
-	if err := c.ensureAuth(); err != nil {
+	url := fmt.Sprintf("%s/scheduling/mm/meeting/%s_%s?lgroup=%d&no_subs=true", c.baseURL, start, end, lgroup)
+	var meetings []Meeting
+	if err := c.getJSON(url, &meetings); err != nil {
 		return nil, err
 	}
-
-	url := fmt.Sprintf("%s/scheduling/mm/meeting/%s_%s?lgroup=%d&no_subs=true", c.baseURL, start, end, lgroup)
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	c.setHeaders(req)
-	c.setCookies(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
-	}
-
-	var meetings []Meeting
-	if err := json.NewDecoder(resp.Body).Decode(&meetings); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
 	return meetings, nil
 }
 
 // GetNotifications retrieves notifications for a date range and type.
 // Endpoint: GET /api/v0.2/scheduling/notifications/{start}_{end}/{type}
 func (c *Client) GetNotifications(start, end, notificationType string) ([]Notification, error) {
-	if err := c.ensureAuth(); err != nil {
+	url := fmt.Sprintf("%s/scheduling/notifications/%s_%s/%s", c.baseURL, start, end, notificationType)
+	var notifications []Notification
+	if err := c.getJSON(url, &notifications); err != nil {
 		return nil, err
 	}
+	return notifications, nil
+}
 
-	url := fmt.Sprintf("%s/scheduling/notifications/%s_%s/%s", c.baseURL, start, end, notificationType)
+// getJSON performs a GET request and decodes the JSON response into the target.
+func (c *Client) getJSON(url string, target interface{}) error {
+	if err := c.ensureAuth(); err != nil {
+		return err
+	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	c.setHeaders(req)
@@ -314,21 +303,20 @@ func (c *Client) GetNotifications(start, end, notificationType string) ([]Notifi
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
+		return fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
 	}
 
-	var notifications []Notification
-	if err := json.NewDecoder(resp.Body).Decode(&notifications); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return notifications, nil
+	return nil
 }
 
 // setHeaders sets the required headers for API requests.
