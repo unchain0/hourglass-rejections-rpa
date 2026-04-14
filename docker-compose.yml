@@ -11,6 +11,7 @@ services:
       - TZ=America/Sao_Paulo
       - CHROME_BIN=/usr/bin/chromium-browser
       - TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
+      - CHROME_PROFILE_DIR=/home/rpa/.hourglass-rpa/chrome-profile
       - AUTO_REFRESH_TOKENS=true
     volumes:
       - outputs:/app/outputs
@@ -48,6 +49,7 @@ services:
     environment:
       - TZ=America/Sao_Paulo
       - TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
+      - CHROME_PROFILE_DIR=/home/rpa/.hourglass-rpa/chrome-profile
       - REFRESH_INTERVAL=6h
     volumes:
       - tokens:/home/rpa/.hourglass-rpa

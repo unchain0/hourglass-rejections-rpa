@@ -1,5 +1,3 @@
-version: "2"
-
 run:
   timeout: 5m
 linters:
@@ -51,7 +49,7 @@ linters-settings:
       - closer.Close
 issues:
   exclude-use-default: false
-  rules:
+  exclude-rules:
     - path: '(.+)_test\.go'
       linters:
         - dupl
