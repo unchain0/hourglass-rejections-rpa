@@ -39,7 +39,7 @@ This repository is a good fit if you want a self-hosted monitor for Hourglass re
 
 Success means the app starts without errors and the bot is ready to accept `/start`.
 
-### Option 2: set up automatic token renewal
+### Option 2: set up automatic token renewal with Google bootstrap
 
 If this will run on a VPS or long-lived container, generate persisted auth files first:
 
@@ -47,7 +47,15 @@ If this will run on a VPS or long-lived container, generate persisted auth files
 make setup-auth
 ```
 
-That command creates `auth-tokens.json` and `webauthn-credentials.json` under `~/.hourglass-rpa/`. Point `TOKENS_PATH` and `WEBAUTHN_CREDENTIALS_PATH` at those files, then start the main daemon with `make run` or Docker Compose.
+That command opens a normal Chrome window so you can sign in with Google once, then it creates `auth-tokens.json` and `webauthn-credentials.json` under `~/.hourglass-rpa/`. After that first bootstrap, the daemon renews access automatically in headless mode by preferring the stored WebAuthn credential and retrying once if Hourglass invalidates the session early. `CHROME_PROFILE_DIR` remains an optional fallback when you want to reuse the persisted browser profile as well.
+
+For VPS use, copy at least these files to the server and keep them persistent across restarts:
+
+- `~/.hourglass-rpa/auth-tokens.json`
+- `~/.hourglass-rpa/webauthn-credentials.json`
+- optional fallback: `~/.hourglass-rpa/chrome-profile/`
+
+Then point `TOKENS_PATH`, `WEBAUTHN_CREDENTIALS_PATH`, and optionally `CHROME_PROFILE_DIR` at those files before starting the daemon.
 
 ## Requirements
 
@@ -55,7 +63,7 @@ That command creates `auth-tokens.json` and `webauthn-credentials.json` under `~
 - Telegram bot token from [@BotFather](https://t.me/BotFather)
 - Hourglass authentication, either:
   - `HOURGLASS_XSRF_TOKEN` + `HOURGLASS_HGLOGIN_COOKIE`, or
-  - persisted token files plus WebAuthn credentials
+  - persisted token files plus WebAuthn credentials from the Google bootstrap flow
 - Chromium/Chrome available when you use the auth setup tools
 
 ## Main workflows
@@ -99,8 +107,11 @@ HOURGLASS_XSRF_TOKEN=your_xsrf_token
 HOURGLASS_HGLOGIN_COOKIE=your_hglogin_cookie
 
 # or use persisted auth files instead of static tokens
+# make setup-auth performs first Google login in visible Chrome,
+# then headless renewals use stored WebAuthn credentials automatically.
 TOKENS_PATH=/home/user/.hourglass-rpa/auth-tokens.json
 WEBAUTHN_CREDENTIALS_PATH=/home/user/.hourglass-rpa/webauthn-credentials.json
+CHROME_PROFILE_DIR=/home/user/.hourglass-rpa/chrome-profile
 
 OUTPUT_DIR=./outputs
 SQLITE_DB_PATH=data/hourglass.db
@@ -111,6 +122,7 @@ TZ=America/Sao_Paulo
 Important notes:
 
 - `AUTO_REFRESH_TOKENS` defaults to `true`.
+- when Hourglass returns `401`, the client forces one fresh renewal before failing the run.
 - preferences use SQLite by default
 - results are written as both JSON and CSV
 - Sentry and Grafana settings are optional
