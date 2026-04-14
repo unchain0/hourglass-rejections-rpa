@@ -14,7 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"hourglass-rejections-rpa/internal/auth/webauthn"
+	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
+)
+
+var (
+	chromeStatFn           = os.Stat
+	prepareChromeProfileFn = webauthn.PrepareChromeProfile
+	execCommandFn          = exec.Command
 )
 
 const (
@@ -38,7 +44,9 @@ type BrowserAuthFactory interface {
 
 type browserAuth interface {
 	Authenticate() (*webauthn.AuthTokens, error)
+	ExtractTokensFromProfile() (*webauthn.AuthTokens, error)
 	WithHeadless(headless bool) browserAuth
+	WithProfileDir(profileDir string) browserAuth
 }
 
 type credentialRegistrar interface {
@@ -76,15 +84,58 @@ func (osFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error 
 }
 
 type browserAuthAdapter struct {
-	auth *webauthn.BrowserAuth
+	auth               *webauthn.BrowserAuth
+	authenticateFunc   func() (*webauthn.AuthTokens, error)
+	extractTokensFunc  func() (*webauthn.AuthTokens, error)
+	withHeadlessFunc   func(bool) *webauthn.BrowserAuth
+	withProfileDirFunc func(string) *webauthn.BrowserAuth
 }
 
 func (b *browserAuthAdapter) Authenticate() (*webauthn.AuthTokens, error) {
+	if b != nil && b.authenticateFunc != nil {
+		return b.authenticateFunc()
+	}
+	if b == nil || b.auth == nil {
+		return nil, errors.New("browser auth is not configured")
+	}
+
 	return b.auth.Authenticate()
 }
 
+func (b *browserAuthAdapter) ExtractTokensFromProfile() (*webauthn.AuthTokens, error) {
+	if b != nil && b.extractTokensFunc != nil {
+		return b.extractTokensFunc()
+	}
+	if b == nil || b.auth == nil {
+		return nil, errors.New("browser auth is not configured")
+	}
+
+	return b.auth.ExtractTokensFromProfile()
+}
+
 func (b *browserAuthAdapter) WithHeadless(headless bool) browserAuth {
+	if b != nil && b.withHeadlessFunc != nil {
+		b.auth = b.withHeadlessFunc(headless)
+		return b
+	}
+	if b == nil || b.auth == nil {
+		return b
+	}
+
 	b.auth = b.auth.WithHeadless(headless)
+	return b
+}
+
+func (b *browserAuthAdapter) WithProfileDir(profileDir string) browserAuth {
+	if b != nil && b.withProfileDirFunc != nil {
+		b.auth = b.withProfileDirFunc(profileDir)
+		return b
+	}
+	if b == nil || b.auth == nil {
+		return b
+	}
+
+	b.auth = b.auth.WithProfileDir(profileDir)
 	return b
 }
 
@@ -157,6 +208,8 @@ type setupRunner struct {
 	fs              FileSystem
 	browserAuthFact BrowserAuthFactory
 	authFactory     func(storagePath, baseURL string) (credentialRegistrar, error)
+	launchBrowser   func(profileDir, loginURL string) error
+	waitForConfirm  func() error
 	userInput       UserInput
 	scpClient       SCPClient
 	baseURL         string
@@ -218,6 +271,8 @@ func (o *optionsFileSystem) WriteFile(path string, data []byte, perm os.FileMode
 
 func main() {
 	runner := newSetupRunner()
+	runner.launchBrowser = launchChromeForManualLogin
+	runner.waitForConfirm = waitForBrowserConfirmation
 	if err := runner.run(); err != nil {
 		fmt.Fprintf(os.Stderr, "\n❌ Setup failed: %v\n", err)
 		runner.osExit(1)
@@ -247,14 +302,20 @@ func (r *setupRunner) run() error {
 	configDir := filepath.Join(homeDir, r.configDir)
 	tokensPath := filepath.Join(configDir, r.tokensFile)
 	credentialsPath := filepath.Join(configDir, "webauthn-credentials.json")
+	profileDir := r.chromeProfileDir(configDir)
 
 	fmt.Println("📍 Configuration Directory:", configDir)
 	fmt.Println("📄 Tokens File:        ", tokensPath)
 	fmt.Println("🔐 WebAuthn File:      ", credentialsPath)
+	fmt.Println("🌐 Chrome Profile:     ", profileDir)
 	fmt.Println()
 
 	if err := r.fs.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	if err := r.fs.MkdirAll(profileDir, 0700); err != nil {
+		return fmt.Errorf("failed to create chrome profile directory: %w", err)
 	}
 
 	existingTokens, err := r.checkExistingTokens(tokensPath)
@@ -284,11 +345,23 @@ func (r *setupRunner) run() error {
 	}
 
 	fmt.Println("🌐 Starting browser authentication...")
-	fmt.Println("📌 A Chrome window will open - please complete the login process.")
+	fmt.Println("📌 A normal Chrome window will open with the persistent profile - complete the login manually.")
 	fmt.Println()
 
-	authenticator := r.browserAuthFact.NewBrowserAuth(r.baseURL)
-	tokens, err := authenticator.Authenticate()
+	loginURL := strings.TrimSuffix(r.baseURL, "/") + "/v2/page/app"
+	if r.launchBrowser != nil {
+		if err := r.launchBrowser(profileDir, loginURL); err != nil {
+			return fmt.Errorf("failed to launch manual browser: %w", err)
+		}
+	}
+	if r.waitForConfirm != nil {
+		if err := r.waitForConfirm(); err != nil {
+			return fmt.Errorf("manual browser confirmation failed: %w", err)
+		}
+	}
+
+	authenticator := r.browserAuthFact.NewBrowserAuth(r.baseURL).WithHeadless(false).WithProfileDir(profileDir)
+	tokens, err := authenticator.ExtractTokensFromProfile()
 	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
@@ -305,7 +378,10 @@ func (r *setupRunner) run() error {
 	}
 
 	if err := r.registerWebAuthnCredential(credentialsPath, tokens); err != nil {
-		return fmt.Errorf("failed to register webauthn credential: %w", err)
+		fmt.Println("⚠️  WebAuthn registration skipped.")
+		fmt.Printf("   Reason: %v\n", err)
+		fmt.Println("   ✅ Persistent Chrome profile bootstrap is still valid for token refresh using CHROME_PROFILE_DIR.")
+		fmt.Println()
 	}
 
 	fmt.Println("💾 Tokens saved successfully!")
@@ -313,6 +389,64 @@ func (r *setupRunner) run() error {
 	fmt.Println()
 
 	return r.askVPSUploadWithCredentials(tokensPath, credentialsPath)
+}
+
+func (r *setupRunner) chromeProfileDir(configDir string) string {
+	if profileDir := os.Getenv("CHROME_PROFILE_DIR"); profileDir != "" {
+		return profileDir
+	}
+
+	return filepath.Join(configDir, "chrome-profile")
+}
+
+func launchChromeForManualLogin(profileDir, loginURL string) error {
+	chromePath := os.Getenv("CHROME_BIN")
+	if chromePath == "" {
+		chromePath = os.Getenv("CHROME_PATH")
+	}
+	if chromePath == "" {
+		for _, candidate := range []string{"/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser", "/usr/bin/chromium"} {
+			if _, err := chromeStatFn(candidate); err == nil {
+				chromePath = candidate
+				break
+			}
+		}
+	}
+	if chromePath == "" {
+		return fmt.Errorf("chrome/chromium not found: set CHROME_BIN environment variable or install Chrome")
+	}
+
+	if err := prepareChromeProfileFn(profileDir); err != nil {
+		return err
+	}
+
+	cmd := execCommandFn(chromePath,
+		fmt.Sprintf("--user-data-dir=%s", profileDir),
+		"--new-window",
+		"--no-first-run",
+		"--no-default-browser-check",
+		loginURL,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func waitForBrowserConfirmation() error {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("🔐 O Chrome normal foi aberto com o perfil persistente.")
+	fmt.Println("👉 Faça o login manualmente no Google/Hourglass, confirme que chegou no app e feche a janela do Chrome.")
+	fmt.Print("⏎ Depois disso, pressione Enter para extrair os tokens do perfil salvo... ")
+	_, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read confirmation input: %w", err)
+	}
+	return nil
 }
 
 func checkExistingTokens(path string) (*webauthn.AuthTokens, error) {

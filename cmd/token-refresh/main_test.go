@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"hourglass-rejections-rpa/internal/auth/webauthn"
+	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 )
 
 type mockTokenManager struct {
@@ -18,6 +18,7 @@ type mockTokenManager struct {
 	ensureErr     error
 	loadCalls     int
 	ensureCalls   int
+	primedTokens  *webauthn.AuthTokens
 }
 
 func (m *mockTokenManager) LoadTokens() (*webauthn.AuthTokens, error) {
@@ -28,6 +29,10 @@ func (m *mockTokenManager) LoadTokens() (*webauthn.AuthTokens, error) {
 func (m *mockTokenManager) EnsureValidTokens() (*webauthn.AuthTokens, error) {
 	m.ensureCalls++
 	return m.ensuredTokens, m.ensureErr
+}
+
+func (m *mockTokenManager) PrimeTokens(tokens *webauthn.AuthTokens) {
+	m.primedTokens = tokens
 }
 
 func TestNewTokenRefresher_Defaults(t *testing.T) {
@@ -82,6 +87,7 @@ func TestTokenRefresher_Run_RenewsTokens(t *testing.T) {
 	assert.Equal(t, defaultBaseURL, gotBaseURL)
 	assert.Equal(t, 1, manager.loadCalls)
 	assert.Equal(t, 1, manager.ensureCalls)
+	assert.Equal(t, currentTokens, manager.primedTokens)
 }
 
 func TestTokenRefresher_Run_AlreadyValid(t *testing.T) {
@@ -108,6 +114,7 @@ func TestTokenRefresher_Run_AlreadyValid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, manager.loadCalls)
 	assert.Equal(t, 1, manager.ensureCalls)
+	assert.Equal(t, tokens, manager.primedTokens)
 }
 
 func TestTokenRefresher_Run_ConfigDirError(t *testing.T) {
@@ -166,6 +173,31 @@ func TestTokenRefresher_Run_EnsureError(t *testing.T) {
 	err := tr.Run()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "falha na renovação real dos tokens")
+}
+
+func TestTokenRefresher_Run_NoPersistedTokens_WithChromeProfile(t *testing.T) {
+	manager := &mockTokenManager{
+		loadedTokens:  nil,
+		ensuredTokens: &webauthn.AuthTokens{HGLogin: "new", XSRFToken: "new", ExpiresAt: time.Now().Add(2 * time.Hour)},
+	}
+	tr := &tokenRefresher{
+		userHomeDir: func() (string, error) { return "/home/test", nil },
+		getenv: func(key string) string {
+			if key == "CHROME_PROFILE_DIR" {
+				return "/tmp/chrome-profile"
+			}
+			return ""
+		},
+		tokenManagerFactory: func(string, string, ...webauthn.TokenManagerOption) (tokenManager, error) {
+			return manager, nil
+		},
+		baseURL: defaultBaseURL,
+	}
+
+	err := tr.Run()
+	require.NoError(t, err)
+	assert.Nil(t, manager.primedTokens)
+	assert.Equal(t, 1, manager.ensureCalls)
 }
 
 func TestTokenRefresher_tokensPathPriority(t *testing.T) {

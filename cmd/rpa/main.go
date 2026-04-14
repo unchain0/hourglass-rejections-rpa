@@ -12,13 +12,13 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"hourglass-rejections-rpa/internal/api"
-	"hourglass-rejections-rpa/internal/bot"
-	"hourglass-rejections-rpa/internal/config"
-	"hourglass-rejections-rpa/internal/logger"
-	"hourglass-rejections-rpa/internal/scheduler"
-	"hourglass-rejections-rpa/internal/sentry"
-	"hourglass-rejections-rpa/internal/storage"
+	"hourglass-rejections-rpa/src/integrations/config"
+	"hourglass-rejections-rpa/src/integrations/filesystem/storage"
+	"hourglass-rejections-rpa/src/integrations/logger"
+	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/services/bot"
+	"hourglass-rejections-rpa/src/services/hourglass"
+	"hourglass-rejections-rpa/src/services/scheduler"
 )
 
 type runOptions struct {
@@ -67,7 +67,7 @@ func main() {
 }
 
 var sentryClientGlobal *sentry.Client
-var enableWebAuthnClient = func(apiClient *api.Client, credentialsPath string) error {
+var enableWebAuthnClient = func(apiClient *hourglass.Client, credentialsPath string) error {
 	return apiClient.EnableWebAuthn(credentialsPath, captureError)
 }
 
@@ -138,38 +138,9 @@ func setupSentry(cfg *config.Config) *sentry.Client {
 	return client
 }
 
-func setupDependencies(cfg *config.Config) (*api.Client, *api.APIAnalyzer, *storage.FileStorage) {
-	apiClient := api.NewClient()
-	apiClient.SetBaseURL(cfg.HourglassURL)
-
-	tokensPath := resolveTokensPath(cfg)
-	if tokensPath != "" {
-		apiClient.SetWebAuthnTokensPath(tokensPath)
-	}
-
-	if enableWebAuthnTokenManager(apiClient, cfg) {
-		analyzer := api.NewAPIAnalyzer(apiClient)
-		store := storage.New(cfg)
-		return apiClient, analyzer, store
-	}
-
-	if cfg.HourglassXSRFToken != "" && cfg.HourglassHGLogin != "" {
-		apiClient.SetXSRFToken(cfg.HourglassXSRFToken)
-		apiClient.SetHGLogin(cfg.HourglassHGLogin)
-		slog.Info("using tokens from environment variables")
-	} else {
-		if tokensPath != "" {
-			if err := apiClient.LoadTokensFromFile(tokensPath); err != nil {
-				slog.Warn("failed to load tokens from file", "path", tokensPath, "error", err)
-			} else {
-				slog.Info("loaded tokens from file", "path", tokensPath)
-			}
-		}
-	}
-
-	analyzer := api.NewAPIAnalyzer(apiClient)
-	store := storage.New(cfg)
-	return apiClient, analyzer, store
+func setupDependencies(cfg *config.Config) (*hourglass.Client, *hourglass.APIAnalyzer, *storage.FileStorage) {
+	bundle := buildDependencies(cfg)
+	return bundle.apiClient, bundle.analyzer, bundle.store
 }
 
 func resolveTokensPath(cfg *config.Config) string {
@@ -208,38 +179,62 @@ func resolveWebAuthnCredentialsPath(cfg *config.Config) string {
 	return ""
 }
 
-func enableWebAuthnTokenManager(apiClient *api.Client, cfg *config.Config) bool {
+func resolveChromeProfileDir(cfg *config.Config) string {
+	if cfg.ChromeProfileDir != "" {
+		return cfg.ChromeProfileDir
+	}
+
+	if profileDir := os.Getenv("CHROME_PROFILE_DIR"); profileDir != "" {
+		return profileDir
+	}
+
+	return ""
+}
+
+func enableWebAuthnTokenManager(apiClient *hourglass.Client, cfg *config.Config) bool {
 	if !cfg.AutoRefreshTokens {
 		slog.Info("automatic token renewal disabled")
 		return false
 	}
 
 	credentialsPath := resolveWebAuthnCredentialsPath(cfg)
-	if credentialsPath == "" {
+	profileDir := resolveChromeProfileDir(cfg)
+	if credentialsPath == "" && profileDir == "" {
 		return false
 	}
 
-	_, err := os.Stat(credentialsPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			slog.Info("webauthn credentials not found, using static token flow", "path", credentialsPath)
-			return false
+	credentialsAvailable := false
+	if credentialsPath != "" {
+		_, err := os.Stat(credentialsPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				if profileDir == "" {
+					slog.Info("authentication credentials not found, using static token flow", "path", credentialsPath)
+					return false
+				}
+				slog.Info("webauthn credentials not found, continuing with persistent browser profile auth", "path", credentialsPath, "profile_dir", profileDir)
+			} else {
+				if profileDir == "" {
+					slog.Warn("failed to inspect webauthn credentials path", "path", credentialsPath, "error", err)
+					return false
+				}
+				slog.Warn("failed to inspect webauthn credentials path, continuing with persistent browser profile auth", "path", credentialsPath, "profile_dir", profileDir, "error", err)
+			}
+		} else {
+			credentialsAvailable = true
 		}
-
-		slog.Warn("failed to inspect webauthn credentials path", "path", credentialsPath, "error", err)
-		return false
 	}
 
 	if err := enableWebAuthnClient(apiClient, credentialsPath); err != nil {
-		slog.Warn("failed to enable webauthn token manager", "path", credentialsPath, "error", err)
+		slog.Warn("failed to enable automatic authentication token manager", "path", credentialsPath, "profile_dir", profileDir, "error", err)
 		return false
 	}
 
-	slog.Info("enabled webauthn token manager", "credentials_path", credentialsPath)
+	slog.Info("enabled automatic authentication token manager", "credentials_path", credentialsPath, "credentials_available", credentialsAvailable, "browser_profile_dir", profileDir)
 	return true
 }
 
-var runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+var runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
 	return errors.New("runOnce not implemented")
 }
 
@@ -247,11 +242,11 @@ type runner interface {
 	Run(ctx context.Context) error
 }
 
-var newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) runner {
+var newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) runner {
 	return scheduler.New(cfg, sentryClient, analyzer, store)
 }
 
-func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
 	if err := runOnceFn(ctx, cfg, sentryClient, analyzer, store); err != nil {
 		sentryClient.CaptureError(err, map[string]interface{}{
 			"phase": "run_once_mode",
@@ -261,7 +256,7 @@ func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.C
 	return nil
 }
 
-func runFullMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+func runFullMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
 	slog.Info("starting full mode (scheduler + bot)")
 
 	go func() {

@@ -11,10 +11,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"hourglass-rejections-rpa/internal/api"
-	"hourglass-rejections-rpa/internal/config"
-	"hourglass-rejections-rpa/internal/sentry"
-	"hourglass-rejections-rpa/internal/storage"
+	"hourglass-rejections-rpa/src/integrations/config"
+	"hourglass-rejections-rpa/src/integrations/filesystem/storage"
+	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	hourglass "hourglass-rejections-rpa/src/services/hourglass"
 )
 
 func TestLoadEnvFiles_NoFile(t *testing.T) {
@@ -265,7 +265,7 @@ func TestRun_OnceModeSuccess(t *testing.T) {
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
 		return nil
 	}
 
@@ -320,7 +320,7 @@ func TestMain_Success(t *testing.T) {
 		osExit = origExit
 	}()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
 		return nil
 	}
 
@@ -422,6 +422,16 @@ func TestSetupDependencies_WithTokensPathEnv(t *testing.T) {
 	if store == nil {
 		t.Error("setupDependencies should return a store")
 	}
+}
+
+func TestNewConfiguredAPIClient_AppliesAuthPaths(t *testing.T) {
+	cfg := &config.Config{HourglassURL: "https://example.com"}
+	client := newConfiguredAPIClient(cfg, authPaths{
+		tokensPath:        "/tmp/auth-tokens.json",
+		browserProfileDir: "/tmp/chrome-profile",
+	})
+
+	assert.NotNil(t, client)
 }
 
 func TestSetupDependencies_NoHomeDir(t *testing.T) {
@@ -553,15 +563,34 @@ func TestResolveWebAuthnCredentialsPath(t *testing.T) {
 	})
 }
 
+func TestResolveChromeProfileDir(t *testing.T) {
+	t.Run("uses config path", func(t *testing.T) {
+		cfg := &config.Config{ChromeProfileDir: "/tmp/from-config-profile"}
+		assert.Equal(t, "/tmp/from-config-profile", resolveChromeProfileDir(cfg))
+	})
+
+	t.Run("uses env path", func(t *testing.T) {
+		t.Setenv("CHROME_PROFILE_DIR", "/tmp/from-env-profile")
+		cfg := &config.Config{}
+		assert.Equal(t, "/tmp/from-env-profile", resolveChromeProfileDir(cfg))
+	})
+
+	t.Run("returns empty when unset", func(t *testing.T) {
+		t.Setenv("CHROME_PROFILE_DIR", "")
+		cfg := &config.Config{}
+		assert.Empty(t, resolveChromeProfileDir(cfg))
+	})
+}
+
 func TestEnableWebAuthnTokenManager(t *testing.T) {
 	t.Run("disabled by config", func(t *testing.T) {
-		client := api.NewClient()
+		client := hourglass.NewClient()
 		cfg := &config.Config{AutoRefreshTokens: false}
 		assert.False(t, enableWebAuthnTokenManager(client, cfg))
 	})
 
 	t.Run("credentials missing", func(t *testing.T) {
-		client := api.NewClient()
+		client := hourglass.NewClient()
 		cfg := &config.Config{
 			AutoRefreshTokens:       true,
 			WebAuthnCredentialsPath: filepath.Join(t.TempDir(), "missing.json"),
@@ -576,13 +605,13 @@ func TestEnableWebAuthnTokenManager(t *testing.T) {
 		t.Setenv("HOMEPATH", "")
 		t.Setenv("WEBAUTHN_CREDENTIALS_PATH", "")
 
-		client := api.NewClient()
+		client := hourglass.NewClient()
 		cfg := &config.Config{AutoRefreshTokens: true}
 		assert.False(t, enableWebAuthnTokenManager(client, cfg))
 	})
 
 	t.Run("credentials path stat error", func(t *testing.T) {
-		client := api.NewClient()
+		client := hourglass.NewClient()
 		cfg := &config.Config{
 			AutoRefreshTokens:       true,
 			WebAuthnCredentialsPath: string([]byte{0}),
@@ -590,17 +619,48 @@ func TestEnableWebAuthnTokenManager(t *testing.T) {
 		assert.False(t, enableWebAuthnTokenManager(client, cfg))
 	})
 
+	t.Run("credentials stat error still enables with chrome profile fallback", func(t *testing.T) {
+		origEnable := enableWebAuthnClient
+		enableWebAuthnClient = func(apiClient *hourglass.Client, credentialsPath string) error {
+			return nil
+		}
+		defer func() { enableWebAuthnClient = origEnable }()
+
+		client := hourglass.NewClient()
+		cfg := &config.Config{
+			AutoRefreshTokens:       true,
+			WebAuthnCredentialsPath: string([]byte{0}),
+			ChromeProfileDir:        filepath.Join(t.TempDir(), "chrome-profile"),
+		}
+
+		assert.True(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
 	t.Run("enable success", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		credentialsPath := filepath.Join(tmpDir, "webauthn-credentials.json")
 		require.NoError(t, os.WriteFile(credentialsPath, []byte("{}"), 0o600))
 
-		client := api.NewClient()
+		client := hourglass.NewClient()
 		client.SetWebAuthnTokensPath(filepath.Join(tmpDir, "auth-tokens.json"))
 		cfg := &config.Config{
 			AutoRefreshTokens:       true,
 			WebAuthnCredentialsPath: credentialsPath,
 		}
+		assert.True(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
+	t.Run("enables with chrome profile even without credentials", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+
+		tmpDir := t.TempDir()
+		client := hourglass.NewClient()
+		client.SetWebAuthnTokensPath(filepath.Join(tmpDir, "auth-tokens.json"))
+		cfg := &config.Config{
+			AutoRefreshTokens: true,
+			ChromeProfileDir:  filepath.Join(tmpDir, "chrome-profile"),
+		}
+
 		assert.True(t, enableWebAuthnTokenManager(client, cfg))
 	})
 
@@ -610,12 +670,12 @@ func TestEnableWebAuthnTokenManager(t *testing.T) {
 		require.NoError(t, os.WriteFile(credentialsPath, []byte("{}"), 0o600))
 
 		origEnable := enableWebAuthnClient
-		enableWebAuthnClient = func(apiClient *api.Client, credentialsPath string) error {
+		enableWebAuthnClient = func(apiClient *hourglass.Client, credentialsPath string) error {
 			return fmt.Errorf("boom")
 		}
 		defer func() { enableWebAuthnClient = origEnable }()
 
-		client := api.NewClient()
+		client := hourglass.NewClient()
 		cfg := &config.Config{
 			AutoRefreshTokens:       true,
 			WebAuthnCredentialsPath: credentialsPath,
@@ -647,8 +707,8 @@ func TestRun_TokenManagerStartError(t *testing.T) {
 func TestRunOnceMode(t *testing.T) {
 	cfg := &config.Config{}
 	sentryClient := &sentry.Client{}
-	apiClient := api.NewClient()
-	analyzer := api.NewAPIAnalyzer(apiClient)
+	apiClient := hourglass.NewClient()
+	analyzer := hourglass.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -664,14 +724,14 @@ func TestRunOnceMode_Success(t *testing.T) {
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
 		return nil
 	}
 
 	cfg := &config.Config{}
 	sentryClient := &sentry.Client{}
-	apiClient := api.NewClient()
-	analyzer := api.NewAPIAnalyzer(apiClient)
+	apiClient := hourglass.NewClient()
+	analyzer := hourglass.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
 
 	err := runOnceMode(context.Background(), cfg, sentryClient, analyzer, store)
@@ -686,8 +746,8 @@ func TestRunFullMode_CancelledContext(t *testing.T) {
 
 	cfg := &config.Config{}
 	sentryClient := &sentry.Client{}
-	apiClient := api.NewClient()
-	analyzer := api.NewAPIAnalyzer(apiClient)
+	apiClient := hourglass.NewClient()
+	analyzer := hourglass.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
 
 	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
@@ -702,8 +762,8 @@ func TestRunFullMode_WithTimeout(t *testing.T) {
 
 	cfg := &config.Config{}
 	sentryClient := &sentry.Client{}
-	apiClient := api.NewClient()
-	analyzer := api.NewAPIAnalyzer(apiClient)
+	apiClient := hourglass.NewClient()
+	analyzer := hourglass.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
 
 	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
@@ -734,7 +794,7 @@ func TestRun_SentryEnabled(t *testing.T) {
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
 		return nil
 	}
 
@@ -765,14 +825,14 @@ func TestRunFullMode_SchedulerError(t *testing.T) {
 	origFn := newSchedulerFn
 	defer func() { newSchedulerFn = origFn }()
 
-	newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *api.APIAnalyzer, store *storage.FileStorage) runner {
+	newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) runner {
 		return &errorRunner{err: fmt.Errorf("mock scheduler failure")}
 	}
 
 	cfg := &config.Config{}
 	sentryClient := &sentry.Client{}
-	apiClient := api.NewClient()
-	analyzer := api.NewAPIAnalyzer(apiClient)
+	apiClient := hourglass.NewClient()
+	analyzer := hourglass.NewAPIAnalyzer(apiClient)
 	store := storage.New(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())

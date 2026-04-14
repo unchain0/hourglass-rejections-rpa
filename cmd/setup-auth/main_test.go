@@ -14,19 +14,29 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"hourglass-rejections-rpa/internal/auth/webauthn"
+	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 )
 
 type mockBrowserAuth struct {
-	tokens *webauthn.AuthTokens
-	err    error
+	tokens     *webauthn.AuthTokens
+	err        error
+	profileDir string
 }
 
 func (m *mockBrowserAuth) Authenticate() (*webauthn.AuthTokens, error) {
 	return m.tokens, m.err
 }
 
+func (m *mockBrowserAuth) ExtractTokensFromProfile() (*webauthn.AuthTokens, error) {
+	return m.tokens, m.err
+}
+
 func (m *mockBrowserAuth) WithHeadless(_ bool) browserAuth {
+	return m
+}
+
+func (m *mockBrowserAuth) WithProfileDir(profileDir string) browserAuth {
+	m.profileDir = profileDir
 	return m
 }
 
@@ -853,6 +863,59 @@ func TestBrowserAuthAdapter(t *testing.T) {
 		result := adapter.WithHeadless(true)
 		assert.Equal(t, adapter, result)
 	})
+
+	t.Run("WithHeadless returns self for nil auth", func(t *testing.T) {
+		adapter := &browserAuthAdapter{}
+		result := adapter.WithHeadless(true)
+		assert.Equal(t, adapter, result)
+	})
+
+	t.Run("nil adapter paths return safe defaults", func(t *testing.T) {
+		adapter := &browserAuthAdapter{}
+		result := adapter.WithProfileDir(t.TempDir())
+		assert.Equal(t, adapter, result)
+
+		tokens, err := adapter.ExtractTokensFromProfile()
+		assert.Nil(t, tokens)
+		assert.EqualError(t, err, "browser auth is not configured")
+	})
+
+	t.Run("delegates extract and profile helpers", func(t *testing.T) {
+		profileCalled := false
+		adapter := &browserAuthAdapter{
+			extractTokensFunc: func() (*webauthn.AuthTokens, error) {
+				return &webauthn.AuthTokens{HGLogin: "a", XSRFToken: "b", ExpiresAt: time.Now()}, nil
+			},
+			withProfileDirFunc: func(profileDir string) *webauthn.BrowserAuth {
+				profileCalled = true
+				assert.Equal(t, "/tmp/profile", profileDir)
+				return webauthn.NewBrowserAuth("http://localhost")
+			},
+		}
+
+		tokens, err := adapter.ExtractTokensFromProfile()
+		assert.NoError(t, err)
+		assert.NotNil(t, tokens)
+
+		result := adapter.WithProfileDir("/tmp/profile")
+		assert.Equal(t, adapter, result)
+		assert.True(t, profileCalled)
+	})
+
+	t.Run("delegates headless helper", func(t *testing.T) {
+		headlessCalled := false
+		adapter := &browserAuthAdapter{
+			withHeadlessFunc: func(headless bool) *webauthn.BrowserAuth {
+				headlessCalled = true
+				assert.True(t, headless)
+				return webauthn.NewBrowserAuth("http://localhost")
+			},
+		}
+
+		result := adapter.WithHeadless(true)
+		assert.Equal(t, adapter, result)
+		assert.True(t, headlessCalled)
+	})
 }
 
 func TestWebauthnBrowserAuthFactory(t *testing.T) {
@@ -1102,7 +1165,7 @@ func TestSetupRunnerRunErrorBranches(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to read transfer confirmation")
 	})
 
-	t.Run("register credential failure", func(t *testing.T) {
+	t.Run("register credential failure degrades gracefully after tokens saved", func(t *testing.T) {
 		runner := &setupRunner{
 			fs: &mockFileSystem{
 				userHomeDir:   "/home/test",
@@ -1125,9 +1188,73 @@ func TestSetupRunnerRunErrorBranches(t *testing.T) {
 			tokensFile: defaultTokensFile,
 		}
 
+		oldStdout := os.Stdout
+		pr, pw, _ := os.Pipe()
+		os.Stdout = pw
+		defer func() {
+			_ = pw.Close()
+			os.Stdout = oldStdout
+		}()
+
+		err := runner.run()
+		assert.NoError(t, err)
+
+		_ = pw.Close()
+		output, _ := io.ReadAll(pr)
+		assert.Contains(t, string(output), "Authentication successful")
+		assert.Contains(t, string(output), "Tokens saved successfully")
+		assert.Contains(t, string(output), "WebAuthn registration skipped")
+	})
+
+	t.Run("chrome profile directory creation failure", func(t *testing.T) {
+		runner := &setupRunner{
+			fs:              &sequenceMkdirFileSystem{userHomeDir: "/home/test", secondErr: errors.New("profile mkdir failed")},
+			userInput:       &mockUserInput{confirmResult: false},
+			browserAuthFact: functionBrowserAuthFactory{newFn: func(_ string) browserAuth { return &mockBrowserAuth{} }},
+			scpClient:       &mockSCPClient{},
+			baseURL:         defaultBaseURL,
+			configDir:       defaultConfigDir,
+			tokensFile:      defaultTokensFile,
+		}
+
 		err := runner.run()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to register webauthn credential")
+		assert.Contains(t, err.Error(), "failed to create chrome profile directory")
+	})
+
+	t.Run("manual browser launch failure", func(t *testing.T) {
+		runner := &setupRunner{
+			fs:              &mockFileSystem{userHomeDir: "/home/test", readFileError: os.ErrNotExist},
+			userInput:       &mockUserInput{confirmResult: false},
+			browserAuthFact: functionBrowserAuthFactory{newFn: func(_ string) browserAuth { return &mockBrowserAuth{} }},
+			launchBrowser:   func(profileDir, loginURL string) error { return errors.New("launch failed") },
+			scpClient:       &mockSCPClient{},
+			baseURL:         defaultBaseURL,
+			configDir:       defaultConfigDir,
+			tokensFile:      defaultTokensFile,
+		}
+
+		err := runner.run()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to launch manual browser")
+	})
+
+	t.Run("manual browser confirmation failure", func(t *testing.T) {
+		runner := &setupRunner{
+			fs:              &mockFileSystem{userHomeDir: "/home/test", readFileError: os.ErrNotExist},
+			userInput:       &mockUserInput{confirmResult: false},
+			browserAuthFact: functionBrowserAuthFactory{newFn: func(_ string) browserAuth { return &mockBrowserAuth{} }},
+			launchBrowser:   func(profileDir, loginURL string) error { return nil },
+			waitForConfirm:  func() error { return errors.New("confirm failed") },
+			scpClient:       &mockSCPClient{},
+			baseURL:         defaultBaseURL,
+			configDir:       defaultConfigDir,
+			tokensFile:      defaultTokensFile,
+		}
+
+		err := runner.run()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "manual browser confirmation failed")
 	})
 }
 
@@ -1295,19 +1422,193 @@ func TestSetupRunnerAskVPSUploadWithCredentialsErrors(t *testing.T) {
 }
 
 func TestBrowserAuthAdapterAuthenticate(t *testing.T) {
-	oldChromeBin := os.Getenv("CHROME_BIN")
-	t.Setenv("CHROME_BIN", "/path/that/does/not/exist/chrome")
-
-	adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
+	adapter := &browserAuthAdapter{authenticateFunc: func() (*webauthn.AuthTokens, error) {
+		return nil, errors.New("browser authentication failed: chrome missing")
+	}}
 	tokens, err := adapter.Authenticate()
-
-	if oldChromeBin != "" {
-		t.Setenv("CHROME_BIN", oldChromeBin)
-	}
 
 	assert.Nil(t, tokens)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "browser authentication failed")
+}
+
+func TestBrowserAuthAdapterAuthenticate_Success(t *testing.T) {
+	expected := &webauthn.AuthTokens{HGLogin: "a", XSRFToken: "b", ExpiresAt: time.Now()}
+	adapter := &browserAuthAdapter{authenticateFunc: func() (*webauthn.AuthTokens, error) {
+		return expected, nil
+	}}
+
+	tokens, err := adapter.Authenticate()
+	assert.NoError(t, err)
+	assert.Equal(t, expected, tokens)
+}
+
+func TestBrowserAuthAdapterAuthenticate_NilAdapter(t *testing.T) {
+	adapter := &browserAuthAdapter{}
+	tokens, err := adapter.Authenticate()
+	assert.Nil(t, tokens)
+	assert.EqualError(t, err, "browser auth is not configured")
+}
+
+func TestBrowserAuthAdapterAuthenticate_UsesWrappedAuth(t *testing.T) {
+	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CHROME_PATH", "")
+	adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
+	tokens, err := adapter.Authenticate()
+	assert.Nil(t, tokens)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "chrome/chromium not found")
+}
+
+func TestBrowserAuthAdapterExtractTokensFromProfile_UsesWrappedAuth(t *testing.T) {
+	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CHROME_PATH", "")
+	adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
+	tokens, err := adapter.ExtractTokensFromProfile()
+	assert.Nil(t, tokens)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "chrome/chromium not found")
+}
+
+func TestBrowserAuthAdapterWithProfileDir_UsesWrappedAuth(t *testing.T) {
+	adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
+	result := adapter.WithProfileDir("/tmp/profile")
+	assert.Equal(t, adapter, result)
+}
+
+func TestSetupRunner_chromeProfileDir_UsesEnvOverride(t *testing.T) {
+	t.Setenv("CHROME_PROFILE_DIR", "/tmp/custom-profile")
+	runner := newSetupRunner()
+	assert.Equal(t, "/tmp/custom-profile", runner.chromeProfileDir("/tmp/config"))
+}
+
+func TestLaunchChromeForManualLogin_ReturnsMissingChromeError(t *testing.T) {
+	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CHROME_PATH", "")
+
+	err := launchChromeForManualLogin(t.TempDir(), "https://example.com/login")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "chrome/chromium not found")
+}
+
+func TestLaunchChromeForManualLogin_ReturnsStartError(t *testing.T) {
+	missingChrome := filepath.Join(t.TempDir(), "missing-chrome")
+	t.Setenv("CHROME_BIN", missingChrome)
+	t.Setenv("CHROME_PATH", "")
+
+	err := launchChromeForManualLogin(t.TempDir(), "https://example.com/login")
+	assert.Error(t, err)
+}
+
+func TestLaunchChromeForManualLogin_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	chromePath := filepath.Join(tempDir, "chrome")
+	err := os.WriteFile(chromePath, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	require.NoError(t, err)
+	t.Setenv("CHROME_BIN", chromePath)
+	t.Setenv("CHROME_PATH", "")
+
+	profileDir := filepath.Join(tempDir, "profile")
+	err = launchChromeForManualLogin(profileDir, "https://example.com/login")
+	assert.NoError(t, err)
+	_, statErr := os.Stat(profileDir)
+	assert.NoError(t, statErr)
+}
+
+func TestLaunchChromeForManualLogin_UsesChromePathFallback(t *testing.T) {
+	tempDir := t.TempDir()
+	chromePath := filepath.Join(tempDir, "chrome-path")
+	err := os.WriteFile(chromePath, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	require.NoError(t, err)
+	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CHROME_PATH", chromePath)
+
+	profileDir := filepath.Join(tempDir, "profile-fallback")
+	err = launchChromeForManualLogin(profileDir, "https://example.com/login")
+	assert.NoError(t, err)
+}
+
+func TestLaunchChromeForManualLogin_UsesCandidateDiscovery(t *testing.T) {
+	originalStat := chromeStatFn
+	originalPrepare := prepareChromeProfileFn
+	originalExec := execCommandFn
+	defer func() {
+		chromeStatFn = originalStat
+		prepareChromeProfileFn = originalPrepare
+		execCommandFn = originalExec
+	}()
+
+	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CHROME_PATH", "")
+	chromeStatFn = func(path string) (os.FileInfo, error) {
+		if path == "/usr/bin/google-chrome" {
+			return os.Stat(os.TempDir())
+		}
+		return nil, os.ErrNotExist
+	}
+	prepareChromeProfileFn = func(profileDir string) error { return nil }
+	execCommandFn = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", fmt.Sprintf("[ \"%s\" = \"/usr/bin/google-chrome\" ]", name))
+	}
+
+	err := launchChromeForManualLogin(t.TempDir(), "https://example.com/login")
+	assert.NoError(t, err)
+}
+
+func TestLaunchChromeForManualLogin_PrepareProfileError(t *testing.T) {
+	originalStat := chromeStatFn
+	originalPrepare := prepareChromeProfileFn
+	defer func() {
+		chromeStatFn = originalStat
+		prepareChromeProfileFn = originalPrepare
+	}()
+
+	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CHROME_PATH", "")
+	chromeStatFn = func(path string) (os.FileInfo, error) {
+		if path == "/usr/bin/google-chrome" {
+			return os.Stat(os.TempDir())
+		}
+		return nil, os.ErrNotExist
+	}
+	prepareChromeProfileFn = func(profileDir string) error { return errors.New("prepare failed") }
+
+	err := launchChromeForManualLogin(t.TempDir(), "https://example.com/login")
+	assert.EqualError(t, err, "prepare failed")
+}
+
+func TestWaitForBrowserConfirmation_Success(t *testing.T) {
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdin = r
+	defer func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	}()
+
+	go func() {
+		_, _ = fmt.Fprintln(w)
+		_ = w.Close()
+	}()
+
+	assert.NoError(t, waitForBrowserConfirmation())
+}
+
+func TestWaitForBrowserConfirmation_ReadError(t *testing.T) {
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdin = r
+	defer func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	}()
+	_ = w.Close()
+
+	err = waitForBrowserConfirmation()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read confirmation input")
 }
 
 func TestMainSuccessAndFailurePaths(t *testing.T) {
@@ -1525,6 +1826,32 @@ type mockFileSystem struct {
 	readFileError  error
 	writeFileError error
 	writeFileFunc  func(path string, data []byte, perm os.FileMode) error
+}
+
+type sequenceMkdirFileSystem struct {
+	userHomeDir string
+	callCount   int
+	secondErr   error
+}
+
+func (m *sequenceMkdirFileSystem) UserHomeDir() (string, error) {
+	return m.userHomeDir, nil
+}
+
+func (m *sequenceMkdirFileSystem) MkdirAll(_ string, _ os.FileMode) error {
+	m.callCount++
+	if m.callCount == 2 {
+		return m.secondErr
+	}
+	return nil
+}
+
+func (m *sequenceMkdirFileSystem) ReadFile(_ string) ([]byte, error) {
+	return nil, os.ErrNotExist
+}
+
+func (m *sequenceMkdirFileSystem) WriteFile(_ string, _ []byte, _ os.FileMode) error {
+	return nil
 }
 
 func (m *mockFileSystem) UserHomeDir() (string, error) {

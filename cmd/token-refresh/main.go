@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"hourglass-rejections-rpa/internal/auth/webauthn"
+	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 )
 
 const (
@@ -18,6 +18,7 @@ const (
 type tokenManager interface {
 	LoadTokens() (*webauthn.AuthTokens, error)
 	EnsureValidTokens() (*webauthn.AuthTokens, error)
+	PrimeTokens(tokens *webauthn.AuthTokens)
 }
 
 type tokenManagerFactory func(string, string, ...webauthn.TokenManagerOption) (tokenManager, error)
@@ -52,7 +53,7 @@ func main() {
 }
 
 func (tr *tokenRefresher) Run() error {
-	fmt.Println("🔄 Token Refresh - Renovação real via WebAuthn")
+	fmt.Println("🔄 Token Refresh - Renovação real de autenticação")
 	fmt.Println()
 
 	configDir, err := tr.configDir()
@@ -62,10 +63,14 @@ func (tr *tokenRefresher) Run() error {
 
 	credentialsPath := tr.credentialsPath(configDir)
 	tokensPath := tr.tokensPath(configDir)
+	profileDir := tr.getenv("CHROME_PROFILE_DIR")
 	renewalThreshold := tr.renewalThreshold()
 
 	fmt.Printf("🔐 Credenciais WebAuthn: %s\n", credentialsPath)
 	fmt.Printf("💾 Tokens:               %s\n", tokensPath)
+	if profileDir != "" {
+		fmt.Printf("🌐 Perfil do Chrome:     %s\n", profileDir)
+	}
 	fmt.Printf("⏱️  Limite de renovação: %s\n", renewalThreshold)
 
 	tm, err := tr.tokenManagerFactory(
@@ -87,14 +92,15 @@ func (tr *tokenRefresher) Run() error {
 		fmt.Println("📭 Nenhum token persistido encontrado.")
 	} else {
 		fmt.Printf("📅 Tokens atuais válidos até: %s\n", currentTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
+		tm.PrimeTokens(currentTokens)
 	}
 
 	refreshedTokens, err := tm.EnsureValidTokens()
 	if err != nil {
 		fmt.Println()
-		fmt.Println("💡 Para renovação automática funcionar na VPS, execute antes:")
-		fmt.Println("   make setup-auth")
-		fmt.Println("   # Depois copie auth-tokens.json e webauthn-credentials.json para a VPS")
+		fmt.Println("💡 Para renovação automática funcionar, garanta um destes modos:")
+		fmt.Println("   - CHROME_PROFILE_DIR apontando para um perfil autenticado do Chrome/Chromium")
+		fmt.Println("   - ou make setup-auth + auth-tokens.json/webauthn-credentials.json")
 		return fmt.Errorf("falha na renovação real dos tokens: %w", err)
 	}
 
