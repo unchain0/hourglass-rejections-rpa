@@ -8,28 +8,28 @@ pre-commit:
   commands:
     format:
       glob: "*.go"
-      run: gofmt -w {staged_files}
+      run: env GOTOOLCHAIN=auto gofmt -w {staged_files}
     lint:
       glob: "*.go"
-      run: golangci-lint run --new-from-rev HEAD
+      run: env GOTOOLCHAIN=auto golangci-lint run --new-from-rev HEAD
     test:
       glob: "*.go"
-      run: go test -short -timeout 2m $(go list ./... | grep -v '/auth/webauthn')
+      run: env GOTOOLCHAIN=auto sh -c 'go test -short -timeout 2m $(env GOTOOLCHAIN=auto go list ./... | grep -v "/auth/webauthn")'
     govulncheck:
       glob: "*.go"
-      run: govulncheck ./...
+      run: env GOTOOLCHAIN=auto govulncheck ./...
     build:
       glob: "*.go"
-      run: go build -o rpa ./cmd/rpa
+      run: env GOTOOLCHAIN=auto go build -o rpa ./cmd/rpa
 
 pre-push:
   commands:
     test:
-      run: go test -v -short -coverprofile=coverage.out $(go list ./... | grep -v '/auth/webauthn')
+      run: env GOTOOLCHAIN=auto sh -c 'go test -v -short -coverprofile=coverage.out $(env GOTOOLCHAIN=auto go list ./... | grep -v "/auth/webauthn")'
     coverage:
       run: |
-        go tool cover -func=coverage.out | grep total | awk '{print "Total coverage: " $3}'
-        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+        env GOTOOLCHAIN=auto go tool cover -func=coverage.out | grep total | awk '{print "Total coverage: " $3}'
+        COVERAGE=$(env GOTOOLCHAIN=auto go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
         if [ "$(echo "$COVERAGE < 95" | bc -l)" = "1" ]; then
           echo "Coverage is below 95%"
           exit 1

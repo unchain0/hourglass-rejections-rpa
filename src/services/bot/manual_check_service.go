@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/domain_models"
+	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/integrations/i18n"
 	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
 )
