@@ -1,9 +1,9 @@
 # Binaries
-rpa
-generate-key
-save-tokens
-setup-auth
-token-refresh
+/rpa
+/generate-key
+/save-tokens
+/setup-auth
+/token-refresh
 *.exe
 *.dll
 *.so
