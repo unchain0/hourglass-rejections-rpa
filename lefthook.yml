@@ -23,6 +23,7 @@ pre-commit:
       run: env GOTOOLCHAIN=auto go build -o rpa ./cmd/rpa
 
 pre-push:
+  parallel: false
   commands:
     test:
       run: env GOTOOLCHAIN=auto sh -c 'go test -v -short -coverprofile=coverage.out $(env GOTOOLCHAIN=auto go list ./... | grep -v "/auth/webauthn")'
