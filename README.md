@@ -1,13 +1,13 @@
 # Hourglass Rejections RPA
 
-Lightweight Go automation that checks Hourglass for rejected assignments, stores the results as JSON/CSV, and delivers notifications through a Telegram bot with per-user preferences.
+Lightweight Go automation that checks Hourglass for rejected assignments, stores operational history in PostgreSQL, and delivers notifications through a Telegram bot with per-user preferences.
 
 ## What it does
 
 - reads Hourglass through the official API
 - sends Telegram notifications only when there are new changes
 - lets each user choose which sections they want to follow
-- persists results in `./outputs` and preferences in SQLite by default
+- persists preferences and rejection history in the configured database
 - supports static tokens or automatic token renewal with WebAuthn
 
 This repository is a good fit if you want a self-hosted monitor for Hourglass rejections with a bot interface. It is a bad fit if you need a generic browser scraper or a multi-tenant SaaS service.
@@ -82,7 +82,7 @@ The main binary starts both the Telegram bot and the scheduler. The scheduler ch
 docker-compose up -d
 ```
 
-The default compose file starts the main `rpa` service with persisted data and token volumes.
+The default compose file starts the main `rpa` service with a persisted auth-token volume.
 
 ### Prepare authentication for servers
 
@@ -113,8 +113,13 @@ TOKENS_PATH=/home/user/.hourglass-rpa/auth-tokens.json
 WEBAUTHN_CREDENTIALS_PATH=/home/user/.hourglass-rpa/webauthn-credentials.json
 CHROME_PROFILE_DIR=/home/user/.hourglass-rpa/chrome-profile
 
-OUTPUT_DIR=./outputs
-SQLITE_DB_PATH=data/hourglass.db
+DB_TYPE=postgres
+DATABASE_URL=postgres://user:password@host:5432/postgres
+
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer token,stream-name=default
+OTEL_SERVICE_NAME=hourglass-rejections-rpa
+OTEL_SERVICE_VERSION=1.0.0
 LOG_LEVEL=info
 TZ=America/Sao_Paulo
 ```
@@ -123,9 +128,8 @@ Important notes:
 
 - `AUTO_REFRESH_TOKENS` defaults to `true`.
 - when Hourglass returns `401`, the client forces one fresh renewal before failing the run.
-- preferences use SQLite by default
-- results are written as both JSON and CSV
-- Sentry and Grafana settings are optional
+- database schema is created automatically on startup when missing
+- OpenTelemetry export is optional but recommended for logs, traces, and metrics
 
 ## Telegram bot commands
 
@@ -171,9 +175,8 @@ internal/api/           Hourglass API client and analysis logic
 internal/auth/webauthn/ browser-assisted auth and token renewal
 internal/bot/           Telegram bot runner
 internal/notifier/      Telegram notification handlers
-internal/preferences/   per-user preference storage
+internal/preferences/   per-user preference storage and operational history
 internal/scheduler/     periodic execution and notification dispatch
-internal/storage/       JSON and CSV output writers
 ```
 
 ## Additional project docs

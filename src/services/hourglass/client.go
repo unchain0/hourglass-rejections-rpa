@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 )
 
@@ -48,8 +49,9 @@ func NewClient() *Client {
 	jar, _ := cookiejar.New(nil)
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
+			Timeout:   30 * time.Second,
+			Jar:       jar,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 		baseURL:     defaultBaseURL,
 		useWebAuthn: false,
@@ -113,10 +115,10 @@ func (c *Client) LoadTokensFromFile(path string) error {
 }
 
 // NewClientWithWebAuthn creates a new Hourglass API client with WebAuthn authentication.
-func NewClientWithWebAuthn(credentialsPath string, sentryCapture func(error, map[string]interface{})) (*Client, error) {
+func NewClientWithWebAuthn(credentialsPath string, capture func(error, map[string]interface{})) (*Client, error) {
 	client := NewClient()
 
-	err := client.EnableWebAuthn(credentialsPath, sentryCapture)
+	err := client.EnableWebAuthn(credentialsPath, capture)
 	if err != nil {
 		return nil, err
 	}
@@ -125,8 +127,8 @@ func NewClientWithWebAuthn(credentialsPath string, sentryCapture func(error, map
 }
 
 // EnableWebAuthn enables WebAuthn authentication with the given credentials path.
-func (c *Client) EnableWebAuthn(credentialsPath string, sentryCapture func(error, map[string]interface{})) error {
-	tokenManager, err := c.newTokenManager(credentialsPath, sentryCapture)
+func (c *Client) EnableWebAuthn(credentialsPath string, capture func(error, map[string]interface{})) error {
+	tokenManager, err := c.newTokenManager(credentialsPath, capture)
 	if err != nil {
 		return fmt.Errorf("failed to create token manager: %w", err)
 	}
@@ -136,14 +138,14 @@ func (c *Client) EnableWebAuthn(credentialsPath string, sentryCapture func(error
 	return nil
 }
 
-func (c *Client) newTokenManager(credentialsPath string, sentryCapture func(error, map[string]interface{})) (authTokenManager, error) {
+func (c *Client) newTokenManager(credentialsPath string, capture func(error, map[string]interface{})) (authTokenManager, error) {
 	opts := []webauthn.TokenManagerOption{
 		webauthn.WithOnTokenRenewed(func(tokens *webauthn.AuthTokens) {
 			c.UpdateTokensFromManager(tokens)
 		}),
 		webauthn.WithOnError(func(err error) {
-			if sentryCapture != nil {
-				sentryCapture(err, map[string]interface{}{
+			if capture != nil {
+				capture(err, map[string]interface{}{
 					"component": "token_manager",
 					"action":    "token_renewal",
 				})

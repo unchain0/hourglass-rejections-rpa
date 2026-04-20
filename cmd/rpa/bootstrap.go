@@ -1,17 +1,18 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 
 	"hourglass-rejections-rpa/src/integrations/config"
-	"hourglass-rejections-rpa/src/integrations/filesystem/storage"
+	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/services/hourglass"
 )
 
 type dependencyBundle struct {
 	apiClient *hourglass.Client
 	analyzer  *hourglass.APIAnalyzer
-	store     *storage.FileStorage
+	store     *preferences.Store
 }
 
 type authPaths struct {
@@ -19,9 +20,24 @@ type authPaths struct {
 	browserProfileDir string
 }
 
-func buildDependencies(cfg *config.Config) dependencyBundle {
+var newPreferenceStore = func(databaseURL string) (*preferences.Store, error) {
+	if databaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL not configured")
+	}
+
+	return preferences.NewStoreFromConfig(&preferences.DatabaseConfig{
+		Type: "postgres",
+		DSN:  databaseURL,
+	})
+}
+
+func buildDependencies(cfg *config.Config) (dependencyBundle, error) {
 	paths := resolveAuthPaths(cfg)
 	apiClient := newConfiguredAPIClient(cfg, paths)
+	store, err := newPreferenceStore(cfg.DatabaseURL)
+	if err != nil {
+		return dependencyBundle{}, fmt.Errorf("failed to initialize database store: %w", err)
+	}
 
 	if !enableWebAuthnTokenManager(apiClient, cfg) {
 		applyStaticAuthentication(apiClient, cfg, paths.tokensPath)
@@ -30,8 +46,8 @@ func buildDependencies(cfg *config.Config) dependencyBundle {
 	return dependencyBundle{
 		apiClient: apiClient,
 		analyzer:  hourglass.NewAPIAnalyzer(apiClient),
-		store:     storage.New(cfg),
-	}
+		store:     store,
+	}, nil
 }
 
 func resolveAuthPaths(cfg *config.Config) authPaths {

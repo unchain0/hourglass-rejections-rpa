@@ -10,7 +10,21 @@ import (
 	"hourglass-rejections-rpa/src/domain_models"
 	"hourglass-rejections-rpa/src/engines/rejection_cache"
 	"hourglass-rejections-rpa/src/integrations/config"
-	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var (
+	schedulerTracer          = otel.Tracer("hourglass-rejections-rpa/scheduler")
+	schedulerMeter           = otel.Meter("hourglass-rejections-rpa/scheduler")
+	schedulerRunCounter, _   = schedulerMeter.Int64Counter("hourglass.scheduler.runs.total")
+	schedulerErrorCounter, _ = schedulerMeter.Int64Counter("hourglass.scheduler.errors.total")
+	rejectionCounter, _      = schedulerMeter.Int64Counter("hourglass.rejections.total")
+	analysisDuration, _      = schedulerMeter.Float64Histogram("hourglass.scheduler.analysis.duration.seconds")
 )
 
 // Analyzer defines the interface for analyzing sections.
@@ -20,17 +34,18 @@ type Analyzer interface {
 
 // Storage defines the interface for storing rejections.
 type Storage interface {
-	Save(ctx context.Context, rejections []domain.Rejection) error
+	SaveRejections(ctx context.Context, rejections []domain.Rejection) error
+	RecordJobExecution(jobName string, success bool, errorMsg string) error
 }
 
 // Scheduler manages periodic analysis and notification jobs.
 type Scheduler struct {
-	cfg          *config.Config
-	sentryClient *sentry.Client
-	analyzer     Analyzer
-	store        Storage
-	cache        *cache.RejectionCache
-	notifier     domain.Notifier
+	cfg             *config.Config
+	telemetryClient *telemetry.Client
+	analyzer        Analyzer
+	store           Storage
+	cache           *cache.RejectionCache
+	notifier        domain.Notifier
 
 	runAnalysisFn func(ctx context.Context) error
 }
@@ -41,13 +56,13 @@ func (s *Scheduler) SetNotifier(n domain.Notifier) {
 }
 
 // New creates a new Scheduler instance.
-func New(cfg *config.Config, sentryClient *sentry.Client, analyzer Analyzer, store Storage) *Scheduler {
+func New(cfg *config.Config, telemetryClient *telemetry.Client, analyzer Analyzer, store Storage) *Scheduler {
 	return &Scheduler{
-		cfg:          cfg,
-		sentryClient: sentryClient,
-		analyzer:     analyzer,
-		store:        store,
-		cache:        cache.New(),
+		cfg:             cfg,
+		telemetryClient: telemetryClient,
+		analyzer:        analyzer,
+		store:           store,
+		cache:           cache.New(),
 	}
 }
 
@@ -85,20 +100,44 @@ func (s *Scheduler) runWithTicker(ctx context.Context, ticker *time.Ticker) erro
 			}
 
 			analysisCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			analysisCtx, span := schedulerTracer.Start(analysisCtx, "scheduled_analysis", trace.WithAttributes(
+				attribute.String("scheduler.run_time", now.Format(time.RFC3339)),
+			))
 			err := analysisFn(analysisCtx)
+			span.End()
 			cancel()
 
+			if recordErr := s.recordExecution(err); recordErr != nil {
+				logger.Warn("failed to record scheduler execution", "error", recordErr)
+			}
+
 			if err != nil {
+				schedulerErrorCounter.Add(ctx, 1)
 				logger.Error("scheduled analysis failed", "error", err)
-				s.sentryClient.CaptureError(err, map[string]interface{}{
+				s.telemetryClient.CaptureError(err, map[string]interface{}{
 					"phase": "scheduled_analysis",
 				})
 			}
+
+			schedulerRunCounter.Add(ctx, 1)
 
 			nextRun = now.Add(interval)
 			logger.Info("next check scheduled", "at", nextRun.Format("15:04"))
 		}
 	}
+}
+
+func (s *Scheduler) recordExecution(runErr error) error {
+	if s.store == nil {
+		return nil
+	}
+
+	errorMsg := ""
+	if runErr != nil {
+		errorMsg = runErr.Error()
+	}
+
+	return s.store.RecordJobExecution("scheduled_analysis", runErr == nil, errorMsg)
 }
 
 func (s *Scheduler) calculateInterval(now time.Time) time.Duration {
@@ -116,6 +155,11 @@ func (s *Scheduler) calculateInterval(now time.Time) time.Duration {
 
 func (s *Scheduler) runAnalysis(ctx context.Context) error {
 	start := time.Now()
+	ctx, span := schedulerTracer.Start(ctx, "run_analysis")
+	defer span.End()
+	defer func() {
+		analysisDuration.Record(ctx, time.Since(start).Seconds())
+	}()
 	var allRejections []domain.Rejection
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -124,13 +168,16 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 		wg.Add(1)
 		go func(sec string) {
 			defer wg.Done()
+			sectionCtx, sectionSpan := schedulerTracer.Start(ctx, "analyze_section", trace.WithAttributes(attribute.String("section", sec)))
+			defer sectionSpan.End()
 
 			slog.Info("analyzing section", "section", sec)
 
 			result, err := s.analyzer.AnalyzeSection(sec)
 			if err != nil {
+				sectionSpan.RecordError(err)
 				slog.Error("failed to analyze section", "section", sec, "error", err)
-				s.sentryClient.CaptureError(err, map[string]interface{}{
+				s.telemetryClient.CaptureError(err, map[string]interface{}{
 					"section": sec,
 					"phase":   "analysis",
 				})
@@ -138,8 +185,9 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 			}
 
 			if result.Error != nil {
+				sectionSpan.RecordError(result.Error)
 				slog.Error("analysis returned error", "section", sec, "error", result.Error)
-				s.sentryClient.CaptureError(result.Error, map[string]interface{}{
+				s.telemetryClient.CaptureError(result.Error, map[string]interface{}{
 					"section": sec,
 					"phase":   "analysis_result",
 					"total":   result.Total,
@@ -150,13 +198,14 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 			slog.Info("section analysis complete", "section", sec, "total", result.Total)
 
 			if len(result.Rejections) > 0 {
+				rejectionCounter.Add(sectionCtx, int64(len(result.Rejections)), metric.WithAttributes(attribute.String("section", sec)))
 				mu.Lock()
 				allRejections = append(allRejections, result.Rejections...)
 				mu.Unlock()
 
-				if err := s.store.Save(ctx, result.Rejections); err != nil {
+				if err := s.store.SaveRejections(ctx, result.Rejections); err != nil {
 					slog.Error("failed to save rejections", "section", sec, "error", err)
-					s.sentryClient.CaptureError(err, map[string]interface{}{
+					s.telemetryClient.CaptureError(err, map[string]interface{}{
 						"section": sec,
 						"phase":   "save_rejections",
 						"count":   len(result.Rejections),
@@ -189,7 +238,7 @@ func (s *Scheduler) sendNotifications(rejections []domain.Rejection, duration ti
 
 	if err := s.notifier.SendJobCompletion(summary, duration); err != nil {
 		slog.Error("failed to send notification", "error", err)
-		s.sentryClient.CaptureError(err, map[string]interface{}{
+		s.telemetryClient.CaptureError(err, map[string]interface{}{
 			"phase": "send_notification",
 		})
 		return err

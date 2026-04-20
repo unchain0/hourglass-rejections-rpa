@@ -9,14 +9,13 @@ import (
 	"strings"
 	"sync"
 
-	"hourglass-rejections-rpa/src/domain_models"
+	domain "hourglass-rejections-rpa/src/domain_models"
 	"hourglass-rejections-rpa/src/integrations/config"
 	"hourglass-rejections-rpa/src/integrations/database/preferences"
-	"hourglass-rejections-rpa/src/integrations/filesystem/storage"
 	"hourglass-rejections-rpa/src/integrations/i18n"
-	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	"hourglass-rejections-rpa/src/services/hourglass"
-	"hourglass-rejections-rpa/src/services/notification"
+	notifier "hourglass-rejections-rpa/src/services/notification"
 )
 
 type Analyzer interface {
@@ -32,22 +31,21 @@ type Notifier interface {
 }
 
 type BotRunner struct {
-	cfg          *config.Config
-	sentryClient *sentry.Client
-	analyzer     Analyzer
-	mu           sync.RWMutex
+	cfg             *config.Config
+	telemetryClient *telemetry.Client
+	analyzer        Analyzer
+	mu              sync.RWMutex
 
 	notifier  Notifier
 	prefStore preferences.PreferenceStore
 }
 
-func New(cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) *BotRunner {
-	_ = store
-
+// New creates a bot runner wired to the shared analyzer and telemetry pipeline.
+func New(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer) *BotRunner {
 	return &BotRunner{
-		cfg:          cfg,
-		sentryClient: sentryClient,
-		analyzer:     analyzer,
+		cfg:             cfg,
+		telemetryClient: telemetryClient,
+		analyzer:        analyzer,
 	}
 }
 
@@ -76,13 +74,17 @@ var newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (N
 	return notifier.NewTelegramNotifier(token, chatID, whitelist)
 }
 
+var newPreferenceStoreFromDatabaseURL = func(databaseURL string) (preferences.PreferenceStore, error) {
+	return preferences.NewStoreFromConfig(&preferences.DatabaseConfig{Type: "postgres", DSN: databaseURL})
+}
+
 var i18nInit = i18n.Init
 
 func (b *BotRunner) Run(ctx context.Context) error {
 	logger := slog.Default()
 
 	if err := i18nInit(); err != nil {
-		b.sentryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]interface{}{
 			"phase": "init_i18n",
 		})
 		return fmt.Errorf("failed to initialize i18n: %w", err)
@@ -90,9 +92,9 @@ func (b *BotRunner) Run(ctx context.Context) error {
 
 	prefStore, closePreferenceStore, err := b.ensurePreferenceStore()
 	if err != nil {
-		b.sentryClient.CaptureError(err, map[string]interface{}{
-			"phase":   "init_preference_store",
-			"db_path": b.preferenceStorePath(),
+		b.telemetryClient.CaptureError(err, map[string]interface{}{
+			"phase":            "init_preference_store",
+			"database_url_set": b.cfg != nil && b.cfg.DatabaseURL != "",
 		})
 		return fmt.Errorf("failed to initialize preference store: %w", err)
 	}
@@ -107,7 +109,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 		if len(whitelist) > 0 {
 			chatID = whitelist[0]
 		}
-		b.sentryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]interface{}{
 			"phase":     "create_notifier",
 			"chat_id":   chatID,
 			"has_token": b.getBotToken() != "",
@@ -123,7 +125,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 	logger.Info("starting telegram bot")
 
 	if err := tgBot.StartBot(ctx, prefManager); err != nil {
-		b.sentryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]interface{}{
 			"phase": "start_bot",
 		})
 		return fmt.Errorf("failed to start bot: %w", err)
@@ -135,7 +137,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 
 	if err := tgBot.StopBot(); err != nil {
 		logger.Error("error stopping bot", "error", err)
-		b.sentryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]interface{}{
 			"phase": "stop_bot",
 		})
 	}
@@ -145,7 +147,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 }
 
 func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences.PreferenceManager, targetChatID int64) error {
-	service := newManualCheckService(b.analyzer, b.sentryClient, prefManager, b.sendNoRejectionsMessage, b.sendRejectionsNotification)
+	service := newManualCheckService(b.analyzer, b.telemetryClient, prefManager, b.sendNoRejectionsMessage, b.sendRejectionsNotification)
 	return service.run(ctx, targetChatID)
 }
 
@@ -161,8 +163,8 @@ func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error 
 	tgBot, err := b.newTransientNotifier(chatID)
 	if err != nil {
 		logger.Error("TELEGRAM_BOT_TOKEN not configured")
-		if b.sentryClient != nil && err.Error() != "TELEGRAM_BOT_TOKEN not configured" {
-			b.sentryClient.CaptureError(err, map[string]interface{}{
+		if b.telemetryClient != nil && err.Error() != "TELEGRAM_BOT_TOKEN not configured" {
+			b.telemetryClient.CaptureError(err, map[string]interface{}{
 				"phase":   "create_temp_notifier",
 				"chat_id": chatID,
 			})
@@ -190,12 +192,15 @@ func (b *BotRunner) ensurePreferenceStore() (preferences.PreferenceStore, func()
 	if b.prefStore != nil {
 		return b.prefStore, func() {}, nil
 	}
+	if b.cfg == nil || b.cfg.DatabaseURL == "" {
+		return nil, func() {}, fmt.Errorf("DATABASE_URL not configured")
+	}
 
-	var prefStore preferences.PreferenceStore
-	prefStore, err := preferences.NewStore(b.preferenceStorePath())
+	store, err := newPreferenceStoreFromDatabaseURL(b.cfg.DatabaseURL)
 	if err != nil {
 		return nil, func() {}, err
 	}
+	prefStore := store
 
 	closeStore := func() {}
 	if closer, ok := any(prefStore).(interface{ Close() error }); ok {
@@ -254,15 +259,6 @@ func (b *BotRunner) getBotToken() string {
 
 	return os.Getenv("TELEGRAM_BOT_TOKEN")
 }
-
-func (b *BotRunner) preferenceStorePath() string {
-	if b.cfg != nil {
-		return b.cfg.SQLiteDBPath
-	}
-
-	return ""
-}
-
 func (b *BotRunner) getWhitelist() []int64 {
 	var whitelist []int64
 	var whitelistEnv string

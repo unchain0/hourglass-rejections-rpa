@@ -8,16 +8,16 @@ import (
 	"hourglass-rejections-rpa/src/domain_models"
 	"hourglass-rejections-rpa/src/engines/rejection_cache"
 	"hourglass-rejections-rpa/src/integrations/config"
-	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 )
 
 func TestScheduler_SetNotifier(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	mockNotifier := &mockNotifier{}
 	s.SetNotifier(mockNotifier)
@@ -67,9 +67,9 @@ func TestScheduler_sendNotifications_NoNotifier(t *testing.T) {
 func TestScheduler_sendNotifications_NotifierError(t *testing.T) {
 	mockNotifier := &mockNotifier{sendJobCompletionError: errors.New("notification failed")}
 	s := &Scheduler{
-		cache:        cache.New(),
-		notifier:     mockNotifier,
-		sentryClient: &sentry.Client{},
+		cache:           cache.New(),
+		notifier:        mockNotifier,
+		telemetryClient: &telemetry.Client{},
 	}
 
 	rejections := []domain.Rejection{

@@ -12,10 +12,28 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"hourglass-rejections-rpa/src/integrations/config"
-	"hourglass-rejections-rpa/src/integrations/filesystem/storage"
-	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/integrations/database/preferences"
+	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	hourglass "hourglass-rejections-rpa/src/services/hourglass"
 )
+
+func newTestStore(t *testing.T) *preferences.Store {
+	t.Helper()
+
+	store, err := preferences.NewStore(filepath.Join(t.TempDir(), "hourglass.db"))
+	require.NoError(t, err)
+	return store
+}
+
+func TestMain(m *testing.M) {
+	origNewPreferenceStore := newPreferenceStore
+	newPreferenceStore = func(databaseURL string) (*preferences.Store, error) {
+		return preferences.NewStore(filepath.Join(os.TempDir(), fmt.Sprintf("hourglass-main-test-%d.db", time.Now().UnixNano())))
+	}
+	defer func() { newPreferenceStore = origNewPreferenceStore }()
+
+	os.Exit(m.Run())
+}
 
 func TestLoadEnvFiles_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -225,7 +243,6 @@ func TestRun_OnceMode(t *testing.T) {
 
 	envContent := `HOURGLASS_XSRF_TOKEN=test-token
 HOURGLASS_HGLOGIN_COOKIE=test-cookie
-OUTPUT_DIR=/tmp
 `
 	os.WriteFile(".env", []byte(envContent), 0644)
 
@@ -265,7 +282,7 @@ func TestRun_OnceModeSuccess(t *testing.T) {
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 		return nil
 	}
 
@@ -320,7 +337,7 @@ func TestMain_Success(t *testing.T) {
 		osExit = origExit
 	}()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 		return nil
 	}
 
@@ -344,22 +361,26 @@ func TestSetupLogging(t *testing.T) {
 	setupLogging("info")
 }
 
-func TestSetupSentry(t *testing.T) {
+func TestSetupTelemetry(t *testing.T) {
 	cfg := &config.Config{}
-	client := setupSentry(cfg)
+	client := setupTelemetry(cfg)
 	if client == nil {
-		t.Error("setupSentry should return a client")
+		t.Error("setupTelemetry should return a client")
 	}
 }
 
-func TestSetupSentry_WithDSN(t *testing.T) {
+func TestSetupTelemetry_WithEndpoint(t *testing.T) {
 	cfg := &config.Config{
-		SentryDSN:         "https://test@sentry.io/123",
-		SentryEnvironment: "test",
+		OTLPEndpoint:            "https://otel.example.com",
+		OTLPHeaders:             "Authorization=Bearer token,stream-name=default",
+		DeploymentEnvironment:   "test",
+		TelemetryServiceName:    "hourglass-rejections-rpa",
+		TelemetryServiceVersion: "1.0.0",
+		OTLPMetricInterval:      time.Second,
 	}
-	client := setupSentry(cfg)
+	client := setupTelemetry(cfg)
 	if client == nil {
-		t.Error("setupSentry should return a client")
+		t.Error("setupTelemetry should return a client")
 	}
 }
 
@@ -369,7 +390,8 @@ func TestSetupDependencies(t *testing.T) {
 		HourglassHGLogin:   "test-login",
 	}
 
-	apiClient, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store, err := setupDependencies(cfg)
+	require.NoError(t, err)
 	if apiClient == nil {
 		t.Error("setupDependencies should return an apiClient")
 	}
@@ -384,7 +406,8 @@ func TestSetupDependencies(t *testing.T) {
 func TestSetupDependencies_NoTokens(t *testing.T) {
 	cfg := &config.Config{}
 
-	apiClient, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store, err := setupDependencies(cfg)
+	require.NoError(t, err)
 	if apiClient == nil {
 		t.Error("setupDependencies should return an apiClient")
 	}
@@ -412,7 +435,8 @@ func TestSetupDependencies_WithTokensPathEnv(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	apiClient, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store, err := setupDependencies(cfg)
+	require.NoError(t, err)
 	if apiClient == nil {
 		t.Error("setupDependencies should return an apiClient")
 	}
@@ -458,7 +482,8 @@ func TestSetupDependencies_NoHomeDir(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	apiClient, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store, err := setupDependencies(cfg)
+	require.NoError(t, err)
 	if apiClient == nil {
 		t.Error("setupDependencies should return an apiClient even without home dir")
 	}
@@ -484,7 +509,8 @@ func TestSetupDependencies_InvalidTokensFile(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	apiClient, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store, err := setupDependencies(cfg)
+	require.NoError(t, err)
 	if apiClient == nil {
 		t.Error("setupDependencies should return an apiClient even with invalid tokens file")
 	}
@@ -507,7 +533,8 @@ func TestSetupDependencies_EnableWebAuthnTokenManager(t *testing.T) {
 		TokensPath:              filepath.Join(tmpDir, "auth-tokens.json"),
 	}
 
-	apiClient, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store, err := setupDependencies(cfg)
+	require.NoError(t, err)
 	require.NotNil(t, apiClient)
 	require.NotNil(t, analyzer)
 	require.NotNil(t, store)
@@ -706,15 +733,15 @@ func TestRun_TokenManagerStartError(t *testing.T) {
 
 func TestRunOnceMode(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	apiClient := hourglass.NewClient()
 	analyzer := hourglass.NewAPIAnalyzer(apiClient)
-	store := storage.New(cfg)
+	store := newTestStore(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := runOnceMode(ctx, cfg, sentryClient, analyzer, store)
+	err := runOnceMode(ctx, cfg, telemetryClient, analyzer, store)
 	if err == nil {
 		t.Error("expected error because runOnce is not implemented")
 	}
@@ -724,17 +751,17 @@ func TestRunOnceMode_Success(t *testing.T) {
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 		return nil
 	}
 
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	apiClient := hourglass.NewClient()
 	analyzer := hourglass.NewAPIAnalyzer(apiClient)
-	store := storage.New(cfg)
+	store := newTestStore(t)
 
-	err := runOnceMode(context.Background(), cfg, sentryClient, analyzer, store)
+	err := runOnceMode(context.Background(), cfg, telemetryClient, analyzer, store)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -745,12 +772,12 @@ func TestRunFullMode_CancelledContext(t *testing.T) {
 	cancel()
 
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	apiClient := hourglass.NewClient()
 	analyzer := hourglass.NewAPIAnalyzer(apiClient)
-	store := storage.New(cfg)
+	store := newTestStore(t)
 
-	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
+	err := runFullMode(ctx, cfg, telemetryClient, analyzer, store)
 	if err != nil {
 		t.Errorf("expected no error with cancelled context, got: %v", err)
 	}
@@ -761,12 +788,12 @@ func TestRunFullMode_WithTimeout(t *testing.T) {
 	defer cancel()
 
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	apiClient := hourglass.NewClient()
 	analyzer := hourglass.NewAPIAnalyzer(apiClient)
-	store := storage.New(cfg)
+	store := newTestStore(t)
 
-	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
+	err := runFullMode(ctx, cfg, telemetryClient, analyzer, store)
 	if err != nil {
 		t.Errorf("expected no error when context times out, got: %v", err)
 	}
@@ -788,18 +815,19 @@ func TestRun_ConfigLoadError(t *testing.T) {
 	}
 }
 
-func TestRun_SentryEnabled(t *testing.T) {
+func TestRun_TelemetryEnabled(t *testing.T) {
 	t.Setenv("AUTO_REFRESH_TOKENS", "false")
 
 	origFn := runOnceFn
 	defer func() { runOnceFn = origFn }()
 
-	runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
+	runOnceFn = func(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 		return nil
 	}
 
-	t.Setenv("SENTRY_DSN", "https://examplePublicKey@o0.ingest.sentry.io/0")
-	t.Setenv("SENTRY_ENVIRONMENT", "test")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otel.example.com")
+	t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer token,stream-name=default")
+	t.Setenv("DEPLOYMENT_ENVIRONMENT", "test")
 
 	opts := runOptions{
 		args:   []string{"-once"},
@@ -825,20 +853,20 @@ func TestRunFullMode_SchedulerError(t *testing.T) {
 	origFn := newSchedulerFn
 	defer func() { newSchedulerFn = origFn }()
 
-	newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) runner {
+	newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) runner {
 		return &errorRunner{err: fmt.Errorf("mock scheduler failure")}
 	}
 
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	apiClient := hourglass.NewClient()
 	analyzer := hourglass.NewAPIAnalyzer(apiClient)
-	store := storage.New(cfg)
+	store := newTestStore(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := runFullMode(ctx, cfg, sentryClient, analyzer, store)
+	err := runFullMode(ctx, cfg, telemetryClient, analyzer, store)
 	if err == nil {
 		t.Fatal("expected error from scheduler")
 	}
@@ -848,44 +876,46 @@ func TestRunFullMode_SchedulerError(t *testing.T) {
 }
 
 func TestCaptureError(t *testing.T) {
-	t.Run("with nil sentry client", func(t *testing.T) {
-		sentryClientGlobal = nil
+	t.Run("with nil telemetry client", func(t *testing.T) {
+		telemetryClientGlobal = nil
 		assert.NotPanics(t, func() {
 			captureError(fmt.Errorf("test error"), nil)
 		})
 	})
 
-	t.Run("with disabled sentry client", func(t *testing.T) {
-		sentryClientGlobal = &sentry.Client{}
+	t.Run("with disabled telemetry client", func(t *testing.T) {
+		telemetryClientGlobal = &telemetry.Client{}
 		assert.NotPanics(t, func() {
 			captureError(fmt.Errorf("test error"), nil)
 		})
 	})
 
-	t.Run("with enabled sentry client", func(t *testing.T) {
-		mockClient := &sentry.Client{}
-		sentryClientGlobal = mockClient
+	t.Run("with enabled telemetry client", func(t *testing.T) {
+		mockClient := &telemetry.Client{}
+		telemetryClientGlobal = mockClient
 		assert.NotPanics(t, func() {
 			captureError(fmt.Errorf("test error"), map[string]interface{}{"key": "value"})
 		})
 	})
 
-	// Test with actually enabled sentry client (requires valid DSN format)
-	t.Run("with truly enabled sentry client", func(t *testing.T) {
-		// Create a client with a valid-looking DSN to enable it
-		enabledClient, err := sentry.New(sentry.Config{
-			DSN:         "https://abc123@test.sentry.io/123456",
-			Environment: "test",
-			Release:     "1.0.0",
+	// Test with actually enabled telemetry client
+	t.Run("with truly enabled telemetry client", func(t *testing.T) {
+		enabledClient, err := telemetry.New(telemetry.Config{
+			Endpoint:       "https://otel.example.com",
+			Headers:        "Authorization=Bearer token,stream-name=default",
+			Environment:    "test",
+			ServiceName:    "hourglass-rejections-rpa",
+			Release:        "1.0.0",
+			MetricInterval: time.Second,
 		})
 		if err != nil {
-			t.Skipf("Skipping test: could not create enabled sentry client: %v", err)
+			t.Skipf("Skipping test: could not create enabled telemetry client: %v", err)
 		}
 		defer enabledClient.Close()
 
-		sentryClientGlobal = enabledClient
+		telemetryClientGlobal = enabledClient
 		assert.NotPanics(t, func() {
-			captureError(fmt.Errorf("test error with enabled sentry"), map[string]interface{}{"test": "data"})
+			captureError(fmt.Errorf("test error with enabled telemetry"), map[string]interface{}{"test": "data"})
 		})
 	})
 }

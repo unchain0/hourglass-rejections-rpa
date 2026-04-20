@@ -62,22 +62,3 @@ func TestDailyStats(t *testing.T) {
 	assert.Equal(t, 5, ds.Sections["Field Ministry"])
 	assert.Equal(t, 5, ds.Sections["Mechanical Parts"])
 }
-
-func TestCookie(t *testing.T) {
-	c := Cookie{
-		Name:     "test_cookie",
-		Value:    "test_value",
-		Domain:   "example.com",
-		Path:     "/",
-		Expires:  time.Now().Add(time.Hour),
-		Secure:   true,
-		HTTPOnly: true,
-	}
-
-	assert.Equal(t, "test_cookie", c.Name)
-	assert.Equal(t, "test_value", c.Value)
-	assert.Equal(t, "example.com", c.Domain)
-	assert.Equal(t, "/", c.Path)
-	assert.True(t, c.Secure)
-	assert.True(t, c.HTTPOnly)
-}

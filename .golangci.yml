@@ -97,9 +97,6 @@ linters:
           - goconst
           - errcheck
           - gosec
-      - path: 'internal/sentry/'
-        linters:
-          - revive
       - path: 'internal/scheduler/'
         linters:
           - revive

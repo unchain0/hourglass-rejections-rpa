@@ -10,9 +10,8 @@ import (
 // Config holds runtime configuration loaded from environment variables.
 type Config struct {
 	HourglassURL    string        `env:"HOURGLASS_URL" envDefault:"https://app.hourglass-app.com"`
-	CookieFile      string        `env:"COOKIE_FILE" envDefault:"cookies.json"`
-	OutputDir       string        `env:"OUTPUT_DIR" envDefault:"./outputs"`
 	Debug           bool          `env:"DEBUG" envDefault:"false"`
+	LogLevel        string        `env:"LOG_LEVEL" envDefault:"info"`
 	ScheduleMorning string        `env:"SCHEDULE_MORNING" envDefault:"0 9 * * *"`
 	ScheduleEvening string        `env:"SCHEDULE_EVENING" envDefault:"0 17 * * *"`
 	Timeout         time.Duration `env:"TIMEOUT" envDefault:"60s"`
@@ -26,13 +25,15 @@ type Config struct {
 	// Playwright Authentication
 	HourglassEmail    string `env:"HOURGLASS_EMAIL"`
 	HourglassPassword string `env:"HOURGLASS_PASSWORD"`
-	// User Preferences (SQLite is default)
-	UseJSON       bool   `env:"USE_JSON" envDefault:"false"`
-	UserPrefsFile string `env:"USER_PREFS_FILE" envDefault:"data/preferences.json"`
-	SQLiteDBPath  string `env:"SQLITE_DB_PATH" envDefault:"data/hourglass.db"`
-	// Sentry configuration
-	SentryDSN         string `env:"SENTRY_DSN"`
-	SentryEnvironment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`
+	// Database configuration
+	DatabaseURL string `env:"DATABASE_URL"`
+	// OpenTelemetry configuration
+	OTLPEndpoint            string        `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
+	OTLPHeaders             string        `env:"OTEL_EXPORTER_OTLP_HEADERS"`
+	OTLPMetricInterval      time.Duration `env:"OTEL_METRIC_EXPORT_INTERVAL" envDefault:"30s"`
+	TelemetryServiceName    string        `env:"OTEL_SERVICE_NAME" envDefault:"hourglass-rejections-rpa"`
+	TelemetryServiceVersion string        `env:"OTEL_SERVICE_VERSION" envDefault:"1.0.0"`
+	DeploymentEnvironment   string        `env:"DEPLOYMENT_ENVIRONMENT" envDefault:"production"`
 	// Telegram Bot configuration
 	TelegramBotToken  string `env:"TELEGRAM_BOT_TOKEN"`
 	TelegramWhitelist string `env:"TELEGRAM_WHITELIST"`

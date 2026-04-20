@@ -1,6 +1,7 @@
 package preferences
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"hourglass-rejections-rpa/src/domain_models"
 )
 
 // PreferenceStore defines the interface for user preference storage.
@@ -65,6 +67,17 @@ type DiscoveredChat struct {
 	MessageCount int       `gorm:"default:1"`
 }
 
+// RejectionLog stores rejection events in the database instead of writing snapshots to disk.
+type RejectionLog struct {
+	ID         uint      `gorm:"primaryKey"`
+	Section    string    `gorm:"size:255;index;not null"`
+	Who        string    `gorm:"size:255"`
+	What       string    `gorm:"size:255"`
+	WhenLabel  string    `gorm:"column:when_label;size:255"`
+	OccurredAt time.Time `gorm:"index;not null"`
+	RecordedAt time.Time `gorm:"index;not null"`
+}
+
 // Sections returns the user's preferred sections as a slice.
 func (u *UserPreference) Sections() []string {
 	var sections []string
@@ -105,7 +118,7 @@ func NewStore(dbPath string) (*Store, error) {
 	db.Exec("PRAGMA synchronous = NORMAL")
 	db.Exec("PRAGMA busy_timeout = 5000")
 
-	if err := db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{}); err != nil {
+	if err := db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{}, &RejectionLog{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -216,6 +229,33 @@ func (s *Store) RecordJobExecution(jobName string, success bool, errorMsg string
 		Success:    success,
 		ErrorMsg:   errorMsg,
 	}).Error
+}
+
+// SaveRejections persists rejection records in the database.
+func (s *Store) SaveRejections(_ context.Context, rejections []domain.Rejection) error {
+	if len(rejections) == 0 {
+		return nil
+	}
+
+	logs := make([]RejectionLog, 0, len(rejections))
+	recordedAt := time.Now().UTC()
+	for _, rejection := range rejections {
+		occurredAt := rejection.Timestamp
+		if occurredAt.IsZero() {
+			occurredAt = recordedAt
+		}
+
+		logs = append(logs, RejectionLog{
+			Section:    rejection.Section,
+			Who:        rejection.Who,
+			What:       rejection.What,
+			WhenLabel:  rejection.When,
+			OccurredAt: occurredAt,
+			RecordedAt: recordedAt,
+		})
+	}
+
+	return s.db.Create(&logs).Error
 }
 
 // GetLastExecution returns the last execution time for a job.

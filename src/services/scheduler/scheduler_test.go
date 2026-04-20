@@ -10,7 +10,7 @@ import (
 	"hourglass-rejections-rpa/src/domain_models"
 	"hourglass-rejections-rpa/src/engines/rejection_cache"
 	"hourglass-rejections-rpa/src/integrations/config"
-	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 )
 
 type mockAnalyzer struct {
@@ -34,7 +34,7 @@ type mockStorage struct {
 	err   error
 }
 
-func (m *mockStorage) Save(ctx context.Context, rejections []domain.Rejection) error {
+func (m *mockStorage) SaveRejections(ctx context.Context, rejections []domain.Rejection) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -44,13 +44,20 @@ func (m *mockStorage) Save(ctx context.Context, rejections []domain.Rejection) e
 	return nil
 }
 
+func (m *mockStorage) RecordJobExecution(jobName string, success bool, errorMsg string) error {
+	if m.err != nil {
+		return m.err
+	}
+	return nil
+}
+
 func TestNew(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	if s == nil {
 		t.Fatal("New() returned nil")
@@ -58,8 +65,8 @@ func TestNew(t *testing.T) {
 	if s.cfg != cfg {
 		t.Error("scheduler cfg not set correctly")
 	}
-	if s.sentryClient != sentryClient {
-		t.Error("scheduler sentryClient not set correctly")
+	if s.telemetryClient != telemetryClient {
+		t.Error("scheduler telemetryClient not set correctly")
 	}
 	if s.analyzer != analyzer {
 		t.Error("scheduler analyzer not set correctly")
@@ -117,11 +124,11 @@ func TestScheduler_sendNotifications_NoChanges(t *testing.T) {
 
 func TestScheduler_Run_ContextCancellation(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -134,11 +141,11 @@ func TestScheduler_Run_ContextCancellation(t *testing.T) {
 
 func TestScheduler_Run_BusinessHours(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -151,11 +158,11 @@ func TestScheduler_Run_BusinessHours(t *testing.T) {
 
 func TestScheduler_Run_NightHours(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -168,11 +175,11 @@ func TestScheduler_Run_NightHours(t *testing.T) {
 
 func TestScheduler_runAnalysis_AnalyzerError(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{err: errors.New("analyzer error")}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ctx := context.Background()
 	err := s.runAnalysis(ctx)
@@ -184,7 +191,7 @@ func TestScheduler_runAnalysis_AnalyzerError(t *testing.T) {
 
 func TestScheduler_runAnalysis_ResultError(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
 			"Mechanical Parts": {Section: "Mechanical Parts", Error: errors.New("result error")},
@@ -192,7 +199,7 @@ func TestScheduler_runAnalysis_ResultError(t *testing.T) {
 	}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ctx := context.Background()
 	err := s.runAnalysis(ctx)
@@ -204,7 +211,7 @@ func TestScheduler_runAnalysis_ResultError(t *testing.T) {
 
 func TestScheduler_runAnalysis_WithRejections(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
 			"Field Ministry": {
@@ -216,7 +223,7 @@ func TestScheduler_runAnalysis_WithRejections(t *testing.T) {
 	}
 	mockStore := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, mockStore)
+	s := New(cfg, telemetryClient, analyzer, mockStore)
 
 	ctx := context.Background()
 	err := s.runAnalysis(ctx)
@@ -232,7 +239,7 @@ func TestScheduler_runAnalysis_WithRejections(t *testing.T) {
 
 func TestScheduler_runAnalysis_NoRejections(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
 			"Field Ministry": {Section: "Field Ministry", Total: 0, Rejections: []domain.Rejection{}},
@@ -240,7 +247,7 @@ func TestScheduler_runAnalysis_NoRejections(t *testing.T) {
 	}
 	mockStore := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, mockStore)
+	s := New(cfg, telemetryClient, analyzer, mockStore)
 
 	ctx := context.Background()
 	err := s.runAnalysis(ctx)
@@ -256,7 +263,7 @@ func TestScheduler_runAnalysis_NoRejections(t *testing.T) {
 
 func TestScheduler_runAnalysis_MultipleSections(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
 			"Field Ministry": {
@@ -273,7 +280,7 @@ func TestScheduler_runAnalysis_MultipleSections(t *testing.T) {
 	}
 	mockStore := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, mockStore)
+	s := New(cfg, telemetryClient, analyzer, mockStore)
 
 	ctx := context.Background()
 	err := s.runAnalysis(ctx)
@@ -289,7 +296,7 @@ func TestScheduler_runAnalysis_MultipleSections(t *testing.T) {
 
 func TestScheduler_runAnalysis_StorageError(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{
 		results: map[string]*domain.JobResult{
 			"Field Ministry": {
@@ -301,7 +308,7 @@ func TestScheduler_runAnalysis_StorageError(t *testing.T) {
 	}
 	store := &mockStorage{err: errors.New("storage error")}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ctx := context.Background()
 	err := s.runAnalysis(ctx)
@@ -339,11 +346,11 @@ func TestScheduler_calculateInterval_NightHours(t *testing.T) {
 
 func TestScheduler_runWithTicker_SingleTick(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -359,11 +366,11 @@ func TestScheduler_runWithTicker_SingleTick(t *testing.T) {
 
 func TestScheduler_runWithTicker_MultipleTicks(t *testing.T) {
 	cfg := &config.Config{}
-	sentryClient := &sentry.Client{}
+	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
 
-	s := New(cfg, sentryClient, analyzer, store)
+	s := New(cfg, telemetryClient, analyzer, store)
 
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
@@ -384,11 +391,11 @@ func TestScheduler_runWithTicker_SkipEarlyTicks(t *testing.T) {
 	store := &mockStorage{}
 
 	s := &Scheduler{
-		cfg:          &config.Config{},
-		sentryClient: &sentry.Client{},
-		analyzer:     analyzer,
-		store:        store,
-		cache:        cache.New(),
+		cfg:             &config.Config{},
+		telemetryClient: &telemetry.Client{},
+		analyzer:        analyzer,
+		store:           store,
+		cache:           cache.New(),
 	}
 
 	// 1ms ticker: first tick runs analysis, setting nextRun ~30min ahead.
@@ -406,11 +413,11 @@ func TestScheduler_runWithTicker_SkipEarlyTicks(t *testing.T) {
 
 func TestScheduler_runWithTicker_AnalysisError(t *testing.T) {
 	s := &Scheduler{
-		cfg:          &config.Config{},
-		sentryClient: &sentry.Client{},
-		analyzer:     &mockAnalyzer{},
-		store:        &mockStorage{},
-		cache:        cache.New(),
+		cfg:             &config.Config{},
+		telemetryClient: &telemetry.Client{},
+		analyzer:        &mockAnalyzer{},
+		store:           &mockStorage{},
+		cache:           cache.New(),
 		runAnalysisFn: func(ctx context.Context) error {
 			return errors.New("analysis failed")
 		},

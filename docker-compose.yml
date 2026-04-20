@@ -14,8 +14,6 @@ services:
       - CHROME_PROFILE_DIR=/home/rpa/.hourglass-rpa/chrome-profile
       - AUTO_REFRESH_TOKENS=true
     volumes:
-      - outputs:/app/outputs
-      - data:/app/data
       - tokens:/home/rpa/.hourglass-rpa
     networks:
       - rpa-network
@@ -59,27 +57,10 @@ services:
       - rpa
     profiles:
       - autorefresh
-
-  grafana-agent:
-    image: grafana/agent:latest
-    container_name: grafana-agent
-    restart: unless-stopped
-    volumes:
-      - ./config/grafana-agent.yaml:/etc/agent/agent.yaml:ro
-    command: -config.file=/etc/agent/agent.yaml
-    networks:
-      - rpa-network
-    profiles:
-      - monitoring
-
 networks:
   rpa-network:
     driver: bridge
 
 volumes:
-  outputs:
-    driver: local
-  data:
-    driver: local
   tokens:
     driver: local

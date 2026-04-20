@@ -5,22 +5,16 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/charmbracelet/log"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Config holds logger configuration.
 type Config struct {
-	Level      string
-	Format     string // "json", "text", "pretty", or "charm"
-	Output     string // "stdout", "stderr", or file path
-	MaxSize    int    // megabytes
-	MaxBackups int
-	MaxAge     int // days
-	Compress   bool
-	NoColor    bool // Disable colors
+	Level   string
+	Format  string // "json", "text", "pretty", or "charm"
+	Output  string // "stdout" or "stderr"
+	NoColor bool   // Disable colors
 }
 
 // New creates a new logger with the given configuration.
@@ -36,17 +30,7 @@ func New(cfg Config) *slog.Logger {
 	case "":
 		output = os.Stdout
 	default:
-		dir := filepath.Dir(cfg.Output)
-		if dir != "" && dir != "." {
-			_ = os.MkdirAll(dir, 0750)
-		}
-		output = &lumberjack.Logger{
-			Filename:   cfg.Output,
-			MaxSize:    cfg.MaxSize,
-			MaxBackups: cfg.MaxBackups,
-			MaxAge:     cfg.MaxAge,
-			Compress:   cfg.Compress,
-		}
+		output = os.Stdout
 	}
 
 	// Parse level
@@ -100,14 +84,10 @@ func parseLevel(level string) slog.Level {
 // DefaultConfig returns a default logger configuration.
 func DefaultConfig() Config {
 	return Config{
-		Level:      "info",
-		Format:     "charm",
-		Output:     "stdout",
-		MaxSize:    10,
-		MaxBackups: 3,
-		MaxAge:     7,
-		Compress:   true,
-		NoColor:    false,
+		Level:   "info",
+		Format:  "charm",
+		Output:  "stdout",
+		NoColor: false,
 	}
 }
 
@@ -118,19 +98,5 @@ func ForTerminal() Config {
 		Format:  "charm",
 		Output:  "stdout",
 		NoColor: false,
-	}
-}
-
-// ForFile returns a config optimized for file output.
-func ForFile(path string) Config {
-	return Config{
-		Level:      "info",
-		Format:     "json",
-		Output:     path,
-		MaxSize:    10,
-		MaxBackups: 5,
-		MaxAge:     30,
-		Compress:   true,
-		NoColor:    true,
 	}
 }

@@ -3,7 +3,9 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -13,11 +15,21 @@ import (
 	"hourglass-rejections-rpa/src/integrations/config"
 	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/integrations/i18n"
-	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	"hourglass-rejections-rpa/src/services/notification"
 )
 
 func TestMain(m *testing.M) {
+	origNewPreferenceStore := newPreferenceStoreFromDatabaseURL
+	newPreferenceStoreFromDatabaseURL = func(databaseURL string) (preferences.PreferenceStore, error) {
+		store, err := preferences.NewStore(filepath.Join(os.TempDir(), fmt.Sprintf("hourglass-bot-test-%d.db", time.Now().UnixNano())))
+		if err != nil {
+			return nil, err
+		}
+		return store, nil
+	}
+	defer func() { newPreferenceStoreFromDatabaseURL = origNewPreferenceStore }()
+
 	if err := i18n.Init(); err != nil {
 		panic(err)
 	}
@@ -122,7 +134,7 @@ func (m *MockPreferenceStore) List() ([]preferences.UserPreference, error) {
 
 func TestNew(t *testing.T) {
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 	if runner == nil {
 		t.Fatal("expected runner to not be nil")
 	}
@@ -155,7 +167,7 @@ func TestWithMethods(t *testing.T) {
 
 func TestRun_Success(t *testing.T) {
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 
 	mockNotifier := &MockNotifier{
 		StartBotFunc: func(ctx context.Context, prefManager *preferences.PreferenceManager) error {
@@ -188,7 +200,7 @@ func TestRun_Success(t *testing.T) {
 
 func TestRun_StartBotError(t *testing.T) {
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 
 	expectedErr := errors.New("start bot error")
 	mockNotifier := &MockNotifier{
@@ -209,7 +221,7 @@ func TestRun_StartBotError(t *testing.T) {
 
 func TestRun_StopBotError(t *testing.T) {
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 
 	mockNotifier := &MockNotifier{
 		StartBotFunc: func(ctx context.Context, prefManager *preferences.PreferenceManager) error {
@@ -244,7 +256,7 @@ func TestRun_NoNotifier_NoToken(t *testing.T) {
 	os.Unsetenv("TELEGRAM_BOT_TOKEN")
 
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 
 	mockStore := &MockPreferenceStore{}
 	runner.WithPreferenceStore(mockStore)
@@ -256,18 +268,18 @@ func TestRun_NoNotifier_NoToken(t *testing.T) {
 }
 
 func TestRun_NoPreferenceStore_Error(t *testing.T) {
-	cfg := &config.Config{SQLiteDBPath: "/invalid/path/that/does/not/exist/db.sqlite"}
-	runner := New(cfg, nil, nil, nil)
+	cfg := &config.Config{}
+	runner := New(cfg, nil, nil)
 
 	err := runner.Run(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "failed to initialize preference store") {
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL not configured") {
 		t.Errorf("expected preference store error, got %v", err)
 	}
 }
 
 func TestRun_NoPreferenceStore_Success(t *testing.T) {
-	cfg := &config.Config{SQLiteDBPath: "file::memory:?cache=shared"}
-	runner := New(cfg, nil, nil, nil)
+	cfg := &config.Config{DatabaseURL: "postgres://test:test@localhost:5432/hourglass"}
+	runner := New(cfg, nil, nil)
 
 	mockNotifier := &MockNotifier{
 		StartBotFunc: func(ctx context.Context, prefManager *preferences.PreferenceManager) error {
@@ -299,7 +311,7 @@ func TestRun_I18nInitError(t *testing.T) {
 	}
 	defer func() { i18nInit = originalI18nInit }()
 
-	runner := New(&config.Config{}, &sentry.Client{}, nil, nil)
+	runner := New(&config.Config{}, &telemetry.Client{}, nil)
 
 	err := runner.Run(context.Background())
 	if err == nil || err.Error() != "failed to initialize i18n: i18n init error" {
@@ -309,7 +321,7 @@ func TestRun_I18nInitError(t *testing.T) {
 
 func TestRun_CheckNowCallback(t *testing.T) {
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 
 	var callback notifier.CheckNowCallback
 	var mu sync.Mutex
@@ -388,7 +400,7 @@ func TestRunOnceForUser_NotFound(t *testing.T) {
 }
 
 func TestRunOnceForUser_NotFound_WithSentryClient(t *testing.T) {
-	runner := &BotRunner{sentryClient: &sentry.Client{}}
+	runner := &BotRunner{telemetryClient: &telemetry.Client{}}
 	mockStore := &MockPreferenceStore{
 		GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
 			return nil, nil
@@ -505,7 +517,7 @@ func TestRunOnceForUser_AnalyzeError(t *testing.T) {
 }
 
 func TestRunOnceForUser_AnalyzeError_WithSentryClient(t *testing.T) {
-	runner := &BotRunner{sentryClient: &sentry.Client{}}
+	runner := &BotRunner{telemetryClient: &telemetry.Client{}}
 
 	called := false
 	mockNotifier := &MockNotifier{
@@ -701,7 +713,7 @@ func TestSendNoRejectionsMessage_NoNotifier_WithToken_AndSentry(t *testing.T) {
 	}
 	defer func() { newTelegramNotifier = origNewTelegramNotifier }()
 
-	runner := &BotRunner{sentryClient: &sentry.Client{}}
+	runner := &BotRunner{telemetryClient: &telemetry.Client{}}
 	err := runner.sendNoRejectionsMessage(123, "msg")
 	if err == nil || !strings.Contains(err.Error(), "failed to create telegram notifier") {
 		t.Errorf("expected create telegram notifier error, got %v", err)
@@ -823,23 +835,11 @@ func TestGetBotToken(t *testing.T) {
 	})
 }
 
-func TestPreferenceStorePath(t *testing.T) {
-	runner := &BotRunner{cfg: &config.Config{SQLiteDBPath: "data/test.db"}}
-	if path := runner.preferenceStorePath(); path != "data/test.db" {
-		t.Fatalf("expected configured path, got %s", path)
-	}
-
-	runner = &BotRunner{}
-	if path := runner.preferenceStorePath(); path != "" {
-		t.Fatalf("expected empty path, got %s", path)
-	}
-}
-
 func TestManualCheckService_CaptureAnalysisError(t *testing.T) {
 	service := newManualCheckService(nil, nil, nil, nil, nil)
 	service.captureAnalysisError(errors.New("boom"), 123, "Field Ministry", time.Now(), "phase", nil)
 
-	service = newManualCheckService(nil, &sentry.Client{}, nil, nil, nil)
+	service = newManualCheckService(nil, &telemetry.Client{}, nil, nil, nil)
 	service.captureAnalysisError(errors.New("boom"), 123, "Field Ministry", time.Now(), "phase", &domain.JobResult{Total: 2})
 }
 
@@ -917,7 +917,7 @@ func TestManualCheckService_Run_PreferenceError_WithSentry(t *testing.T) {
 	pm := preferences.NewPreferenceManager(&MockPreferenceStore{GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
 		return nil, errors.New("get error")
 	}})
-	service := newManualCheckService(&MockAnalyzer{}, &sentry.Client{}, pm, nil, nil)
+	service := newManualCheckService(&MockAnalyzer{}, &telemetry.Client{}, pm, nil, nil)
 	err := service.run(context.Background(), 123)
 	if err == nil || !strings.Contains(err.Error(), "failed to get user preferences") {
 		t.Fatalf("expected preference error, got %v", err)
@@ -928,7 +928,7 @@ func TestManualCheckService_Run_PreferenceNotFound_WithSentry(t *testing.T) {
 	pm := preferences.NewPreferenceManager(&MockPreferenceStore{GetFunc: func(chatID int64) (*preferences.UserPreference, error) {
 		return nil, nil
 	}})
-	service := newManualCheckService(&MockAnalyzer{}, &sentry.Client{}, pm, nil, nil)
+	service := newManualCheckService(&MockAnalyzer{}, &telemetry.Client{}, pm, nil, nil)
 	err := service.run(context.Background(), 123)
 	if err == nil || err.Error() != "user preferences not found" {
 		t.Fatalf("expected not found error, got %v", err)
@@ -952,7 +952,7 @@ func TestRun_NoNotifier_WithToken_Success(t *testing.T) {
 	defer func() { newTelegramNotifier = origNewTelegramNotifier }()
 
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 
 	mockStore := &MockPreferenceStore{}
 	runner.WithPreferenceStore(mockStore)
@@ -994,7 +994,7 @@ func TestRun_NoNotifier_WithToken(t *testing.T) {
 	defer func() { newTelegramNotifier = origNewTelegramNotifier }()
 
 	cfg := &config.Config{}
-	runner := New(cfg, nil, nil, nil)
+	runner := New(cfg, nil, nil)
 
 	mockStore := &MockPreferenceStore{}
 	runner.WithPreferenceStore(mockStore)

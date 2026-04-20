@@ -76,7 +76,7 @@ func NewStoreFromConfig(cfg *DatabaseConfig) (*Store, error) {
 }
 
 var autoMigrateFn = func(db *gorm.DB) error {
-	return db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{})
+	return db.AutoMigrate(&UserPreference{}, &JobExecution{}, &AuditLog{}, &DiscoveredChat{}, &RejectionLog{})
 }
 
 var openSQLiteDBFn = func(dbPath string) (*gorm.DB, error) {

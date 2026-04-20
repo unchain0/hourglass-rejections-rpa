@@ -18,8 +18,6 @@ type Scraper interface {
 // Storage defines the contract for persistence.
 type Storage interface {
 	Save(ctx context.Context, rejections []Rejection) error
-	LoadCookies() ([]Cookie, error)
-	SaveCookies(cookies []Cookie) error
 }
 
 // Notifier defines the contract for notifications.

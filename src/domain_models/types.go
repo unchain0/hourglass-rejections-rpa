@@ -30,14 +30,3 @@ type DailyStats struct {
 	TotalRejections int
 	Sections        map[string]int
 }
-
-// Cookie represents a browser cookie for persistence.
-type Cookie struct {
-	Name     string    `json:"name"`
-	Value    string    `json:"value"`
-	Domain   string    `json:"domain"`
-	Path     string    `json:"path"`
-	Expires  time.Time `json:"expires"`
-	Secure   bool      `json:"secure"`
-	HTTPOnly bool      `json:"http_only"`
-}

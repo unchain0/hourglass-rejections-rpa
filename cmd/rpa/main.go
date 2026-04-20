@@ -13,9 +13,9 @@ import (
 	"github.com/joho/godotenv"
 
 	"hourglass-rejections-rpa/src/integrations/config"
-	"hourglass-rejections-rpa/src/integrations/filesystem/storage"
+	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/integrations/logger"
-	"hourglass-rejections-rpa/src/integrations/monitoring/sentry"
+	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	"hourglass-rejections-rpa/src/services/bot"
 	"hourglass-rejections-rpa/src/services/hourglass"
 	"hourglass-rejections-rpa/src/services/scheduler"
@@ -66,15 +66,15 @@ func main() {
 	}
 }
 
-var sentryClientGlobal *sentry.Client
+var telemetryClientGlobal *telemetry.Client
 var enableWebAuthnClient = func(apiClient *hourglass.Client, credentialsPath string) error {
 	return apiClient.EnableWebAuthn(credentialsPath, captureError)
 }
 
 func captureError(err error, extras map[string]interface{}) {
-	if sentryClientGlobal != nil && sentryClientGlobal.IsEnabled() {
-		sentryClientGlobal.CaptureError(err, extras)
-		sentryClientGlobal.Flush(2 * time.Second)
+	if telemetryClientGlobal != nil && telemetryClientGlobal.IsEnabled() {
+		telemetryClientGlobal.CaptureError(err, extras)
+		telemetryClientGlobal.Flush(2 * time.Second)
 	}
 }
 
@@ -93,10 +93,11 @@ func run(ctx context.Context, opts runOptions) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	sentryClient := setupSentry(cfg)
-	sentryClientGlobal = sentryClient
-	if sentryClient.IsEnabled() {
-		defer sentryClient.Close()
+	telemetryClient := setupTelemetry(cfg)
+	slog.SetDefault(telemetryClient.Logger())
+	telemetryClientGlobal = telemetryClient
+	if telemetryClient.IsEnabled() {
+		defer telemetryClient.Close()
 	}
 
 	slog.Info("starting hourglass-rejections-rpa", "version", "1.0.0", "once_mode", *onceMode)
@@ -104,7 +105,10 @@ func run(ctx context.Context, opts runOptions) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	apiClient, analyzer, store := setupDependencies(cfg)
+	apiClient, analyzer, store, err := setupDependencies(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to setup dependencies: %w", err)
+	}
 
 	if err := apiClient.StartTokenManager(ctx); err != nil {
 		return fmt.Errorf("failed to start token manager: %w", err)
@@ -113,10 +117,10 @@ func run(ctx context.Context, opts runOptions) error {
 
 	if *onceMode {
 		slog.Info("running in once mode")
-		return runOnceMode(ctx, cfg, sentryClient, analyzer, store)
+		return runOnceMode(ctx, cfg, telemetryClient, analyzer, store)
 	}
 
-	return runFullMode(ctx, cfg, sentryClient, analyzer, store)
+	return runFullMode(ctx, cfg, telemetryClient, analyzer, store)
 }
 
 func setupLogging(level string) {
@@ -129,18 +133,31 @@ func setupLogging(level string) {
 	slog.SetDefault(l)
 }
 
-func setupSentry(cfg *config.Config) *sentry.Client {
-	client, _ := sentry.New(sentry.Config{
-		DSN:         cfg.SentryDSN,
-		Environment: cfg.SentryEnvironment,
-		Release:     "1.0.0",
+func setupTelemetry(cfg *config.Config) *telemetry.Client {
+	client, err := telemetry.New(telemetry.Config{
+		Endpoint:       cfg.OTLPEndpoint,
+		Headers:        cfg.OTLPHeaders,
+		Environment:    cfg.DeploymentEnvironment,
+		ServiceName:    cfg.TelemetryServiceName,
+		Release:        cfg.TelemetryServiceVersion,
+		MetricInterval: cfg.OTLPMetricInterval,
+		Level:          cfg.LogLevel,
 	})
+	if err != nil {
+		setupLogging(cfg.LogLevel)
+		fallback, _ := telemetry.New(telemetry.Config{Level: cfg.LogLevel})
+		return fallback
+	}
 	return client
 }
 
-func setupDependencies(cfg *config.Config) (*hourglass.Client, *hourglass.APIAnalyzer, *storage.FileStorage) {
-	bundle := buildDependencies(cfg)
-	return bundle.apiClient, bundle.analyzer, bundle.store
+func setupDependencies(cfg *config.Config) (*hourglass.Client, *hourglass.APIAnalyzer, *preferences.Store, error) {
+	bundle, err := buildDependencies(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return bundle.apiClient, bundle.analyzer, bundle.store, nil
 }
 
 func resolveTokensPath(cfg *config.Config) string {
@@ -234,7 +251,7 @@ func enableWebAuthnTokenManager(apiClient *hourglass.Client, cfg *config.Config)
 	return true
 }
 
-var runOnceFn = func(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
+var runOnceFn = func(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 	return errors.New("runOnce not implemented")
 }
 
@@ -242,13 +259,13 @@ type runner interface {
 	Run(ctx context.Context) error
 }
 
-var newSchedulerFn = func(cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) runner {
-	return scheduler.New(cfg, sentryClient, analyzer, store)
+var newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) runner {
+	return scheduler.New(cfg, telemetryClient, analyzer, store)
 }
 
-func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
-	if err := runOnceFn(ctx, cfg, sentryClient, analyzer, store); err != nil {
-		sentryClient.CaptureError(err, map[string]interface{}{
+func runOnceMode(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
+	if err := runOnceFn(ctx, cfg, telemetryClient, analyzer, store); err != nil {
+		telemetryClient.CaptureError(err, map[string]interface{}{
 			"phase": "run_once_mode",
 		})
 		return fmt.Errorf("run failed: %w", err)
@@ -256,22 +273,22 @@ func runOnceMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.C
 	return nil
 }
 
-func runFullMode(ctx context.Context, cfg *config.Config, sentryClient *sentry.Client, analyzer *hourglass.APIAnalyzer, store *storage.FileStorage) error {
+func runFullMode(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 	slog.Info("starting full mode (scheduler + bot)")
 
 	go func() {
-		botRunner := bot.New(cfg, sentryClient, analyzer, store)
+		botRunner := bot.New(cfg, telemetryClient, analyzer).WithPreferenceStore(store)
 		if err := botRunner.Run(ctx); err != nil {
 			slog.Error("bot error", "error", err)
-			sentryClient.CaptureError(err, map[string]interface{}{
+			telemetryClient.CaptureError(err, map[string]interface{}{
 				"phase": "bot_run",
 			})
 		}
 	}()
 
-	sched := newSchedulerFn(cfg, sentryClient, analyzer, store)
+	sched := newSchedulerFn(cfg, telemetryClient, analyzer, store)
 	if err := sched.Run(ctx); err != nil {
-		sentryClient.CaptureError(err, map[string]interface{}{
+		telemetryClient.CaptureError(err, map[string]interface{}{
 			"phase": "scheduler_run",
 		})
 		return fmt.Errorf("scheduler failed: %w", err)
