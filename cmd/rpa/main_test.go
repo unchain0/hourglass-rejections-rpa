@@ -27,7 +27,7 @@ func newTestStore(t *testing.T) *preferences.Store {
 
 func TestMain(m *testing.M) {
 	origNewPreferenceStore := newPreferenceStore
-	newPreferenceStore = func(databaseURL string) (*preferences.Store, error) {
+	newPreferenceStore = func(_ *config.Config) (*preferences.Store, error) {
 		return preferences.NewStore(filepath.Join(os.TempDir(), fmt.Sprintf("hourglass-main-test-%d.db", time.Now().UnixNano())))
 	}
 	defer func() { newPreferenceStore = origNewPreferenceStore }()

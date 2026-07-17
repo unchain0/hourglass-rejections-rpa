@@ -1,4 +1,23 @@
 services:
+  db:
+    image: postgres:17-alpine
+    container_name: hourglass-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hourglass
+      POSTGRES_PASSWORD: hourglass
+      POSTGRES_DB: hourglass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rpa-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hourglass -d hourglass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   rpa:
     build:
       context: .
@@ -13,10 +32,20 @@ services:
       - TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
       - CHROME_PROFILE_DIR=/home/rpa/.hourglass-rpa/chrome-profile
       - AUTO_REFRESH_TOKENS=true
+      - DB_TYPE=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=hourglass
+      - DB_PASSWORD=hourglass
+      - DB_NAME=hourglass
+      - DB_SSLMODE=disable
     volumes:
       - tokens:/home/rpa/.hourglass-rpa
     networks:
       - rpa-network
+    depends_on:
+      db:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -57,10 +86,13 @@ services:
       - rpa
     profiles:
       - autorefresh
+
 networks:
   rpa-network:
     driver: bridge
 
 volumes:
   tokens:
+    driver: local
+  postgres_data:
     driver: local

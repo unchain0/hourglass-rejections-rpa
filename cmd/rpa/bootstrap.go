@@ -20,21 +20,21 @@ type authPaths struct {
 	browserProfileDir string
 }
 
-var newPreferenceStore = func(databaseURL string) (*preferences.Store, error) {
-	if databaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL not configured")
+var newPreferenceStore = func(cfg *config.Config) (*preferences.Store, error) {
+	if cfg.DatabaseURL != "" {
+		return preferences.NewStoreFromConfig(&preferences.DatabaseConfig{
+			Type: "postgres",
+			DSN:  cfg.DatabaseURL,
+		})
 	}
 
-	return preferences.NewStoreFromConfig(&preferences.DatabaseConfig{
-		Type: "postgres",
-		DSN:  databaseURL,
-	})
+	return preferences.NewStoreFromConfig(nil)
 }
 
 func buildDependencies(cfg *config.Config) (dependencyBundle, error) {
 	paths := resolveAuthPaths(cfg)
 	apiClient := newConfiguredAPIClient(cfg, paths)
-	store, err := newPreferenceStore(cfg.DatabaseURL)
+	store, err := newPreferenceStore(cfg)
 	if err != nil {
 		return dependencyBundle{}, fmt.Errorf("failed to initialize database store: %w", err)
 	}
