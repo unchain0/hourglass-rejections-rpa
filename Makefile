@@ -10,6 +10,9 @@ BUILD_DIR=.
 DOCKER_IMAGE=hourglass-rejections-rpa
 GO=go
 GOFLAGS=-v
+# Ensure Go downloads the correct toolchain version from go.mod
+GOTOOLCHAIN?=auto
+export GOTOOLCHAIN
 
 # Default target
 all: clean lint test build
@@ -47,10 +50,14 @@ test:
 	@echo "Running tests..."
 	$(GO) test $(GOFLAGS) -race -coverprofile=coverage.out ./...
 
-## test-short: Run tests without race detector (faster)
+# Testes que criam contextos ChromeDP e travam em ambientes headless/sandboxed
+SKIP_CHROME_TESTS ?= -skip 'TestBrowserAuthAdapter.*UsesWrappedAuth|TestBrowserAuthAdapterExtractTokensFromProfile_UsesWrappedAuth|TestClient_EnableWebAuthn_ErrorCallbackInvoked'
+
+## test-short: Run tests without race detector (faster), skips known Chrome-dependent tests
 test-short:
 	@echo "Running tests (short)..."
-	$(GO) test $(GOFLAGS) ./...
+	$(GO) test $(GOFLAGS) -short -timeout 5m $(SKIP_CHROME_TESTS) \
+		$$(go list ./... | grep -v -E "cmd/(save-tokens|setup-auth)")
 
 ## coverage: Generate and display test coverage
 coverage: test
@@ -66,9 +73,9 @@ coverage-total: test
 lint:
 	@echo "Running linter..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
+		golangci-lint run --timeout=5m ./...; \
 	else \
-		echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/"; \
+		echo "golangci-lint not installed. Run: make install-tools"; \
 		exit 1; \
 	fi
 
@@ -76,6 +83,18 @@ lint:
 fmt:
 	@echo "Formatting code..."
 	$(GO) fmt ./...
+
+## fmt-check: Check Go code formatting (CI-safe, does not modify files)
+fmt-check:
+	@echo "Checking code formatting..."
+	@UNFORMATTED=$$($(GO) fmt ./...); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "ERROR: The following files are not formatted:"; \
+		echo "$$UNFORMATTED"; \
+		echo "Run 'make fmt' to fix"; \
+		exit 1; \
+	fi; \
+	echo "All Go files are properly formatted"
 
 ## vet: Run go vet
 vet:
@@ -193,13 +212,17 @@ vulncheck:
 		exit 1; \
 	fi
 
-## ci: Run all CI checks
+## ci: Run all CI checks (CI server order)
 ci: tidy fmt vet lint test coverage-total vulncheck
 
-## install-tools: Install required development tools
+## ci-local: Run all checks exactly like CI but optimized for local use (excludes slow webauthn tests)
+ci-local: tidy fmt-check vet lint test-short vulncheck build
+	@echo "✅ All local CI checks passed"
+
+## install-tools: Install required development tools (pinned to CI versions)
 install-tools:
 	@echo "Installing development tools..."
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
 	$(GO) install golang.org/x/vuln/cmd/govulncheck@latest
 
 .DEFAULT_GOAL := help

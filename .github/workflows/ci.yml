@@ -6,60 +6,127 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  GOTOOLCHAIN: auto
+  GO_VERSION: '1.26'
+  GOLANGCI_VERSION: 'v2.1.6'
+
 jobs:
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - name: Check formatting
+      run: |
+        UNFORMATTED=$(gofmt -l .)
+        if [ -n "$UNFORMATTED" ]; then
+          echo "ERROR: The following files are not formatted:"
+          echo "$UNFORMATTED"
+          exit 1
+        fi
+        echo "All Go files are properly formatted"
+
+  vet:
+    name: Vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - name: go vet
+      run: go vet ./...
+
+  tidy:
+    name: Tidy & Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - name: go mod tidy & verify
+      run: |
+        go mod tidy
+        go mod verify
+    - name: Check for changes
+      run: |
+        if [ -n "$(git diff --name-only go.mod go.sum)" ]; then
+          echo "ERROR: go.mod or go.sum changed after tidy. Please run 'go mod tidy' locally and commit the changes."
+          git diff go.mod go.sum
+          exit 1
+        fi
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
-
+        go-version: ${{ env.GO_VERSION }}
+    - name: golangci-lint cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/golangci-lint
+          ~/.cache/go-build
+        key: ${{ runner.os }}-golangci-${{ env.GOLANGCI_VERSION }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-golangci-${{ env.GOLANGCI_VERSION }}-
     - name: golangci-lint
       run: |
-        go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
+        go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
         golangci-lint run --timeout=5m ./...
+
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
-
-    - name: Install Chrome
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y chromium-browser
-
+        go-version: ${{ env.GO_VERSION }}
+    - name: Setup Chrome
+      id: setup-chrome
+      uses: browser-actions/setup-chrome@v1
+      with:
+        chrome-version: stable
     - name: Run tests
-      timeout-minutes: 10
       env:
-        CHROME_BIN: /usr/bin/chromium-browser
-      run: go test -v -timeout 8m -coverprofile=coverage.out ./...
-
+        CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+      run: |
+        echo "Using Chrome at: $CHROME_BIN"
+        go test -v -race -timeout 8m -coverprofile=coverage.out ./...
     - name: Generate coverage report
       run: |
         go tool cover -html=coverage.out -o coverage.html
         go tool cover -func=coverage.out | grep total | awk '{print "Total coverage: " $3}'
-
     - name: Upload coverage
       uses: actions/upload-artifact@v4
       with:
         name: coverage-report
         path: coverage.html
-
+        retention-days: 7
     - name: Check coverage threshold
       run: |
         COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-        echo "Coverage: $COVERAGE%"
-        if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+        echo "Coverage: ${COVERAGE}%"
+        if (( $(echo "${COVERAGE} < 70" | bc -l) )); then
           echo "Coverage is below 70%"
           exit 1
         fi
@@ -67,57 +134,61 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
-
+        go-version: ${{ env.GO_VERSION }}
     - name: Install govulncheck
       run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
     - name: Run govulncheck
       run: govulncheck ./...
 
   build:
-    name: Build
+    name: Build All Binaries
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [format, vet, tidy, lint, test, security]
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
-
-    - name: Build binary
-      run: go build -v -o rpa ./cmd/rpa
-
-    - name: Upload binary
+        go-version: ${{ env.GO_VERSION }}
+    - name: Build all binaries
+      run: |
+        go build -v -o rpa ./cmd/rpa
+        go build -v -o save-tokens ./cmd/save-tokens
+        go build -v -o token-refresh ./cmd/token-refresh
+        go build -v -o setup-auth ./cmd/setup-auth
+    - name: Upload binaries
       uses: actions/upload-artifact@v4
       with:
-        name: rpa-binary
-        path: rpa
+        name: binaries
+        path: |
+          rpa
+          save-tokens
+          token-refresh
+          setup-auth
+        retention-days: 7
 
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [format, vet, tidy, lint, test, security]
     if: github.ref == 'refs/heads/main'
+    timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
     - name: Build Docker image
       uses: docker/build-push-action@v5
       with:
         context: .
         push: false
-        tags: hourglass-rejeicoes-rpa:latest
+        tags: hourglass-rejections-rpa:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max

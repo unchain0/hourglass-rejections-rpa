@@ -8,25 +8,35 @@ on:
 permissions:
   contents: write
 
+env:
+  GOTOOLCHAIN: auto
+  GO_VERSION: '1.26'
+
 jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
 
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
+        go-version: ${{ env.GO_VERSION }}
 
     - name: Build binaries
       run: |
-        GOOS=linux GOARCH=amd64 go build -o rpa-linux-amd64 ./cmd/rpa
-        GOOS=linux GOARCH=arm64 go build -o rpa-linux-arm64 ./cmd/rpa
-        GOOS=darwin GOARCH=amd64 go build -o rpa-darwin-amd64 ./cmd/rpa
-        GOOS=darwin GOARCH=arm64 go build -o rpa-darwin-arm64 ./cmd/rpa
-        GOOS=windows GOARCH=amd64 go build -o rpa-windows-amd64.exe ./cmd/rpa
+        GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w" -o rpa-linux-amd64 ./cmd/rpa
+        GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w" -o rpa-linux-arm64 ./cmd/rpa
+        GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o rpa-darwin-amd64 ./cmd/rpa
+        GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o rpa-darwin-arm64 ./cmd/rpa
+        GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o rpa-windows-amd64.exe ./cmd/rpa
+
+    - name: Generate checksums
+      run: |
+        sha256sum rpa-linux-amd64 rpa-linux-arm64 rpa-darwin-amd64 rpa-darwin-arm64 rpa-windows-amd64.exe > checksums.txt
+        cat checksums.txt
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
@@ -37,6 +47,7 @@ jobs:
           rpa-darwin-amd64
           rpa-darwin-arm64
           rpa-windows-amd64.exe
+          checksums.txt
         generate_release_notes: true
         draft: false
         prerelease: false

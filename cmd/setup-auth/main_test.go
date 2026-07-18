@@ -79,7 +79,7 @@ func stubCredentialRegistrarFactory(t *testing.T, registrar credentialRegistrar,
 }
 
 // setupVPSUploadTest é um helper para testes de VPS upload.
-func setupVPSUploadTest(t *testing.T, inputs []string) (error, string) {
+func setupVPSUploadTest(t *testing.T, inputs []string) (string, error) {
 	t.Helper()
 
 	oldStdin := os.Stdin
@@ -111,7 +111,7 @@ func setupVPSUploadTest(t *testing.T, inputs []string) (error, string) {
 	_ = pw.Close()
 	output, _ := io.ReadAll(pr)
 
-	return err, string(output)
+	return string(output), err
 }
 
 func TestSetupOptions(t *testing.T) {
@@ -669,7 +669,7 @@ func TestAskVPSUpload(t *testing.T) {
 	})
 
 	t.Run("valid VPS host with default path", func(t *testing.T) {
-		err, output := setupVPSUploadTest(t, []string{"yes", "user@host", ""})
+		output, err := setupVPSUploadTest(t, []string{"yes", "user@host", ""})
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")
@@ -677,7 +677,7 @@ func TestAskVPSUpload(t *testing.T) {
 	})
 
 	t.Run("valid VPS host with custom path", func(t *testing.T) {
-		err, output := setupVPSUploadTest(t, []string{"yes", "user@host", "/custom/path/tokens.json"})
+		output, err := setupVPSUploadTest(t, []string{"yes", "user@host", "/custom/path/tokens.json"})
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")

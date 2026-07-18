@@ -73,7 +73,7 @@ linters:
           - revive
           - unparam
           - misspell
-      - path: 'internal/auth/webauthn/'
+      - path: 'src/integrations/auth/webauthn/'
         linters:
           - errcheck
           - gosec
@@ -82,50 +82,51 @@ linters:
           - dupl
           - revive
           - unparam
-      - path: 'internal/testutil/'
+          - misspell
+      - path: 'src/testutil/'
         linters:
           - revive
-      - path: 'internal/cache/'
+      - path: 'src/engines/rejection_cache/'
         linters:
           - revive
-      - path: 'internal/config/'
+      - path: 'src/integrations/config/'
         linters:
           - revive
-      - path: 'internal/logger/'
+      - path: 'src/integrations/logger/'
         linters:
           - revive
           - goconst
           - errcheck
           - gosec
-      - path: 'internal/scheduler/'
+      - path: 'src/services/scheduler/'
         linters:
           - revive
           - gocognit
-      - path: 'internal/storage/'
+      - path: 'src/integrations/database/preferences/'
         linters:
           - revive
           - errcheck
-      - path: 'internal/notifier/'
-        linters:
-          - errcheck
-          - gocognit
-          - revive
-      - path: 'internal/bot/'
+      - path: 'src/services/notification/'
         linters:
           - errcheck
           - gocognit
           - revive
-      - path: 'internal/api/'
+      - path: 'src/services/bot/'
+        linters:
+          - errcheck
+          - gocognit
+          - revive
+      - path: 'src/services/hourglass/'
         linters:
           - dupl
           - revive
-      - path: 'internal/domain/'
+      - path: 'src/domain_models/'
         linters:
           - revive
-      - path: 'internal/metrics/'
+      - path: 'src/integrations/monitoring/telemetry/'
         linters:
           - revive
-      - path: 'internal/preferences/'
+      - path: 'src/integrations/database/preferences/'
         linters:
           - revive
       - path: 'cmd/'
