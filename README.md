@@ -125,6 +125,8 @@ Configure the required Telegram and Hourglass variables in Coolify, keep `AUTO_R
 
 Do not set `CHROME_PROFILE_DIR` for the normal passkey flow. The first deployment consumes the valid Hourglass token/cookie pair to register the RPA credential; subsequent deployments reuse `webauthn-credentials.json` and `auth-tokens.json` from the volume. After the first successful start, the original environment token and cookie may expire without interrupting renewal.
 
+The container health check reports whether the `rpa` daemon is alive. Authentication readiness is intentionally separate: token and cookie may come from Coolify variables before the persistent token file is created, while renewal failures remain visible in the application logs.
+
 Keep exactly one running `rpa` instance for each Telegram bot token. Telegram long polling permits only one `getUpdates` consumer, so a second Coolify replica or a local daemon using the production token will cause HTTP 409 conflicts. Use the automated test suite or a separate development bot token for local validation, and keep the Coolify replica count at one.
 
 ## Configuration

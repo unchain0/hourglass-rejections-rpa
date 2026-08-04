@@ -39,5 +39,5 @@ ENV TZ=America/Sao_Paulo \
 
 VOLUME ["/home/rpa/.hourglass-rpa"]
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
-    CMD pgrep -x rpa >/dev/null && test -s "$WEBAUTHN_TOKENS_PATH" || exit 1
+    CMD test "$(cat /proc/1/comm)" = "rpa"
 ENTRYPOINT ["./rpa"]
