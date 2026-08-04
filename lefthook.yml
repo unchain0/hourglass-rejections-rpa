@@ -63,14 +63,6 @@ pre-push:
       run: |
         env GOTOOLCHAIN=auto bash -c '
           go test -short -race -timeout 5m -coverprofile=coverage.out ./...
-        '
-    coverage:
-      run: |
-        env GOTOOLCHAIN=auto bash -c '
-          if [ ! -f coverage.out ]; then
-            echo "ERROR: coverage.out not found. Run tests first."
-            exit 1
-          fi
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk "{print \$3}" | sed "s/%//")
           echo "Total coverage: ${COVERAGE}%"
           # Use bc if available, otherwise awk for comparison
