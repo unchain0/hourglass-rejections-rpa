@@ -12,6 +12,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 	"hourglass-rejections-rpa/src/integrations/config"
 	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/integrations/logger"
@@ -74,6 +75,16 @@ func main() {
 var telemetryClientGlobal *telemetry.Client
 var enableWebAuthnClient = func(apiClient *hourglass.Client, credentialsPath string) error {
 	return apiClient.EnableWebAuthn(credentialsPath, captureError)
+}
+var bootstrapWebAuthnCredential = func(credentialsPath, baseURL, xsrfToken, hgLogin string) error {
+	authenticator, err := webauthn.NewAuthenticator(credentialsPath, baseURL)
+	if err != nil {
+		return err
+	}
+
+	authenticator.SetCookies(xsrfToken, hgLogin)
+	_, err = authenticator.Register("Hourglass RPA")
+	return err
 }
 
 func captureError(err error, extras map[string]any) {
@@ -230,23 +241,27 @@ func enableWebAuthnTokenManager(apiClient *hourglass.Client, cfg *config.Config)
 
 	credentialsAvailable := false
 	if credentialsPath != "" {
-		_, err := os.Stat(credentialsPath)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				if profileDir == "" {
-					slog.Info("authentication credentials not found, using static token flow", "path", credentialsPath)
-					return false
-				}
-				slog.Info("webauthn credentials not found, continuing with persistent browser profile auth", "path", credentialsPath, "profile_dir", profileDir)
-			} else {
-				if profileDir == "" {
-					slog.Warn("failed to inspect webauthn credentials path", "path", credentialsPath, "error", err)
-					return false
-				}
-				slog.Warn("failed to inspect webauthn credentials path, continuing with persistent browser profile auth", "path", credentialsPath, "profile_dir", profileDir, "error", err)
-			}
-		} else {
+		_, statErr := os.Stat(credentialsPath)
+		switch {
+		case statErr == nil:
 			credentialsAvailable = true
+		case errors.Is(statErr, os.ErrNotExist) && cfg.HourglassXSRFToken != "" && cfg.HourglassHGLogin != "":
+			if err := bootstrapWebAuthnCredential(credentialsPath, cfg.HourglassURL, cfg.HourglassXSRFToken, cfg.HourglassHGLogin); err != nil {
+				slog.Warn("failed to bootstrap automatic authentication from configured session", "path", credentialsPath, "error", err)
+				return false
+			}
+			credentialsAvailable = true
+			slog.Info("registered WebAuthn credential from configured Hourglass session", "path", credentialsPath)
+		case errors.Is(statErr, os.ErrNotExist) && profileDir == "":
+			slog.Info("authentication credentials not found, using static token flow", "path", credentialsPath)
+			return false
+		case errors.Is(statErr, os.ErrNotExist):
+			slog.Info("webauthn credentials not found, continuing with persistent browser profile auth", "path", credentialsPath, "profile_dir", profileDir)
+		case profileDir == "":
+			slog.Warn("failed to inspect webauthn credentials path", "path", credentialsPath, "error", statErr)
+			return false
+		default:
+			slog.Warn("failed to inspect webauthn credentials path, continuing with persistent browser profile auth", "path", credentialsPath, "profile_dir", profileDir, "error", statErr)
 		}
 	}
 

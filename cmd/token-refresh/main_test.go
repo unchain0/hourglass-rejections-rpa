@@ -117,6 +117,40 @@ func TestTokenRefresher_Run_AlreadyValid(t *testing.T) {
 	assert.Equal(t, tokens, manager.primedTokens)
 }
 
+func TestTokenRefresher_Run_UsesEnvironmentSessionWhenFileIsMissing(t *testing.T) {
+	newTokens := &webauthn.AuthTokens{
+		HGLogin:   "renewed-hglogin",
+		XSRFToken: "renewed-xsrf",
+		ExpiresAt: time.Now().Add(8 * time.Hour),
+	}
+	manager := &mockTokenManager{ensuredTokens: newTokens}
+
+	tr := &tokenRefresher{
+		userHomeDir: func() (string, error) { return "/home/test", nil },
+		getenv: func(key string) string {
+			switch key {
+			case "HOURGLASS_HGLOGIN_COOKIE":
+				return "environment-hglogin"
+			case "HOURGLASS_XSRF_TOKEN":
+				return "environment-xsrf"
+			default:
+				return ""
+			}
+		},
+		tokenManagerFactory: func(string, string, ...webauthn.TokenManagerOption) (tokenManager, error) {
+			return manager, nil
+		},
+		baseURL: defaultBaseURL,
+	}
+
+	err := tr.Run()
+	require.NoError(t, err)
+	require.NotNil(t, manager.primedTokens)
+	assert.Equal(t, "environment-hglogin", manager.primedTokens.HGLogin)
+	assert.Equal(t, "environment-xsrf", manager.primedTokens.XSRFToken)
+	assert.True(t, manager.primedTokens.IsExpired(), "environment sessions have unknown expiry and must be renewed immediately")
+}
+
 func TestTokenRefresher_Run_ConfigDirError(t *testing.T) {
 	tr := &tokenRefresher{
 		userHomeDir: func() (string, error) { return "", errors.New("home dir error") },

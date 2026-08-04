@@ -37,6 +37,10 @@ func (s *stubTokenManager) Start(context.Context) error { return nil }
 
 func (s *stubTokenManager) Stop() {}
 
+func (s *stubTokenManager) PrimeTokens(tokens *webauthn.AuthTokens) {
+	s.current = tokens
+}
+
 func (s *stubTokenManager) EnsureValidTokens() (*webauthn.AuthTokens, error) {
 	s.ensureCalls++
 	return s.current, nil
@@ -74,6 +78,23 @@ func TestClient_SetBaseURL_UsesDefaultWhenEmpty(t *testing.T) {
 	client := NewClient()
 	client.SetBaseURL("")
 	assert.Equal(t, defaultBaseURL, client.baseURL)
+}
+
+func TestClient_EnableWebAuthn_PrimesConfiguredSession(t *testing.T) {
+	client := NewClient()
+	client.SetHGLogin("bootstrap-hg-login")
+	client.SetXSRFToken("bootstrap-xsrf-token")
+
+	err := client.EnableWebAuthn(filepath.Join(t.TempDir(), "credentials.json"), nil)
+	require.NoError(t, err)
+
+	manager, ok := client.tokenManager.(*webauthn.TokenManager)
+	require.True(t, ok)
+	tokens := manager.GetTokens()
+	require.NotNil(t, tokens)
+	assert.Equal(t, "bootstrap-hg-login", tokens.HGLogin)
+	assert.Equal(t, "bootstrap-xsrf-token", tokens.XSRFToken)
+	assert.True(t, tokens.IsExpired())
 }
 
 func TestClient_SetBaseURL_KeepsInvalidURLUntouched(t *testing.T) {

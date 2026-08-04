@@ -47,7 +47,7 @@ func TestPriority_SetCookiesAndGenerateUserID(t *testing.T) {
 	assert.Equal(t, "hg-login", a.hgLogin)
 
 	userID := generateUserID()
-	decoded, err := base64.StdEncoding.DecodeString(userID)
+	decoded, err := base64.RawURLEncoding.DecodeString(userID)
 	require.NoError(t, err)
 	assert.Len(t, decoded, 16)
 }
@@ -129,7 +129,7 @@ func TestPriority_LoadCredentialFromPEM(t *testing.T) {
 		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
 		require.NoError(t, os.WriteFile(pemPath, pemBytes, 0o600))
 
-		cred, err := LoadCredentialFromPEM(pemPath, "cred-id", "hourglass-app.com", "dXNlcg==", "Test")
+		cred, err := LoadCredentialFromPEM(pemPath, "cred-id", "hourglass-app.com", base64.RawURLEncoding.EncodeToString([]byte("user")), "Test")
 		require.NoError(t, err)
 		require.NotNil(t, cred)
 		assert.Equal(t, "cred-id", cred.ID)
@@ -367,7 +367,7 @@ func TestPriority_AuthenticateErrorPaths(t *testing.T) {
 		auth, err := NewAuthenticator(storagePath, "https://example.com")
 		require.NoError(t, err)
 
-		cred, err := GenerateCredential("hourglass-app.com", "dXNlcg==", "User")
+		cred, err := GenerateCredential("hourglass-app.com", base64.RawURLEncoding.EncodeToString([]byte("user")), "User")
 		require.NoError(t, err)
 		stored, err := auth.storage.Load()
 		require.NoError(t, err)
@@ -394,7 +394,7 @@ func TestPriority_AuthenticateErrorPaths(t *testing.T) {
 		stored.Credentials = append(stored.Credentials, Credential{
 			ID:         base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef")),
 			PrivateKey: []byte("invalid"),
-			UserID:     base64.StdEncoding.EncodeToString([]byte("user")),
+			UserID:     base64.RawURLEncoding.EncodeToString([]byte("user")),
 			RPID:       "hourglass-app.com",
 		})
 		require.NoError(t, auth.storage.Save(stored))
@@ -529,7 +529,7 @@ func TestPriority_TokenManagerAuthenticateWithFallbackNativeSuccess(t *testing.T
 	tempDir := t.TempDir()
 	storagePath := filepath.Join(tempDir, "credentials.json")
 
-	cred, err := GenerateCredential("hourglass-app.com", base64.StdEncoding.EncodeToString([]byte("user")), "User")
+	cred, err := GenerateCredential("hourglass-app.com", base64.RawURLEncoding.EncodeToString([]byte("user")), "User")
 	require.NoError(t, err)
 	storage, err := NewStorage(storagePath)
 	require.NoError(t, err)
@@ -543,7 +543,7 @@ func TestPriority_TokenManagerAuthenticateWithFallbackNativeSuccess(t *testing.T
 	tm.browserAuth = nil
 	tm.authenticator.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
-		case "/auth/webauthn/login/begin":
+		case "/api/v0.2/auth/webauthn/login/begin":
 			header := make(http.Header)
 			header.Add("Set-Cookie", "hglogin=begin-native")
 			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=begin-native-xsrf")
@@ -552,7 +552,7 @@ func TestPriority_TokenManagerAuthenticateWithFallbackNativeSuccess(t *testing.T
 				Body:       io.NopCloser(strings.NewReader(`{"publicKey":{"challenge":"c","timeout":60000,"rpId":"hourglass-app.com"}}`)),
 				Header:     header,
 			}, nil
-		case "/auth/webauthn/login/finish":
+		case "/api/v0.2/auth/webauthn/login/finish":
 			header := make(http.Header)
 			header.Add("Set-Cookie", "hglogin=native-hg")
 			header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=native-xsrf")
@@ -624,7 +624,7 @@ func TestPriority_BrowserFallbackErrorPathAndChromePath(t *testing.T) {
 
 		_, err := tm.authenticateWithFallback()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "browser auth fallback failed")
+		assert.Contains(t, err.Error(), "browser authentication failed")
 	})
 }
 

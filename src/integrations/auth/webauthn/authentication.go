@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -95,7 +96,7 @@ type BeginAuthenticationResponse struct {
 }
 
 func (a *Authenticator) beginAuthentication() (*BeginAuthenticationResponse, error) {
-	url := fmt.Sprintf("%s/auth/webauthn/login/begin", a.baseURL)
+	url := fmt.Sprintf("%s%s/login/begin", a.baseURL, webAuthnAPIPath)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -189,7 +190,10 @@ func (a *Authenticator) createAssertion(cred *Credential, beginResp *BeginAuthen
 		return nil, fmt.Errorf("create signature: %w", err)
 	}
 
-	userHandle, _ := cred.GetUserIDBytes()
+	userHandle, err := cred.GetUserIDBytes()
+	if err != nil {
+		return nil, fmt.Errorf("decode user handle: %w", err)
+	}
 
 	return &AssertionResponse{
 		Type:                    "public-key",
@@ -209,7 +213,7 @@ func (a *Authenticator) createAssertion(cred *Credential, beginResp *BeginAuthen
 func (a *Authenticator) createAssertionAuthenticatorData(cred *Credential, _ []byte) ([]byte, error) {
 	rpIDHash := sha256.Sum256([]byte(cred.RPID))
 
-	flags := byte(0x1d)
+	flags := byte(0x01)
 
 	signCount := make([]byte, 4)
 	binary.BigEndian.PutUint32(signCount, cred.SignCount)
@@ -238,21 +242,14 @@ func (a *Authenticator) createSignature(privateKey *ecdsa.PrivateKey, authData, 
 }
 
 func encodeECDSASignature(r, s *big.Int) ([]byte, error) {
-	signature := make([]byte, 64)
-
-	// Pad r to 32 bytes (big-endian)
-	rBytes := r.Bytes()
-	copy(signature[32-len(rBytes):], rBytes)
-
-	// Pad s to 32 bytes (big-endian)
-	sBytes := s.Bytes()
-	copy(signature[64-len(sBytes):], sBytes)
-
-	return signature, nil
+	return asn1.Marshal(struct {
+		R *big.Int
+		S *big.Int
+	}{R: r, S: s})
 }
 
 func (a *Authenticator) finishAuthentication(assertion *AssertionResponse) (*AuthTokens, error) {
-	url := fmt.Sprintf("%s/auth/webauthn/login/finish", a.baseURL)
+	url := fmt.Sprintf("%s%s/login/finish", a.baseURL, webAuthnAPIPath)
 
 	body, err := json.Marshal(assertion)
 	if err != nil {

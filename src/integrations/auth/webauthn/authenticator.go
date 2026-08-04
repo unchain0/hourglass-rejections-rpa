@@ -15,6 +15,8 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+const webAuthnAPIPath = "/api/v0.2/auth/webauthn"
+
 var (
 	execCommand                     = exec.Command
 	generateCredentialAuthenticator = GenerateCredential
@@ -49,7 +51,7 @@ func NewAuthenticator(storagePath, baseURL string) (*Authenticator, error) {
 
 	return &Authenticator{
 		storage:    storage,
-		baseURL:    baseURL,
+		baseURL:    normalizeWebAuthnBaseURL(baseURL),
 		httpClient: defaultHTTPClient,
 	}, nil
 }
@@ -80,16 +82,10 @@ func (a *Authenticator) Register(userName string) (*Credential, error) {
 		return nil, fmt.Errorf("generate credential failed: %w", err)
 	}
 
-	fmt.Printf("DEBUG: Generated credential - ID: %s, UserID: %s, RPID: %s\n",
-		credential.ID, credential.UserID, credential.RPID)
-
 	attestation, err := createAttestationAuthenticator(a, credential, beginResp)
 	if err != nil {
 		return nil, fmt.Errorf("create attestation failed: %w", err)
 	}
-
-	fmt.Printf("DEBUG: Attestation - Type: %s, ID: %s, RawID: %s\n",
-		attestation.Type, attestation.ID, attestation.RawID)
 
 	if err := finishRegistrationAuthenticator(a, attestation); err != nil {
 		return nil, fmt.Errorf("finish registration failed: %w", err)
@@ -154,7 +150,7 @@ const (
 )
 
 func (a *Authenticator) beginRegistration(_ string) (*BeginRegistrationResponse, error) {
-	url := fmt.Sprintf("%s/auth/webauthn/register/begin", a.baseURL)
+	url := fmt.Sprintf("%s%s/register/begin", a.baseURL, webAuthnAPIPath)
 
 	var body []byte
 	var err error
@@ -173,11 +169,6 @@ func (a *Authenticator) beginRegistration(_ string) (*BeginRegistrationResponse,
 	if err := json.Unmarshal(body, &beginResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-
-	fmt.Printf("DEBUG: Begin response - Challenge: %s, RP ID: %s, User ID: %s\n",
-		beginResp.PublicKey.Challenge,
-		beginResp.PublicKey.Rp.ID,
-		beginResp.PublicKey.User.ID)
 
 	return &beginResp, nil
 }
@@ -283,8 +274,6 @@ func (a *Authenticator) createAttestation(cred *Credential, beginResp *BeginRegi
 		return nil, fmt.Errorf("create authenticator data: %w", err)
 	}
 
-	debugAuthData(authData)
-
 	attestationObject, err := createAttestationObjectAuthenticator(a, authData)
 	if err != nil {
 		return nil, fmt.Errorf("create attestation object: %w", err)
@@ -316,7 +305,6 @@ func (a *Authenticator) createAuthenticatorData(cred *Credential, _ []byte) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("failed to get credential ID bytes: %w", err)
 	}
-	fmt.Printf("DEBUG: credential ID bytes length: %d\n", len(credIDBytes))
 
 	credIDLen := make([]byte, 2)
 	binary.BigEndian.PutUint16(credIDLen, uint16(len(credIDBytes)))
@@ -350,58 +338,21 @@ func (a *Authenticator) createAttestationObject(authData []byte) ([]byte, error)
 	return encMode.Marshal(attObj)
 }
 
-func debugAuthData(authData []byte) {
-	if len(authData) < 37 {
-		fmt.Printf("DEBUG: authData too short: %d bytes\n", len(authData))
-		return
-	}
-	rpIDHash := authData[:32]
-	flags := authData[32]
-	signCount := binary.BigEndian.Uint32(authData[33:37])
-	fmt.Printf("DEBUG: rpIdHash: %x...\n", rpIDHash[:8])
-	fmt.Printf("DEBUG: flags: %02x\n", flags)
-	fmt.Printf("DEBUG: signCount: %d\n", signCount)
-
-	if flags&0x40 != 0 {
-		if len(authData) < 55 {
-			fmt.Printf("DEBUG: authData too short for credential data: %d bytes\n", len(authData))
-			return
-		}
-		credIDLen := binary.BigEndian.Uint16(authData[53:55])
-		fmt.Printf("DEBUG: credentialIdLength: %d\n", credIDLen)
-		if len(authData) >= int(55+credIDLen) {
-			credID := authData[55 : 55+credIDLen]
-			fmt.Printf("DEBUG: credentialId: %s\n", base64.RawURLEncoding.EncodeToString(credID))
-		}
-	}
-}
-
 func (a *Authenticator) finishRegistration(attestation *AttestationResponse) error {
-	url := fmt.Sprintf("%s/auth/webauthn/register/finish", a.baseURL)
+	url := fmt.Sprintf("%s%s/register/finish", a.baseURL, webAuthnAPIPath)
 
 	body, err := jsonMarshalAuthenticator(attestation)
 	if err != nil {
 		return fmt.Errorf("marshal attestation: %w", err)
 	}
 
-	fmt.Printf("DEBUG: Finish registration payload:\n%s\n\n", string(body))
-
-	var respBody []byte
 	if a.xsrfToken != "" && a.hgLogin != "" {
-		respBody, err = a.curlPost(url, body)
+		_, err = a.curlPost(url, body)
 	} else {
-		respBody, err = a.httpPost(url, body)
+		_, err = a.httpPost(url, body)
 	}
 
-	if err != nil {
-		return err
-	}
-
-	if len(respBody) > 0 {
-		return nil
-	}
-
-	return nil
+	return err
 }
 
 func (a *Authenticator) curlPost(url string, data []byte) ([]byte, error) {
@@ -430,9 +381,6 @@ func (a *Authenticator) curlPost(url string, data []byte) ([]byte, error) {
 
 	statusCode := string(lines[len(lines)-1])
 	body := bytes.Join(lines[:len(lines)-1], []byte("\n"))
-
-	fmt.Printf("DEBUG: Response status: %s\n", statusCode)
-	fmt.Printf("DEBUG: Response body: %s\n", string(body))
 
 	if statusCode != "200" && statusCode != "201" {
 		return nil, fmt.Errorf("registration failed: status=%s, body=%s", statusCode, string(body))
@@ -465,5 +413,5 @@ func (a *Authenticator) httpPost(url string, data []byte) ([]byte, error) {
 func generateUserID() string {
 	id := make([]byte, 16)
 	_, _ = rand.Read(id)
-	return base64.StdEncoding.EncodeToString(id)
+	return base64.RawURLEncoding.EncodeToString(id)
 }

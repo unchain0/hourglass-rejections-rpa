@@ -236,7 +236,7 @@ func (c *Credential) Sign(challenge, clientDataHash []byte) ([]byte, error) {
 }
 
 func (c *Credential) GetUserIDBytes() ([]byte, error) {
-	return base64.StdEncoding.DecodeString(c.UserID)
+	return base64.RawURLEncoding.DecodeString(c.UserID)
 }
 
 func (c *Credential) incrementSignCount() {

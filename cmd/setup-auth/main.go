@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 )
 
@@ -216,9 +218,15 @@ type setupRunner struct {
 	configDir       string
 	tokensFile      string
 	osExit          func(int)
+	getenv          func(string) string
 }
 
 func newSetupRunner() *setupRunner {
+	baseURL := os.Getenv("HOURGLASS_URL")
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+
 	return &setupRunner{
 		fs:              osFileSystem{},
 		browserAuthFact: functionBrowserAuthFactory{newFn: newBrowserAuth},
@@ -228,10 +236,11 @@ func newSetupRunner() *setupRunner {
 			stdout: os.Stdout,
 			stderr: os.Stderr,
 		},
-		baseURL:    defaultBaseURL,
+		baseURL:    baseURL,
 		configDir:  defaultConfigDir,
 		tokensFile: defaultTokensFile,
 		osExit:     os.Exit,
+		getenv:     os.Getenv,
 	}
 }
 
@@ -270,6 +279,7 @@ func (o *optionsFileSystem) WriteFile(path string, data []byte, perm os.FileMode
 }
 
 func main() {
+	_ = godotenv.Load()
 	runner := newSetupRunner()
 	runner.launchBrowser = launchChromeForManualLogin
 	runner.waitForConfirm = waitForBrowserConfirmation
@@ -281,6 +291,9 @@ func main() {
 
 func run(opts setupOptions) error {
 	runner := newSetupRunner()
+	if opts.getenv != nil {
+		runner.getenv = opts.getenv
+	}
 	runner.fs = &optionsFileSystem{
 		base:          runner.fs,
 		userHomeDirFn: opts.osUserHomeDir,
@@ -321,6 +334,10 @@ func (r *setupRunner) run() error {
 	existingTokens, err := r.checkExistingTokens(tokensPath)
 	if err != nil {
 		return fmt.Errorf("failed to check existing tokens: %w", err)
+	}
+
+	if environmentTokens := r.environmentBootstrapTokens(credentialsPath); environmentTokens != nil {
+		return r.bootstrapEnvironmentSession(tokensPath, credentialsPath, environmentTokens)
 	}
 
 	if existingTokens != nil {
@@ -388,6 +405,40 @@ func (r *setupRunner) run() error {
 	fmt.Printf("   📁 Location: %s\n", tokensPath)
 	fmt.Println()
 
+	return r.askVPSUploadWithCredentials(tokensPath, credentialsPath)
+}
+
+func (r *setupRunner) environmentBootstrapTokens(credentialsPath string) *webauthn.AuthTokens {
+	if r.getenv == nil {
+		return nil
+	}
+
+	hgLogin := r.getenv("HOURGLASS_HGLOGIN_COOKIE")
+	xsrfToken := r.getenv("HOURGLASS_XSRF_TOKEN")
+	if hgLogin == "" || xsrfToken == "" {
+		return nil
+	}
+	if _, err := os.Stat(credentialsPath); !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	return &webauthn.AuthTokens{
+		HGLogin:   hgLogin,
+		XSRFToken: xsrfToken,
+		ExpiresAt: time.Now().Add(-time.Second),
+	}
+}
+
+func (r *setupRunner) bootstrapEnvironmentSession(tokensPath, credentialsPath string, tokens *webauthn.AuthTokens) error {
+	fmt.Println("🔑 Valid session found in the environment; registering automatic renewal without opening a browser.")
+	if err := r.registerWebAuthnCredential(credentialsPath, tokens); err != nil {
+		return fmt.Errorf("failed to bootstrap automatic renewal from environment session: %w", err)
+	}
+	if err := r.saveTokens(tokensPath, tokens); err != nil {
+		return fmt.Errorf("failed to save bootstrap tokens: %w", err)
+	}
+
+	fmt.Println("✅ WebAuthn credential registered. The token-refresh command can now renew the session automatically.")
 	return r.askVPSUploadWithCredentials(tokensPath, credentialsPath)
 }
 

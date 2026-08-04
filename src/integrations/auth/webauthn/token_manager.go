@@ -421,7 +421,7 @@ func (tm *TokenManager) authenticateWithFallback(currentTokens ...*AuthTokens) (
 
 func (tm *TokenManager) authenticateWithCurrentTokens(currentTokens *AuthTokens) (*AuthTokens, error) {
 	hasCredentials := tm.HasWebAuthnCredentials()
-	preferWebAuthn := IsHeadlessEnvironment() && hasCredentials
+	preferWebAuthn := hasCredentials
 	slog.Info("attempting authentication fallback", "has_browser_auth", tm.browserAuth != nil, "has_credentials", hasCredentials, "prefer_webauthn", preferWebAuthn)
 	if IsHeadlessEnvironment() && !hasCredentials && tm.browserAuth != nil && tm.browserProfileDir != "" && !browserProfileHasCookieStore(tm.browserProfileDir) {
 		return nil, fmt.Errorf("persistent browser profile has no cookie store at %s; run setup-auth and import the generated authentication files before starting the headless service", tm.browserProfileDir)
@@ -439,7 +439,7 @@ func (tm *TokenManager) authenticateWithCurrentTokens(currentTokens *AuthTokens)
 		if tm.browserAuth == nil {
 			return nil, err
 		}
-		slog.Warn("WebAuthn authentication failed in headless mode, falling back to browser profile auth", "error", err)
+		slog.Warn("WebAuthn authentication failed, falling back to browser profile auth", "error", err)
 		return tm.authenticateWithBrowser()
 	}
 

@@ -26,74 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func restoreWebAuthnCoreHooks(t *testing.T) {
-	t.Helper()
-
-	originalOsMkdirAllTypes := osMkdirAllTypes
-	originalOsReadFileTypes := osReadFileTypes
-	originalOsWriteFileTypes := osWriteFileTypes
-	originalJSONMarshalIndentTypes := jsonMarshalIndentTypes
-	originalECDSAGenerateKey := ecdsaGenerateKey
-	originalX509MarshalPKCS8PrivateKey := x509MarshalPKCS8PrivateKey
-	originalIOReadFullTypes := ioReadFullTypes
-	originalCBORMarshalTypes := cborMarshalTypes
-	originalX509ParsePKCS8PrivateKey := x509ParsePKCS8PrivateKey
-	originalECDSASignASN1Types := ecdsaSignASN1Types
-	originalJSONMarshalAuthentication := jsonMarshalAuthentication
-	originalCreateAssertionAuthData := createAssertionAuthData
-	originalCreateAssertionSignature := createAssertionSignature
-	originalECDSASignAuthentication := ecdsaSignAuthentication
-	originalGenerateCredentialAuthenticator := generateCredentialAuthenticator
-	originalCreateAttestationAuthenticator := createAttestationAuthenticator
-	originalFinishRegistrationAuthenticator := finishRegistrationAuthenticator
-	originalCreateAuthenticatorDataAuthenticator := createAuthenticatorDataAuthenticator
-	originalCreateAttestationObjectAuthenticator := createAttestationObjectAuthenticator
-	originalJSONMarshalAuthenticator := jsonMarshalAuthenticator
-	originalOSUserHomeDirTokenManager := osUserHomeDirTokenManager
-	originalOSMkdirAllTokenManager := osMkdirAllTokenManager
-	originalOSWriteFileTokenManager := osWriteFileTokenManager
-	originalOSRenameTokenManager := osRenameTokenManager
-	originalOSRemoveTokenManager := osRemoveTokenManager
-	originalOSStatTokenManager := osStatTokenManager
-	originalOSReadFileTokenManager := osReadFileTokenManager
-	originalJSONMarshalTokenManager := jsonMarshalTokenManager
-	originalJSONUnmarshalTokenManager := jsonUnmarshalTokenManager
-	originalNewRenewalTicker := newRenewalTicker
-
-	t.Cleanup(func() {
-		osMkdirAllTypes = originalOsMkdirAllTypes
-		osReadFileTypes = originalOsReadFileTypes
-		osWriteFileTypes = originalOsWriteFileTypes
-		jsonMarshalIndentTypes = originalJSONMarshalIndentTypes
-		ecdsaGenerateKey = originalECDSAGenerateKey
-		x509MarshalPKCS8PrivateKey = originalX509MarshalPKCS8PrivateKey
-		ioReadFullTypes = originalIOReadFullTypes
-		cborMarshalTypes = originalCBORMarshalTypes
-		x509ParsePKCS8PrivateKey = originalX509ParsePKCS8PrivateKey
-		ecdsaSignASN1Types = originalECDSASignASN1Types
-		jsonMarshalAuthentication = originalJSONMarshalAuthentication
-		createAssertionAuthData = originalCreateAssertionAuthData
-		createAssertionSignature = originalCreateAssertionSignature
-		ecdsaSignAuthentication = originalECDSASignAuthentication
-		generateCredentialAuthenticator = originalGenerateCredentialAuthenticator
-		createAttestationAuthenticator = originalCreateAttestationAuthenticator
-		finishRegistrationAuthenticator = originalFinishRegistrationAuthenticator
-		createAuthenticatorDataAuthenticator = originalCreateAuthenticatorDataAuthenticator
-		createAttestationObjectAuthenticator = originalCreateAttestationObjectAuthenticator
-		jsonMarshalAuthenticator = originalJSONMarshalAuthenticator
-		osUserHomeDirTokenManager = originalOSUserHomeDirTokenManager
-		osMkdirAllTokenManager = originalOSMkdirAllTokenManager
-		osWriteFileTokenManager = originalOSWriteFileTokenManager
-		osRenameTokenManager = originalOSRenameTokenManager
-		osRemoveTokenManager = originalOSRemoveTokenManager
-		osStatTokenManager = originalOSStatTokenManager
-		osReadFileTokenManager = originalOSReadFileTokenManager
-		jsonMarshalTokenManager = originalJSONMarshalTokenManager
-		jsonUnmarshalTokenManager = originalJSONUnmarshalTokenManager
-		newRenewalTicker = originalNewRenewalTicker
-	})
-}
-
 func mustWriteECDSAPrivateKeyPEM(t *testing.T) string {
 	t.Helper()
 
@@ -111,7 +43,7 @@ func mustWriteECDSAPrivateKeyPEM(t *testing.T) string {
 func mustGenerateCredentialForTest(t *testing.T) *Credential {
 	t.Helper()
 
-	cred, err := GenerateCredential("hourglass-app.com", base64.StdEncoding.EncodeToString([]byte("user")), "Test User")
+	cred, err := GenerateCredential("hourglass-app.com", base64.RawURLEncoding.EncodeToString([]byte("user")), "Test User")
 	require.NoError(t, err)
 	return cred
 }
@@ -211,7 +143,7 @@ func TestCoverageEnvironmentBranches(t *testing.T) {
 
 func TestCoverageTypesBranches(t *testing.T) {
 	t.Run("new storage returns mkdir error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 		osMkdirAllTypes = func(string, os.FileMode) error { return errors.New("mkdir failed") }
 
 		_, err := NewStorage("/tmp/credentials.json")
@@ -220,7 +152,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 	})
 
 	t.Run("load returns read error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 		osReadFileTypes = func(string) ([]byte, error) { return nil, errors.New("read failed") }
 
 		_, err := (&Storage{path: "/tmp/credentials.json"}).Load()
@@ -229,7 +161,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 	})
 
 	t.Run("save returns marshal error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 		jsonMarshalIndentTypes = func(v any, prefix, indent string) ([]byte, error) {
 			return nil, errors.New("marshal failed")
 		}
@@ -241,7 +173,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 
 	t.Run("generate credential covers all error branches", func(t *testing.T) {
 		t.Run("key generation error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			ecdsaGenerateKey = func(elliptic.Curve, io.Reader) (*ecdsa.PrivateKey, error) {
 				return nil, errors.New("keygen failed")
 			}
@@ -252,7 +184,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 		})
 
 		t.Run("marshal private key error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			x509MarshalPKCS8PrivateKey = func(any) ([]byte, error) {
 				return nil, errors.New("marshal failed")
 			}
@@ -263,7 +195,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 		})
 
 		t.Run("credential id generation error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			ioReadFullTypes = func(io.Reader, []byte) (int, error) {
 				return 0, errors.New("random read failed")
 			}
@@ -274,7 +206,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 		})
 
 		t.Run("cose public key error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cborMarshalTypes = func(any) ([]byte, error) {
 				return nil, errors.New("cbor failed")
 			}
@@ -287,7 +219,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 
 	t.Run("load credential from pem covers remaining errors", func(t *testing.T) {
 		t.Run("marshal private key error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			x509MarshalPKCS8PrivateKey = func(any) ([]byte, error) {
 				return nil, errors.New("marshal failed")
 			}
@@ -298,7 +230,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 		})
 
 		t.Run("cose public key error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cborMarshalTypes = func(any) ([]byte, error) {
 				return nil, errors.New("cbor failed")
 			}
@@ -310,7 +242,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 	})
 
 	t.Run("get private key rejects non ecdsa keys", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 
 		rsaKey, err := rsa.GenerateKey(crand.Reader, 2048)
 		require.NoError(t, err)
@@ -324,7 +256,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 	})
 
 	t.Run("sign returns signing error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 		cred := mustGenerateCredentialForTest(t)
 		ecdsaSignASN1Types = func(io.Reader, *ecdsa.PrivateKey, []byte) ([]byte, error) {
 			return nil, errors.New("sign failed")
@@ -338,7 +270,7 @@ func TestCoverageTypesBranches(t *testing.T) {
 
 func TestCoverageAuthenticationBranches(t *testing.T) {
 	t.Run("stored credential helpers handle errors", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 
 		auth := &Authenticator{storage: &Storage{path: t.TempDir()}}
 
@@ -358,7 +290,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 	})
 
 	t.Run("begin authentication forwards cookie and stores response cookies", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 
 		auth := &Authenticator{
 			baseURL: "https://example.com",
@@ -390,7 +322,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 
 	t.Run("create assertion covers remaining error branches", func(t *testing.T) {
 		t.Run("marshal client data error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cred := mustGenerateCredentialForTest(t)
 			jsonMarshalAuthentication = func(any) ([]byte, error) {
 				return nil, errors.New("marshal failed")
@@ -408,7 +340,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 		})
 
 		t.Run("authenticator data error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cred := mustGenerateCredentialForTest(t)
 			createAssertionAuthData = func(*Authenticator, *Credential, []byte) ([]byte, error) {
 				return nil, errors.New("auth data failed")
@@ -426,7 +358,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 		})
 
 		t.Run("signature error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cred := mustGenerateCredentialForTest(t)
 			createAssertionSignature = func(*Authenticator, *ecdsa.PrivateKey, []byte, []byte) ([]byte, error) {
 				return nil, errors.New("signature failed")
@@ -445,7 +377,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 	})
 
 	t.Run("create signature returns signing error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 		key, err := ecdsa.GenerateKey(elliptic.P256(), crand.Reader)
 		require.NoError(t, err)
 
@@ -459,7 +391,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 	})
 
 	t.Run("finish authentication returns request creation error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 
 		_, err := (&Authenticator{baseURL: "://bad-url"}).finishAuthentication(&AssertionResponse{})
 		require.Error(t, err)
@@ -467,7 +399,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 
 	t.Run("authenticate wraps finish and update errors", func(t *testing.T) {
 		t.Run("finish authentication error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			storagePath := filepath.Join(t.TempDir(), "credentials.json")
 			cred := mustGenerateCredentialForTest(t)
@@ -478,7 +410,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 				baseURL: "https://example.com",
 				httpClient: &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 					switch req.URL.Path {
-					case "/auth/webauthn/login/begin":
+					case "/api/v0.2/auth/webauthn/login/begin":
 						return &http.Response{
 							StatusCode: http.StatusOK,
 							Body: io.NopCloser(strings.NewReader(
@@ -486,7 +418,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 							)),
 							Header: make(http.Header),
 						}, nil
-					case "/auth/webauthn/login/finish":
+					case "/api/v0.2/auth/webauthn/login/finish":
 						return &http.Response{
 							StatusCode: http.StatusUnauthorized,
 							Body:       io.NopCloser(strings.NewReader("unauthorized")),
@@ -505,7 +437,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 		})
 
 		t.Run("update stored credential error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			storagePath := filepath.Join(t.TempDir(), "credentials.json")
 			cred := mustGenerateCredentialForTest(t)
@@ -518,7 +450,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 			badPath := t.TempDir()
 			auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 				switch req.URL.Path {
-				case "/auth/webauthn/login/begin":
+				case "/api/v0.2/auth/webauthn/login/begin":
 					header := make(http.Header)
 					header.Add("Set-Cookie", "hglogin=begin-hg")
 					header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=begin-xsrf")
@@ -529,7 +461,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 						)),
 						Header: header,
 					}, nil
-				case "/auth/webauthn/login/finish":
+				case "/api/v0.2/auth/webauthn/login/finish":
 					auth.storage.path = badPath
 					header := make(http.Header)
 					header.Add("Set-Cookie", "hglogin=final-hg")
@@ -554,7 +486,7 @@ func TestCoverageAuthenticationBranches(t *testing.T) {
 
 func TestCoverageAuthenticatorBranches(t *testing.T) {
 	t.Run("new authenticator returns storage error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 
 		tempFile := filepath.Join(t.TempDir(), "not-a-dir")
 		require.NoError(t, os.WriteFile(tempFile, []byte("x"), 0o600))
@@ -565,14 +497,14 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 
 	t.Run("register covers remaining branches", func(t *testing.T) {
 		t.Run("defaults empty user id and rp id", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			storagePath := filepath.Join(t.TempDir(), "credentials.json")
 			auth, err := NewAuthenticator(storagePath, "https://example.com")
 			require.NoError(t, err)
 			auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 				switch req.URL.Path {
-				case "/auth/webauthn/register/begin":
+				case "/api/v0.2/auth/webauthn/register/begin":
 					return &http.Response{
 						StatusCode: http.StatusOK,
 						Body: io.NopCloser(strings.NewReader(
@@ -580,7 +512,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 						)),
 						Header: make(http.Header),
 					}, nil
-				case "/auth/webauthn/register/finish":
+				case "/api/v0.2/auth/webauthn/register/finish":
 					return &http.Response{
 						StatusCode: http.StatusCreated,
 						Body:       io.NopCloser(strings.NewReader("created")),
@@ -599,7 +531,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("begin registration error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			auth := &Authenticator{
 				baseURL: "https://example.com",
@@ -615,7 +547,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("generate credential error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			generateCredentialAuthenticator = func(string, string, string) (*Credential, error) {
 				return nil, errors.New("generate failed")
 			}
@@ -638,7 +570,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("create attestation error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			createAttestationAuthenticator = func(*Authenticator, *Credential, *BeginRegistrationResponse) (*AttestationResponse, error) {
 				return nil, errors.New("attestation failed")
 			}
@@ -661,7 +593,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("finish registration error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			finishRegistrationAuthenticator = func(*Authenticator, *AttestationResponse) error {
 				return errors.New("finish failed")
 			}
@@ -684,7 +616,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("load credentials error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			auth := &Authenticator{
 				baseURL: "https://example.com",
@@ -711,7 +643,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("save credential error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			osWriteFileTypes = func(string, []byte, os.FileMode) error {
 				return errors.New("write failed")
 			}
@@ -739,7 +671,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 
 	t.Run("begin registration covers curl and decode branches", func(t *testing.T) {
 		t.Run("uses curl when cookies are present", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			setMockExecCommand(t, `{"publicKey":{"rp":{"id":"hourglass-app.com"},"user":{"id":"user"},"challenge":"challenge"}}`+"\n200", 0)
 
 			auth := &Authenticator{baseURL: "https://example.com", xsrfToken: "x", hgLogin: "h"}
@@ -750,7 +682,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("decode error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			auth := &Authenticator{
 				baseURL: "https://example.com",
@@ -771,7 +703,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 
 	t.Run("create attestation covers remaining error branches", func(t *testing.T) {
 		t.Run("marshal client data error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cred := mustGenerateCredentialForTest(t)
 			jsonMarshalAuthenticator = func(any) ([]byte, error) {
 				return nil, errors.New("marshal failed")
@@ -785,7 +717,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("authenticator data error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cred := mustGenerateCredentialForTest(t)
 			createAuthenticatorDataAuthenticator = func(*Authenticator, *Credential, []byte) ([]byte, error) {
 				return nil, errors.New("auth data failed")
@@ -799,7 +731,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("attestation object error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			cred := mustGenerateCredentialForTest(t)
 			createAttestationObjectAuthenticator = func(*Authenticator, []byte) ([]byte, error) {
 				return nil, errors.New("attestation object failed")
@@ -814,7 +746,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 	})
 
 	t.Run("create authenticator data rejects invalid credential ids", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 		cred := &Credential{ID: "!!!", PublicKey: []byte("pub"), RPID: "hourglass-app.com"}
 
 		_, err := (&Authenticator{}).createAuthenticatorData(cred, []byte("client"))
@@ -822,17 +754,9 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to get credential ID bytes")
 	})
 
-	t.Run("debug auth data covers short branches", func(t *testing.T) {
-		debugAuthData([]byte("short"))
-
-		authData := make([]byte, 54)
-		authData[32] = 0x40
-		debugAuthData(authData)
-	})
-
 	t.Run("finish registration covers marshal, curl, and empty-body success", func(t *testing.T) {
 		t.Run("marshal error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			jsonMarshalAuthenticator = func(any) ([]byte, error) {
 				return nil, errors.New("marshal failed")
 			}
@@ -843,7 +767,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("uses curl path", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			setMockExecCommand(t, "created\n201", 0)
 
 			err := (&Authenticator{
@@ -855,7 +779,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 		})
 
 		t.Run("returns nil on empty http body", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			auth := &Authenticator{
 				baseURL: "https://example.com",
@@ -876,7 +800,7 @@ func TestCoverageAuthenticatorBranches(t *testing.T) {
 func TestCoverageTokenManagerBranches(t *testing.T) {
 	t.Run("new token manager covers home dir, headless, and authenticator errors", func(t *testing.T) {
 		t.Run("uses home dir fallback and disables browser auth when headless", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			tempDir := t.TempDir()
 			t.Setenv("WEBAUTHN_CREDENTIALS_PATH", "")
 			t.Setenv("WEBAUTHN_TOKENS_PATH", "")
@@ -892,7 +816,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		})
 
 		t.Run("propagates authenticator construction error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			tempFile := filepath.Join(t.TempDir(), "not-a-dir")
 			require.NoError(t, os.WriteFile(tempFile, []byte("x"), 0o600))
 
@@ -902,7 +826,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 	})
 
 	t.Run("start returns ensure valid tokens error", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 
 		tm, err := NewTokenManager(filepath.Join(t.TempDir(), "credentials.json"), "https://example.com", WithBrowserAuth(nil))
 		require.NoError(t, err)
@@ -913,7 +837,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 
 	t.Run("ensure valid tokens covers concurrent refresh and incomplete tokens", func(t *testing.T) {
 		t.Run("returns tokens refreshed by another goroutine", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			tm := &TokenManager{renewalThreshold: time.Hour, stopChan: make(chan struct{})}
 			tm.setTokens(&AuthTokens{HGLogin: "old", XSRFToken: "old", ExpiresAt: time.Now().Add(10 * time.Minute)})
@@ -942,7 +866,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		})
 
 		t.Run("reauthenticates incomplete tokens and ignores save failure", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 
 			storagePath := filepath.Join(t.TempDir(), "credentials.json")
 			cred := mustGenerateCredentialForTest(t)
@@ -957,7 +881,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 			}
 			tm.authenticator.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 				switch req.URL.Path {
-				case "/auth/webauthn/login/begin":
+				case "/api/v0.2/auth/webauthn/login/begin":
 					header := make(http.Header)
 					header.Add("Set-Cookie", "hglogin=begin-hg")
 					header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=begin-xsrf")
@@ -966,7 +890,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 						Body:       io.NopCloser(strings.NewReader(`{"publicKey":{"challenge":"challenge","timeout":1,"rpId":"hourglass-app.com"}}`)),
 						Header:     header,
 					}, nil
-				case "/auth/webauthn/login/finish":
+				case "/api/v0.2/auth/webauthn/login/finish":
 					header := make(http.Header)
 					header.Add("Set-Cookie", "hglogin=final-hg")
 					header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=final-xsrf")
@@ -1005,7 +929,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		tokens := &AuthTokens{HGLogin: "h", XSRFToken: "x", ExpiresAt: time.Now().Add(time.Hour)}
 
 		t.Run("marshal error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			jsonMarshalTokenManager = func(any) ([]byte, error) {
 				return nil, errors.New("marshal failed")
 			}
@@ -1016,7 +940,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		})
 
 		t.Run("mkdir error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			osMkdirAllTokenManager = func(string, os.FileMode) error {
 				return errors.New("mkdir failed")
 			}
@@ -1027,7 +951,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		})
 
 		t.Run("write temp file error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			osWriteFileTokenManager = func(string, []byte, os.FileMode) error {
 				return errors.New("write failed")
 			}
@@ -1038,7 +962,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		})
 
 		t.Run("rename error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			osWriteFileTokenManager = func(string, []byte, os.FileMode) error { return nil }
 			osRenameTokenManager = func(string, string) error { return errors.New("rename failed") }
 
@@ -1048,7 +972,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		})
 
 		t.Run("stat error is ignored", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			osWriteFileTokenManager = func(string, []byte, os.FileMode) error { return nil }
 			osRenameTokenManager = func(string, string) error { return nil }
 			osStatTokenManager = func(string) (os.FileInfo, error) { return nil, errors.New("stat failed") }
@@ -1059,14 +983,14 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 
 	t.Run("load tokens covers remaining error branches", func(t *testing.T) {
 		t.Run("empty path", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			_, err := (&TokenManager{}).LoadTokens()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "tokens path is not configured")
 		})
 
 		t.Run("read error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			osReadFileTokenManager = func(string) ([]byte, error) {
 				return nil, errors.New("read failed")
 			}
@@ -1077,7 +1001,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 		})
 
 		t.Run("unmarshal error", func(t *testing.T) {
-			restoreWebAuthnCoreHooks(t)
+			restoreWebAuthnHooks(t)
 			osReadFileTokenManager = func(string) ([]byte, error) {
 				return []byte(`{"bad":true}`), nil
 			}
@@ -1092,7 +1016,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 	})
 
 	t.Run("authenticate with fallback returns browser auth success", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 		restoreBrowserAuthHooks(t)
 		t.Setenv("CHROME_BIN", "/tmp/chrome")
 
@@ -1121,7 +1045,7 @@ func TestCoverageTokenManagerBranches(t *testing.T) {
 	})
 
 	t.Run("renewal loop handles ticker errors", func(t *testing.T) {
-		restoreWebAuthnCoreHooks(t)
+		restoreWebAuthnHooks(t)
 
 		ticker := &fakeTicker{ch: make(chan time.Time, 1)}
 		newRenewalTicker = func(time.Duration) renewalTicker { return ticker }

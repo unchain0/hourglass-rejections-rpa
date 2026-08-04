@@ -113,7 +113,7 @@ func restoreWebAuthnHooks(t *testing.T) {
 
 func mustCredential(t *testing.T) *Credential {
 	t.Helper()
-	cred, err := GenerateCredential("hourglass-app.com", base64.StdEncoding.EncodeToString([]byte("user")), "User")
+	cred, err := GenerateCredential("hourglass-app.com", base64.RawURLEncoding.EncodeToString([]byte("user")), "User")
 	require.NoError(t, err)
 	return cred
 }
@@ -133,7 +133,7 @@ func testBeginRegistrationResponse() *BeginRegistrationResponse {
 	return &BeginRegistrationResponse{
 		PublicKey: PublicKeyClass{
 			Rp:        Rp{Name: "Hourglass", ID: "hourglass-app.com"},
-			User:      User{Name: "User", DisplayName: "User", ID: base64.StdEncoding.EncodeToString([]byte("user"))},
+			User:      User{Name: "User", DisplayName: "User", ID: base64.RawURLEncoding.EncodeToString([]byte("user"))},
 			Challenge: "challenge",
 			AuthenticatorSelection: AuthenticatorSelection{
 				AuthenticatorAttachment: "platform",
@@ -302,7 +302,7 @@ func TestTypesCoverage(t *testing.T) {
 		x509MarshalPKCS8PrivateKey = func(key any) ([]byte, error) {
 			return nil, errors.New("marshal failed")
 		}
-		_, err := LoadCredentialFromPEM(pemPath, "cred-id", "hourglass-app.com", "dXNlcg==", "User")
+		_, err := LoadCredentialFromPEM(pemPath, "cred-id", "hourglass-app.com", "dXNlcg", "User")
 		require.Error(t, err)
 
 		resetWebAuthnHooks()
@@ -310,7 +310,7 @@ func TestTypesCoverage(t *testing.T) {
 		cborMarshalTypes = func(v any) ([]byte, error) {
 			return nil, errors.New("cbor failed")
 		}
-		_, err = LoadCredentialFromPEM(pemPath, "cred-id", "hourglass-app.com", "dXNlcg==", "User")
+		_, err = LoadCredentialFromPEM(pemPath, "cred-id", "hourglass-app.com", "dXNlcg", "User")
 		require.Error(t, err)
 	})
 
@@ -435,13 +435,13 @@ func TestAuthenticationCoverage(t *testing.T) {
 
 		auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
-			case "/auth/webauthn/login/begin":
+			case "/api/v0.2/auth/webauthn/login/begin":
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Body:       io.NopCloser(strings.NewReader(`{"publicKey":{"challenge":"c","timeout":1,"rpId":"hourglass-app.com"}}`)),
 					Header:     make(http.Header),
 				}, nil
-			case "/auth/webauthn/login/finish":
+			case "/api/v0.2/auth/webauthn/login/finish":
 				return &http.Response{
 					StatusCode: http.StatusUnauthorized,
 					Body:       io.NopCloser(strings.NewReader("denied")),
@@ -471,7 +471,7 @@ func TestAuthenticationCoverage(t *testing.T) {
 
 		auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
-			case "/auth/webauthn/login/begin":
+			case "/api/v0.2/auth/webauthn/login/begin":
 				header := make(http.Header)
 				header.Add("Set-Cookie", "hglogin=begin-hg")
 				header.Add("Set-Cookie", "X-Hourglass-XSRF-Token=begin-xsrf")
@@ -480,7 +480,7 @@ func TestAuthenticationCoverage(t *testing.T) {
 					Body:       io.NopCloser(strings.NewReader(`{"publicKey":{"challenge":"c","timeout":1,"rpId":"hourglass-app.com"}}`)),
 					Header:     header,
 				}, nil
-			case "/auth/webauthn/login/finish":
+			case "/api/v0.2/auth/webauthn/login/finish":
 				auth.storage.path = tempDir
 				header := make(http.Header)
 				header.Add("Set-Cookie", "hglogin=done-hg")
@@ -627,7 +627,7 @@ func TestAuthenticatorCoverage(t *testing.T) {
 		restoreWebAuthnHooks(t)
 		auth := &Authenticator{baseURL: "https://example.com"}
 		auth.SetCookies("xsrf", "hglogin")
-		setMockExecCommand(t, `{"publicKey":{"rp":{"name":"Hourglass","id":"hourglass-app.com"},"user":{"name":"User","displayName":"User","id":"dXNlcg=="},"challenge":"challenge"}}`+"\n200", 0)
+		setMockExecCommand(t, `{"publicKey":{"rp":{"name":"Hourglass","id":"hourglass-app.com"},"user":{"name":"User","displayName":"User","id":"dXNlcg"},"challenge":"challenge"}}`+"\n200", 0)
 		beginResp, err := auth.beginRegistration("User")
 		require.NoError(t, err)
 		assert.Equal(t, "challenge", beginResp.PublicKey.Challenge)
@@ -667,13 +667,7 @@ func TestAuthenticatorCoverage(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("debugAuthData and finishRegistration branches", func(t *testing.T) {
-		debugAuthData([]byte{1, 2, 3})
-
-		shortCredData := make([]byte, 54)
-		shortCredData[32] = 0x40
-		debugAuthData(shortCredData)
-
+	t.Run("finishRegistration branches", func(t *testing.T) {
 		auth := &Authenticator{}
 		err := auth.finishRegistration(&AttestationResponse{
 			Type:                   "public-key",

@@ -423,7 +423,6 @@ func TestSetupDependencies_WithTokensPathEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	tokensPath := filepath.Join(tmpDir, "auth-tokens.json")
 
-	// Create a valid tokens file
 	tokens := `{"xsrf_token":"test-token","hg_login":"test-login","expires_at":"2099-01-01T00:00:00Z"}`
 	if err := os.WriteFile(tokensPath, []byte(tokens), 0644); err != nil {
 		t.Fatalf("failed to create tokens file: %v", err)
@@ -623,6 +622,38 @@ func TestEnableWebAuthnTokenManager(t *testing.T) {
 			WebAuthnCredentialsPath: filepath.Join(t.TempDir(), "missing.json"),
 		}
 		assert.False(t, enableWebAuthnTokenManager(client, cfg))
+	})
+
+	t.Run("bootstraps missing credentials from the configured session", func(t *testing.T) {
+		originalBootstrap := bootstrapWebAuthnCredential
+		originalEnable := enableWebAuthnClient
+		t.Cleanup(func() {
+			bootstrapWebAuthnCredential = originalBootstrap
+			enableWebAuthnClient = originalEnable
+		})
+
+		bootstrapped := false
+		bootstrapWebAuthnCredential = func(credentialsPath, baseURL, xsrfToken, hgLogin string) error {
+			bootstrapped = true
+			assert.NotEmpty(t, credentialsPath)
+			assert.Equal(t, "https://app.hourglass-app.com", baseURL)
+			assert.Equal(t, "bootstrap-xsrf", xsrfToken)
+			assert.Equal(t, "bootstrap-hglogin", hgLogin)
+			return nil
+		}
+		enableWebAuthnClient = func(*hourglass.Client, string) error { return nil }
+
+		client := hourglass.NewClient()
+		cfg := &config.Config{
+			HourglassURL:            "https://app.hourglass-app.com",
+			HourglassXSRFToken:      "bootstrap-xsrf",
+			HourglassHGLogin:        "bootstrap-hglogin",
+			AutoRefreshTokens:       true,
+			WebAuthnCredentialsPath: filepath.Join(t.TempDir(), "webauthn-credentials.json"),
+		}
+
+		assert.True(t, enableWebAuthnTokenManager(client, cfg))
+		assert.True(t, bootstrapped)
 	})
 
 	t.Run("credentials path unavailable", func(t *testing.T) {
@@ -898,7 +929,6 @@ func TestCaptureError(t *testing.T) {
 		})
 	})
 
-	// Test with actually enabled telemetry client
 	t.Run("with truly enabled telemetry client", func(t *testing.T) {
 		enabledClient, err := telemetry.New(telemetry.Config{
 			Endpoint:       "https://otel.example.com",

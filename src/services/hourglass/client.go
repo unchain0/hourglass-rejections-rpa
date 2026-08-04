@@ -42,6 +42,7 @@ type authTokenManager interface {
 	Stop()
 	EnsureValidTokens() (*webauthn.AuthTokens, error)
 	ForceRenewal() (*webauthn.AuthTokens, error)
+	PrimeTokens(*webauthn.AuthTokens)
 }
 
 // NewClient creates a new Hourglass API client.
@@ -131,6 +132,13 @@ func (c *Client) EnableWebAuthn(credentialsPath string, capture func(error, map[
 	tokenManager, err := c.newTokenManager(credentialsPath, capture)
 	if err != nil {
 		return fmt.Errorf("failed to create token manager: %w", err)
+	}
+	if c.hgLogin != "" && c.xsrfToken != "" {
+		tokenManager.PrimeTokens(&webauthn.AuthTokens{
+			HGLogin:   c.hgLogin,
+			XSRFToken: c.xsrfToken,
+			ExpiresAt: time.Now().Add(-time.Second),
+		})
 	}
 
 	c.tokenManager = tokenManager

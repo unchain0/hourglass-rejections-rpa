@@ -297,6 +297,32 @@ func TestAuthenticateWithCurrentTokens_PreferWebAuthnFallsBackToBrowser(t *testi
 	assert.Equal(t, "browser", tokens.HGLogin)
 }
 
+func TestAuthenticateWithCurrentTokens_PrefersWebAuthnWhenDisplayIsAvailable(t *testing.T) {
+	restoreTokenManagerHooks(t)
+	t.Setenv("DISPLAY", ":1")
+	storagePath := filepath.Join(t.TempDir(), "credentials.json")
+	storage, err := NewStorage(storagePath)
+	require.NoError(t, err)
+	require.NoError(t, storage.Save(&StoredCredentials{Version: 1, Credentials: []Credential{{ID: "cred-1"}}}))
+
+	browserAuthenticate = func(*BrowserAuth) (*AuthTokens, error) {
+		t.Fatal("browser authentication should not run")
+		return nil, nil
+	}
+	authenticatorAuthenticate = func(*Authenticator) (*AuthTokens, error) {
+		return &AuthTokens{HGLogin: "renewed", XSRFToken: "renewed", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}
+	tm := &TokenManager{
+		authenticator: &Authenticator{storage: storage},
+		storagePath:   storagePath,
+		browserAuth:   NewBrowserAuth("https://example.com"),
+	}
+
+	tokens, err := tm.authenticateWithCurrentTokens(&AuthTokens{HGLogin: "current-hg", XSRFToken: "current-xsrf", ExpiresAt: time.Now()})
+	require.NoError(t, err)
+	assert.Equal(t, "renewed", tokens.HGLogin)
+}
+
 func TestTokenManagerSaveTokensErrors(t *testing.T) {
 	tempDir := t.TempDir()
 	storagePath := filepath.Join(tempDir, "credentials.json")

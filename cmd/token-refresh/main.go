@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 )
 
@@ -31,13 +33,18 @@ type tokenRefresher struct {
 }
 
 func newTokenRefresher() *tokenRefresher {
+	baseURL := os.Getenv("HOURGLASS_URL")
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+
 	return &tokenRefresher{
 		userHomeDir: os.UserHomeDir,
 		getenv:      os.Getenv,
 		tokenManagerFactory: func(credentialsPath, baseURL string, opts ...webauthn.TokenManagerOption) (tokenManager, error) {
 			return webauthn.NewTokenManager(credentialsPath, baseURL, opts...)
 		},
-		baseURL: defaultBaseURL,
+		baseURL: baseURL,
 	}
 }
 
@@ -45,6 +52,7 @@ var osExit = os.Exit
 var newTokenRefresherFunc = newTokenRefresher
 
 func main() {
+	_ = godotenv.Load()
 	tr := newTokenRefresherFunc()
 	if err := tr.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
@@ -92,7 +100,13 @@ func (tr *tokenRefresher) Run() error {
 	}
 
 	if currentTokens == nil {
-		fmt.Println("📭 Nenhum token persistido encontrado.")
+		currentTokens = tr.environmentSession()
+		if currentTokens == nil {
+			fmt.Println("📭 Nenhum token persistido ou sessão configurada encontrado.")
+		} else {
+			fmt.Println("🔑 Usando token e cookie do ambiente como sessão de bootstrap.")
+			tm.PrimeTokens(currentTokens)
+		}
 	} else {
 		fmt.Printf("📅 Tokens atuais válidos até: %s\n", currentTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
 		tm.PrimeTokens(currentTokens)
@@ -116,6 +130,20 @@ func (tr *tokenRefresher) Run() error {
 	fmt.Printf("📅 Validated atual: %s\n", refreshedTokens.ExpiresAt.Format("02/01/2006 15:04:05"))
 
 	return nil
+}
+
+func (tr *tokenRefresher) environmentSession() *webauthn.AuthTokens {
+	hgLogin := tr.getenv("HOURGLASS_HGLOGIN_COOKIE")
+	xsrfToken := tr.getenv("HOURGLASS_XSRF_TOKEN")
+	if hgLogin == "" || xsrfToken == "" {
+		return nil
+	}
+
+	return &webauthn.AuthTokens{
+		HGLogin:   hgLogin,
+		XSRFToken: xsrfToken,
+		ExpiresAt: time.Now().Add(-time.Second),
+	}
 }
 
 func (tr *tokenRefresher) configDir() (string, error) {

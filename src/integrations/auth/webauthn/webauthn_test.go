@@ -1,9 +1,11 @@
 package webauthn
 
 import (
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +17,40 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestEncodeECDSASignature_UsesASN1DERExpectedByWebAuthn(t *testing.T) {
+	signature, err := encodeECDSASignature(big.NewInt(1), big.NewInt(2))
+	require.NoError(t, err)
+
+	var decoded struct {
+		R *big.Int
+		S *big.Int
+	}
+	rest, err := asn1.Unmarshal(signature, &decoded)
+	require.NoError(t, err)
+	assert.Empty(t, rest)
+	assert.Equal(t, big.NewInt(1), decoded.R)
+	assert.Equal(t, big.NewInt(2), decoded.S)
+}
+
+func TestCreateAssertionAuthenticatorData_ReportsOnlyUserPresence(t *testing.T) {
+	cred, err := GenerateCredential("hourglass-app.com", "dGVzdC11c2Vy", "Test User")
+	require.NoError(t, err)
+
+	authData, err := (&Authenticator{}).createAssertionAuthenticatorData(cred, nil)
+	require.NoError(t, err)
+	require.Len(t, authData, 37)
+	assert.Equal(t, byte(0x01), authData[32])
+}
+
+func TestCredential_GetUserIDBytes_DecodesWebAuthnBase64URL(t *testing.T) {
+	want := []byte{0xfb, 0xff, 0xef, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c}
+	cred := &Credential{UserID: base64.RawURLEncoding.EncodeToString(want)}
+
+	got, err := cred.GetUserIDBytes()
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
 
 func TestGenerateCredential(t *testing.T) {
 	rpID := "hourglass-app.com"
@@ -34,12 +70,10 @@ func TestGenerateCredential(t *testing.T) {
 	assert.Equal(t, uint32(0), cred.SignCount)
 	assert.False(t, cred.CreatedAt.IsZero())
 
-	// Verify we can get the private key back
 	privateKey, err := cred.GetPrivateKey()
 	require.NoError(t, err)
 	require.NotNil(t, privateKey)
 
-	// Verify credential ID is valid base64
 	credIDBytes, err := cred.GetCredentialIDBytes()
 	require.NoError(t, err)
 	assert.Len(t, credIDBytes, 16)
@@ -52,13 +86,11 @@ func TestStorage(t *testing.T) {
 	storage, err := NewStorage(storagePath)
 	require.NoError(t, err)
 
-	// Test loading empty storage
 	creds, err := storage.Load()
 	require.NoError(t, err)
 	assert.Empty(t, creds.Credentials)
 	assert.Equal(t, 1, creds.Version)
 
-	// Test saving credentials
 	cred, err := GenerateCredential("hourglass-app.com", "test-user-id", "Test User")
 	require.NoError(t, err)
 
@@ -66,12 +98,10 @@ func TestStorage(t *testing.T) {
 	err = storage.Save(creds)
 	require.NoError(t, err)
 
-	// Verify file has correct permissions
 	info, err := os.Stat(storagePath)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 
-	// Test loading saved credentials
 	loadedCreds, err := storage.Load()
 	require.NoError(t, err)
 	require.Len(t, loadedCreds.Credentials, 1)
@@ -103,14 +133,14 @@ func TestAuthTokens(t *testing.T) {
 	assert.False(t, incompleteTokens.IsUsable())
 }
 
-func TestAuthenticator_Register(t *testing.T) {
+func TestAuthenticator_Register_UsesHourglassAPIPath(t *testing.T) {
 	tempDir := t.TempDir()
 	storagePath := filepath.Join(tempDir, "credentials.json")
 	auth, err := NewAuthenticator(storagePath, "https://example.com")
 	require.NoError(t, err)
 	auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
-		case "/auth/webauthn/register/begin":
+		case "/api/v0.2/auth/webauthn/register/begin":
 			response := BeginRegistrationResponse{
 				PublicKey: PublicKeyClass{
 					Rp: Rp{
@@ -140,7 +170,7 @@ func TestAuthenticator_Register(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader(string(body))),
 				Header:     make(http.Header),
 			}, nil
-		case "/auth/webauthn/register/finish":
+		case "/api/v0.2/auth/webauthn/register/finish":
 			var reqBody AttestationResponse
 			err := json.NewDecoder(req.Body).Decode(&reqBody)
 			require.NoError(t, err)
@@ -164,7 +194,6 @@ func TestAuthenticator_Register(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cred)
 
-	// Verify credential was stored
 	storedCreds, err := auth.storage.Load()
 	require.NoError(t, err)
 	require.Len(t, storedCreds.Credentials, 1)
@@ -195,7 +224,8 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 	storage, err := NewStorage(storagePath)
 	require.NoError(t, err)
 
-	storedCreds, _ := storage.Load()
+	storedCreds, err := storage.Load()
+	require.NoError(t, err)
 	storedCreds.Credentials = append(storedCreds.Credentials, *cred)
 	err = storage.Save(storedCreds)
 	require.NoError(t, err)
@@ -204,7 +234,7 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 	require.NoError(t, err)
 	auth.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
-		case "/auth/webauthn/login/begin":
+		case "/api/v0.2/auth/webauthn/login/begin":
 			assert.Equal(t, http.MethodGet, req.Method)
 			response := BeginAuthenticationResponse{
 				PublicKey: struct {
@@ -227,7 +257,7 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader(string(body))),
 				Header:     header,
 			}, nil
-		case "/auth/webauthn/login/finish":
+		case "/api/v0.2/auth/webauthn/login/finish":
 			var reqBody AssertionResponse
 			err := json.NewDecoder(req.Body).Decode(&reqBody)
 			require.NoError(t, err)
@@ -264,8 +294,8 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 	assert.Equal(t, "test-xsrf-token", tokens.XSRFToken)
 	assert.False(t, tokens.IsExpired())
 
-	// Verify sign count was incremented
-	updatedCreds, _ := auth.storage.Load()
+	updatedCreds, err := auth.storage.Load()
+	require.NoError(t, err)
 	assert.Equal(t, uint32(1), updatedCreds.Credentials[0].SignCount)
 }
 
@@ -274,13 +304,16 @@ func TestTokenManager(t *testing.T) {
 	tempDir := t.TempDir()
 	storagePath := filepath.Join(tempDir, "credentials.json")
 
-	cred, _ := GenerateCredential("hourglass-app.com", "test-user", "Test")
-	storage, _ := NewStorage(storagePath)
-	storedCreds, _ := storage.Load()
+	userID := base64.RawURLEncoding.EncodeToString([]byte("test-user"))
+	cred, err := GenerateCredential("hourglass-app.com", userID, "Test")
+	require.NoError(t, err)
+	storage, err := NewStorage(storagePath)
+	require.NoError(t, err)
+	storedCreds, err := storage.Load()
+	require.NoError(t, err)
 	storedCreds.Credentials = append(storedCreds.Credentials, *cred)
-	storage.Save(storedCreds)
+	require.NoError(t, storage.Save(storedCreds))
 
-	// Create token manager
 	tokenRenewed := false
 	tm, err := NewTokenManager(storagePath, "https://example.com",
 		WithBrowserAuth(nil),
@@ -292,7 +325,7 @@ func TestTokenManager(t *testing.T) {
 	require.NoError(t, err)
 	tm.authenticator.httpClient = &mockHTTPClient{do: func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
-		case "/auth/webauthn/login/begin":
+		case "/api/v0.2/auth/webauthn/login/begin":
 			response := BeginAuthenticationResponse{
 				PublicKey: struct {
 					Challenge string `json:"challenge"`
@@ -314,7 +347,7 @@ func TestTokenManager(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader(string(body))),
 				Header:     header,
 			}, nil
-		case "/auth/webauthn/login/finish":
+		case "/api/v0.2/auth/webauthn/login/finish":
 			authCallCount++
 			header := make(http.Header)
 			header.Add("Set-Cookie", "hglogin=token-value")
@@ -330,14 +363,12 @@ func TestTokenManager(t *testing.T) {
 		}
 	}}
 
-	// Test initial authentication
 	tokens, err := tm.EnsureValidTokens()
 	require.NoError(t, err)
 	require.NotNil(t, tokens)
 	assert.True(t, tokenRenewed)
 	assert.Equal(t, 1, authCallCount)
 
-	// Test that subsequent calls don't re-authenticate (tokens still valid)
 	tokens2, err := tm.EnsureValidTokens()
 	require.NoError(t, err)
 	assert.Equal(t, tokens.HGLogin, tokens2.HGLogin)
@@ -350,7 +381,8 @@ func TestTokenManager(t *testing.T) {
 }
 
 func TestCredential_IncrementSignCount(t *testing.T) {
-	cred, _ := GenerateCredential("test.com", "user", "Test")
+	cred, err := GenerateCredential("test.com", "user", "Test")
+	require.NoError(t, err)
 
 	assert.Equal(t, uint32(0), cred.SignCount)
 	assert.True(t, cred.LastUsedAt.IsZero())
@@ -365,14 +397,12 @@ func TestCredential_IncrementSignCount(t *testing.T) {
 }
 
 func TestBase64Decoding(t *testing.T) {
-	// Test standard encoding
 	data := []byte("test data")
 	encoded := base64.StdEncoding.EncodeToString(data)
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	require.NoError(t, err)
 	assert.Equal(t, data, decoded)
 
-	// Test URL encoding (no padding)
 	urlEncoded := base64.RawURLEncoding.EncodeToString(data)
 	urlDecoded, err := base64.RawURLEncoding.DecodeString(urlEncoded)
 	require.NoError(t, err)

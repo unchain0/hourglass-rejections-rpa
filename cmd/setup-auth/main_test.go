@@ -128,6 +128,43 @@ func TestSetupOptions(t *testing.T) {
 	})
 }
 
+func TestSetupRunnerUsesEnvironmentSessionWithoutBrowser(t *testing.T) {
+	homeDir := t.TempDir()
+	registrar := &mockCredentialRegistrar{}
+	browserStarted := false
+	runner := newSetupRunner()
+	runner.fs = &optionsFileSystem{base: osFileSystem{}, userHomeDirFn: func() (string, error) { return homeDir, nil }}
+	runner.getenv = func(key string) string {
+		switch key {
+		case "HOURGLASS_HGLOGIN_COOKIE":
+			return "environment-hglogin"
+		case "HOURGLASS_XSRF_TOKEN":
+			return "environment-xsrf"
+		default:
+			return ""
+		}
+	}
+	runner.authFactory = func(string, string) (credentialRegistrar, error) { return registrar, nil }
+	runner.launchBrowser = func(string, string) error {
+		browserStarted = true
+		return nil
+	}
+	runner.userInput = &mockUserInput{confirmResult: false}
+
+	err := runner.run()
+	require.NoError(t, err)
+	assert.False(t, browserStarted)
+	assert.Equal(t, "environment-hglogin", registrar.hgLogin)
+	assert.Equal(t, "environment-xsrf", registrar.xsrfToken)
+
+	tokensPath := filepath.Join(homeDir, defaultConfigDir, defaultTokensFile)
+	data, err := os.ReadFile(tokensPath)
+	require.NoError(t, err)
+	var tokens webauthn.AuthTokens
+	require.NoError(t, json.Unmarshal(data, &tokens))
+	assert.True(t, tokens.IsExpired(), "the refresh command must immediately exchange the bootstrapping session")
+}
+
 func TestCheckExistingTokens(t *testing.T) {
 	tempDir := t.TempDir()
 
