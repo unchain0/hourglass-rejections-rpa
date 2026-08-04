@@ -1,5 +1,5 @@
 # Hourglass Rejections RPA Makefile
-.PHONY: all build build-rpa build-save-tokens build-token-refresh build-setup-auth test clean lint fmt vet coverage docker-build docker-run help run run-once save-tokens token-refresh setup-auth copy-to-vps copy-to-vps-password
+.PHONY: all build build-rpa build-save-tokens build-token-refresh build-setup-auth test clean lint fmt vet coverage docker-build docker-run docker-compose-up docker-compose-down docker-auth-bootstrap help run run-once save-tokens token-refresh setup-auth copy-to-vps copy-to-vps-password
 
 # Variables
 BINARY_NAME=rpa
@@ -8,6 +8,8 @@ TOKEN_REFRESH_NAME=token-refresh
 SETUP_AUTH_NAME=setup-auth
 BUILD_DIR=.
 DOCKER_IMAGE=hourglass-rejections-rpa
+APP_VERSION?=dev
+GIT_COMMIT?=$(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 GO=go
 GOFLAGS=-v
 # Ensure Go downloads the correct toolchain version from go.mod
@@ -135,7 +137,7 @@ setup-auth: build-setup-auth
 	@echo "Running setup-auth..."
 	./$(SETUP_AUTH_NAME)
 
-## copy-to-vps: Copy saved tokens to VPS using SSH keys
+## copy-to-vps: Copy tokens and WebAuthn credentials to a VPS using SSH keys
 ## Usage: make copy-to-vps VPS=user@your-vps.com
 copy-to-vps:
 	@if [ -z "$(VPS)" ]; then \
@@ -144,8 +146,10 @@ copy-to-vps:
 		echo "If your VPS uses password authentication, use: make copy-to-vps-password"; \
 		exit 1; \
 	fi
-	@echo "Copying tokens to $(VPS)..."
-	@scp ~/.hourglass-rpa/auth-tokens.json $(VPS):~/.hourglass-rpa/ 2>/dev/null || (echo "❌ scp failed!" && echo "For password auth, use: make copy-to-vps-password VPS=$(VPS)")
+	@echo "Copying authentication files to $(VPS)..."
+	@ssh "$(VPS)" 'install -d -m 700 ~/.hourglass-rpa' && \
+		scp ~/.hourglass-rpa/auth-tokens.json ~/.hourglass-rpa/webauthn-credentials.json "$(VPS):~/.hourglass-rpa/" || \
+		(echo "❌ copy failed!" && echo "For password auth, use: make copy-to-vps-password VPS=$(VPS)" && exit 1)
 
 ## copy-to-vps-password: Copy tokens to VPS with password (interactive)
 ## Usage: make copy-to-vps-password VPS=user@your-vps.com
@@ -161,42 +165,42 @@ copy-to-vps-password:
 		echo "   ssh-copy-id user@your-vps.com"; \
 		echo "   # Then use: make copy-to-vps VPS=user@your-vps.com"; \
 		echo ""; \
-		echo "2. METHOD: scp with password prompt"; \
-		echo "   scp ~/.hourglass-rpa/auth-tokens.json user@your-vps.com:~/.hourglass-rpa/"; \
-		echo ""; \
-		echo "3. METHOD: Manual copy (copy-paste)"; \
-		echo "   a. Show tokens: cat ~/.hourglass-rpa/auth-tokens.json"; \
-		echo "   b. Copy the output"; \
-		echo "   c. On VPS: mkdir -p ~/.hourglass-rpa"; \
-		echo "   d. On VPS: nano ~/.hourglass-rpa/auth-tokens.json"; \
-		echo "   e. Paste and save"; \
+		echo "2. METHOD: use this target with the VPS address"; \
+		echo "   make copy-to-vps-password VPS=user@your-vps.com"; \
 		echo ""; \
 		exit 1; \
 	fi
 	@echo "=== Copying to $(VPS) with password auth ==="
 	@echo "You will be prompted for your VPS password..."
 	@echo ""
-	@scp ~/.hourglass-rpa/auth-tokens.json $(VPS):~/.hourglass-rpa/
+	@ssh "$(VPS)" 'install -d -m 700 ~/.hourglass-rpa'
+	@scp ~/.hourglass-rpa/auth-tokens.json ~/.hourglass-rpa/webauthn-credentials.json "$(VPS):~/.hourglass-rpa/"
 
 ## docker-build: Build Docker image
 docker-build:
 	@echo "Building Docker image..."
-	docker build -t $(DOCKER_IMAGE):latest .
+	docker build --pull --build-arg APP_VERSION=$(APP_VERSION) --build-arg VCS_REF=$(GIT_COMMIT) -t $(DOCKER_IMAGE):$(APP_VERSION) .
 
 ## docker-run: Run Docker container
 docker-run:
 	@echo "Running Docker container..."
-	docker run --rm -it --env-file .env $(DOCKER_IMAGE):latest
+	docker run --rm -it --env-file .env $(DOCKER_IMAGE):$(APP_VERSION)
 
 ## docker-compose-up: Start with Docker Compose
 docker-compose-up:
 	@echo "Starting with Docker Compose..."
-	docker-compose up -d
+	APP_VERSION=$(APP_VERSION) GIT_COMMIT=$(GIT_COMMIT) docker compose up -d --build
 
 ## docker-compose-down: Stop Docker Compose
 docker-compose-down:
 	@echo "Stopping Docker Compose..."
-	docker-compose down
+	docker compose down
+
+## docker-auth-bootstrap: Import locally generated authentication into the Compose volume
+## Usage: make docker-auth-bootstrap AUTH_SOURCE_DIR=$$HOME/.hourglass-rpa
+docker-auth-bootstrap:
+	@test -n "$(AUTH_SOURCE_DIR)" || (echo "AUTH_SOURCE_DIR is required" && exit 1)
+	AUTH_SOURCE_DIR="$(AUTH_SOURCE_DIR)" docker compose --profile bootstrap run --rm auth-bootstrap
 
 ## vulncheck: Run govulncheck
 vulncheck:

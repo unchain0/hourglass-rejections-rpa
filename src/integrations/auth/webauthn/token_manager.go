@@ -423,6 +423,9 @@ func (tm *TokenManager) authenticateWithCurrentTokens(currentTokens *AuthTokens)
 	hasCredentials := tm.HasWebAuthnCredentials()
 	preferWebAuthn := IsHeadlessEnvironment() && hasCredentials
 	slog.Info("attempting authentication fallback", "has_browser_auth", tm.browserAuth != nil, "has_credentials", hasCredentials, "prefer_webauthn", preferWebAuthn)
+	if IsHeadlessEnvironment() && !hasCredentials && tm.browserAuth != nil && tm.browserProfileDir != "" && !browserProfileHasCookieStore(tm.browserProfileDir) {
+		return nil, fmt.Errorf("persistent browser profile has no cookie store at %s; run setup-auth and import the generated authentication files before starting the headless service", tm.browserProfileDir)
+	}
 
 	if currentTokens != nil {
 		authenticatorSetCookies(tm.authenticator, currentTokens.XSRFToken, currentTokens.HGLogin)
@@ -451,6 +454,28 @@ func (tm *TokenManager) authenticateWithCurrentTokens(currentTokens *AuthTokens)
 	}
 
 	return tm.authenticateWithWebAuthn(hasCredentials)
+}
+
+func browserProfileHasCookieStore(profileDir string) bool {
+	entries, err := os.ReadDir(profileDir)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() || (entry.Name() != "Default" && !strings.HasPrefix(entry.Name(), "Profile ")) {
+			continue
+		}
+
+		for _, relativePath := range []string{"Cookies", filepath.Join("Network", "Cookies")} {
+			info, err := os.Stat(filepath.Join(profileDir, entry.Name(), relativePath))
+			if err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func (tm *TokenManager) authenticateWithBrowser() (*AuthTokens, error) {

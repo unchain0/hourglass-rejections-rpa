@@ -1,3 +1,12 @@
+x-rpa-image: &rpa-image
+  image: hourglass-rejections-rpa:${APP_VERSION:-latest}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      APP_VERSION: ${APP_VERSION:-dev}
+      VCS_REF: ${GIT_COMMIT:-unknown}
+
 services:
   db:
     image: postgres:17-alpine
@@ -19,26 +28,26 @@ services:
       start_period: 10s
 
   rpa:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *rpa-image
     container_name: hourglass-rejections-rpa
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      - TZ=America/Sao_Paulo
-      - CHROME_BIN=/usr/bin/chromium-browser
-      - TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
-      - CHROME_PROFILE_DIR=/home/rpa/.hourglass-rpa/chrome-profile
-      - AUTO_REFRESH_TOKENS=true
-      - DB_TYPE=postgres
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USER=hourglass
-      - DB_PASSWORD=hourglass
-      - DB_NAME=hourglass
-      - DB_SSLMODE=disable
+      TZ: America/Sao_Paulo
+      CHROME_BIN: /usr/bin/chromium-browser
+      TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
+      WEBAUTHN_TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
+      WEBAUTHN_CREDENTIALS_PATH: /home/rpa/.hourglass-rpa/webauthn-credentials.json
+      CHROME_PROFILE_DIR: ${CHROME_PROFILE_DIR:-}
+      AUTO_REFRESH_TOKENS: ${AUTO_REFRESH_TOKENS:-true}
+      DB_TYPE: postgres
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: hourglass
+      DB_PASSWORD: hourglass
+      DB_NAME: hourglass
+      DB_SSLMODE: disable
     volumes:
       - tokens:/home/rpa/.hourglass-rpa
     networks:
@@ -47,21 +56,19 @@ services:
       db:
         condition: service_healthy
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "10m"
+        max-size: 10m
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q rpa && test -f /home/rpa/.hourglass-rpa/auth-tokens.json"]
+      test: ["CMD-SHELL", "pgrep -x rpa >/dev/null && test -s /home/rpa/.hourglass-rpa/auth-tokens.json"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
   token-refresh:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *rpa-image
     container_name: hourglass-token-refresh
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
@@ -74,10 +81,13 @@ services:
           sleep 21600
         done
     environment:
-      - TZ=America/Sao_Paulo
-      - TOKENS_PATH=/home/rpa/.hourglass-rpa/auth-tokens.json
-      - CHROME_PROFILE_DIR=/home/rpa/.hourglass-rpa/chrome-profile
-      - REFRESH_INTERVAL=6h
+      TZ: America/Sao_Paulo
+      CHROME_BIN: /usr/bin/chromium-browser
+      TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
+      WEBAUTHN_TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
+      WEBAUTHN_CREDENTIALS_PATH: /home/rpa/.hourglass-rpa/webauthn-credentials.json
+      CHROME_PROFILE_DIR: ${CHROME_PROFILE_DIR:-}
+      REFRESH_INTERVAL: 6h
     volumes:
       - tokens:/home/rpa/.hourglass-rpa
     networks:
@@ -86,6 +96,32 @@ services:
       - rpa
     profiles:
       - autorefresh
+
+  auth-bootstrap:
+    image: alpine:3.23
+    profiles:
+      - bootstrap
+    volumes:
+      - ${AUTH_SOURCE_DIR:-./.hourglass-rpa}:/source:ro,Z
+      - tokens:/target
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        test -s /source/auth-tokens.json
+        test -s /source/webauthn-credentials.json
+        cp /source/auth-tokens.json /target/auth-tokens.json
+        cp /source/webauthn-credentials.json /target/webauthn-credentials.json
+        chmod 600 /target/auth-tokens.json /target/webauthn-credentials.json
+        chown 1000:1000 /target/auth-tokens.json /target/webauthn-credentials.json
+        if [ -d /source/chrome-profile ]; then
+          mkdir -p /target/chrome-profile
+          cp -a /source/chrome-profile/. /target/chrome-profile/
+          chown -R 1000:1000 /target/chrome-profile
+        fi
+        chown 1000:1000 /target
+        chmod 700 /target
+        echo "Authentication files imported successfully."
 
 networks:
   rpa-network:

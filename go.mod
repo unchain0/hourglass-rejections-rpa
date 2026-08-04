@@ -12,6 +12,7 @@ require (
 	github.com/chromedp/chromedp v0.16.0
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/glebarez/sqlite v1.11.0
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
 	github.com/go-telegram/bot v1.19.0
 	github.com/joho/godotenv v1.5.1
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
@@ -47,7 +48,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
-	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

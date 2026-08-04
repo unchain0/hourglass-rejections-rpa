@@ -73,12 +73,15 @@ func (tr *tokenRefresher) Run() error {
 	}
 	fmt.Printf("⏱️  Limite de renovação: %s\n", renewalThreshold)
 
-	tm, err := tr.tokenManagerFactory(
-		credentialsPath,
-		tr.baseURL,
+	managerOptions := []webauthn.TokenManagerOption{
 		webauthn.WithTokensPath(tokensPath),
 		webauthn.WithRenewalThreshold(renewalThreshold),
-	)
+	}
+	if profileDir != "" {
+		managerOptions = append(managerOptions, webauthn.WithBrowserProfileDir(profileDir))
+	}
+
+	tm, err := tr.tokenManagerFactory(credentialsPath, tr.baseURL, managerOptions...)
 	if err != nil {
 		return fmt.Errorf("erro ao criar gerenciador de tokens: %w", err)
 	}

@@ -180,6 +180,7 @@ func TestTokenRefresher_Run_NoPersistedTokens_WithChromeProfile(t *testing.T) {
 		loadedTokens:  nil,
 		ensuredTokens: &webauthn.AuthTokens{HGLogin: "new", XSRFToken: "new", ExpiresAt: time.Now().Add(2 * time.Hour)},
 	}
+	optionCount := 0
 	tr := &tokenRefresher{
 		userHomeDir: func() (string, error) { return "/home/test", nil },
 		getenv: func(key string) string {
@@ -188,7 +189,8 @@ func TestTokenRefresher_Run_NoPersistedTokens_WithChromeProfile(t *testing.T) {
 			}
 			return ""
 		},
-		tokenManagerFactory: func(string, string, ...webauthn.TokenManagerOption) (tokenManager, error) {
+		tokenManagerFactory: func(_ string, _ string, opts ...webauthn.TokenManagerOption) (tokenManager, error) {
+			optionCount = len(opts)
 			return manager, nil
 		},
 		baseURL: defaultBaseURL,
@@ -198,6 +200,7 @@ func TestTokenRefresher_Run_NoPersistedTokens_WithChromeProfile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, manager.primedTokens)
 	assert.Equal(t, 1, manager.ensureCalls)
+	assert.Equal(t, 3, optionCount, "Chrome profile option must reach the token manager")
 }
 
 func TestTokenRefresher_tokensPathPriority(t *testing.T) {

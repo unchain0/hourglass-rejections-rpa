@@ -225,6 +225,44 @@ func TestAuthenticateWithCurrentTokens_BrowserSuccessUsesCurrentTokens(t *testin
 	assert.Equal(t, "browser", tokens.HGLogin)
 }
 
+func TestAuthenticateWithCurrentTokens_EmptyHeadlessProfileFailsWithoutBrowserWait(t *testing.T) {
+	restoreTokenManagerHooks(t)
+	t.Setenv("DISPLAY", "")
+	t.Setenv("SSH_CONNECTION", "1")
+
+	profileDir := filepath.Join(t.TempDir(), "chrome-profile")
+	require.NoError(t, os.MkdirAll(profileDir, 0o700))
+
+	browserCalled := false
+	browserAuthenticate = func(*BrowserAuth) (*AuthTokens, error) {
+		browserCalled = true
+		return &AuthTokens{HGLogin: "unexpected", XSRFToken: "unexpected"}, nil
+	}
+
+	tm := &TokenManager{
+		authenticator:     &Authenticator{},
+		browserAuth:       NewBrowserAuth("https://example.com").WithProfileDir(profileDir),
+		browserProfileDir: profileDir,
+		storagePath:       filepath.Join(t.TempDir(), "missing-credentials.json"),
+	}
+
+	tokens, err := tm.authenticateWithCurrentTokens(nil)
+	require.Error(t, err)
+	assert.Nil(t, tokens)
+	assert.False(t, browserCalled)
+	assert.Contains(t, err.Error(), "persistent browser profile has no cookie store")
+}
+
+func TestBrowserProfileHasCookieStore(t *testing.T) {
+	profileDir := t.TempDir()
+	assert.False(t, browserProfileHasCookieStore(profileDir))
+
+	cookieDir := filepath.Join(profileDir, "Default", "Network")
+	require.NoError(t, os.MkdirAll(cookieDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(cookieDir, "Cookies"), []byte("sqlite"), 0o600))
+	assert.True(t, browserProfileHasCookieStore(profileDir))
+}
+
 func TestAuthenticateWithCurrentTokens_BrowserFailureFallsBackToWebAuthn(t *testing.T) {
 	restoreTokenManagerHooks(t)
 	storagePath := filepath.Join(t.TempDir(), "credentials.json")

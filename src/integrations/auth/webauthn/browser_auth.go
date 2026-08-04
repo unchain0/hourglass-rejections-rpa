@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -26,6 +27,8 @@ const (
 	shortTestAuthTimeout = 1 * time.Second
 	defaultPollInterval  = 1 * time.Second
 	testPollInterval     = 100 * time.Millisecond
+	minimumChromeMajor   = 128
+	browserCloseTimeout  = 2 * time.Second
 )
 
 var (
@@ -34,6 +37,7 @@ var (
 	osLstat                   = os.Lstat
 	osReadlink                = os.Readlink
 	osRemove                  = os.Remove
+	chromeVersionOutput       = func(path string) ([]byte, error) { return exec.Command(path, "--version").Output() }
 	chromedpRun               = chromedp.Run
 	newExecAllocator          = chromedp.NewExecAllocator
 	newBrowserContext         = chromedp.NewContext
@@ -267,7 +271,12 @@ func (ba *BrowserAuth) runBrowserFlow(allowAuthTrigger bool) (*AuthTokens, error
 		return nil, fmt.Errorf("chrome/chromium not found: set CHROME_BIN environment variable or install Chrome")
 	}
 
-	slog.Info("using chrome binary", "path", chromePath)
+	chromeVersion, err := validateChromeVersion(chromePath)
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Info("using chrome binary", "path", chromePath, "version", chromeVersion)
 
 	if ba.profileDir != "" {
 		if err := PrepareChromeProfile(ba.profileDir); err != nil {
@@ -331,6 +340,49 @@ func (ba *BrowserAuth) runBrowserFlow(allowAuthTrigger bool) (*AuthTokens, error
 	}
 
 	return tokens, nil
+}
+
+func validateChromeVersion(path string) (string, error) {
+	output, err := chromeVersionOutput(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read browser version from %q: %w", path, err)
+	}
+
+	version := strings.TrimSpace(string(output))
+	major, err := chromeMajorVersion(version)
+	if err != nil {
+		return "", err
+	}
+	if major < minimumChromeMajor {
+		return "", fmt.Errorf("unsupported browser %q: browser authentication requires Chromium %d or newer", version, minimumChromeMajor)
+	}
+
+	return version, nil
+}
+
+func chromeMajorVersion(version string) (int, error) {
+	start := -1
+	for i, char := range version {
+		if char >= '0' && char <= '9' {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return 0, fmt.Errorf("could not parse browser version %q", version)
+	}
+
+	end := start
+	for end < len(version) && version[end] >= '0' && version[end] <= '9' {
+		end++
+	}
+
+	major, err := strconv.Atoi(version[start:end])
+	if err != nil {
+		return 0, fmt.Errorf("could not parse browser version %q: %w", version, err)
+	}
+
+	return major, nil
 }
 
 func (ba *BrowserAuth) waitForAuthentication(ctx context.Context, cookies *[]*network.Cookie, allowAuthTrigger bool) error {
@@ -411,7 +463,9 @@ func (ba *BrowserAuth) tryTriggerWebAuthn(ctx context.Context) (bool, error) {
 func closeBrowserContext(browserCtx context.Context, cancelBrowser context.CancelFunc) {
 	browserContext := browserContextFromContext(browserCtx)
 	if browserContext != nil && browserContext.Browser != nil {
-		if err := chromedpCancel(browserCtx); err != nil && !errors.Is(err, context.Canceled) {
+		closeCtx, cancelClose := context.WithTimeout(browserCtx, browserCloseTimeout)
+		defer cancelClose()
+		if err := chromedpCancel(closeCtx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			slog.Warn("failed to close browser context gracefully", "error", err)
 		}
 	}

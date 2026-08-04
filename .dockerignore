@@ -1,0 +1,17 @@
+.git
+.github
+.playwright-mcp
+.debug-journal.md
+.env
+.env.*
+!.env.example
+coverage.out
+coverage.html
+*.db
+*.db-*
+*.log
+rpa
+save-tokens
+token-refresh
+setup-auth
+hourglass-login-requests.txt

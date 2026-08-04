@@ -29,6 +29,11 @@ type runOptions struct {
 
 var osExit = os.Exit
 
+var (
+	version  = "dev"
+	revision = "unknown"
+)
+
 func init() {
 	loadEnvFiles()
 }
@@ -103,7 +108,7 @@ func run(ctx context.Context, opts runOptions) error {
 		defer telemetryClient.Close()
 	}
 
-	slog.Info("starting hourglass-rejections-rpa", "version", "1.0.0", "once_mode", *onceMode)
+	slog.Info("starting hourglass-rejections-rpa", "version", version, "revision", revision, "once_mode", *onceMode)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

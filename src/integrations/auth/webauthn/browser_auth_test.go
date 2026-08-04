@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/go-json-experiment/json/jsontext"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +35,7 @@ func restoreBrowserAuthHooks(t *testing.T) {
 	originalTriggerWebAuthnPrompt := triggerWebAuthnPrompt
 	originalExtractAuthTokens := extractAuthTokens
 	originalProcessExists := processExists
+	originalChromeVersionOutput := chromeVersionOutput
 
 	newExecAllocator = func(parent context.Context, _ ...chromedp.ExecAllocatorOption) (context.Context, context.CancelFunc) {
 		return parent, func() {}
@@ -40,7 +43,12 @@ func restoreBrowserAuthHooks(t *testing.T) {
 	newBrowserContext = func(parent context.Context, _ ...chromedp.ContextOption) (context.Context, context.CancelFunc) {
 		return parent, func() {}
 	}
-	chromedpCancel = func(context.Context) error { return nil }
+	chromedpCancel = func(ctx context.Context) error {
+		_, hasDeadline := ctx.Deadline()
+		assert.True(t, hasDeadline)
+		return nil
+	}
+	chromeVersionOutput = func(string) ([]byte, error) { return []byte("Chromium 149.0.0.0"), nil }
 
 	t.Cleanup(func() {
 		osStat = originalOsStat
@@ -56,6 +64,7 @@ func restoreBrowserAuthHooks(t *testing.T) {
 		triggerWebAuthnPrompt = originalTriggerWebAuthnPrompt
 		extractAuthTokens = originalExtractAuthTokens
 		processExists = originalProcessExists
+		chromeVersionOutput = originalChromeVersionOutput
 	})
 }
 
@@ -76,6 +85,56 @@ func TestBrowserAuthConstructors(t *testing.T) {
 	assert.False(t, ba.headless)
 	assert.Same(t, ba, ba.WithProfileDir("/tmp/hourglass-profile"))
 	assert.Equal(t, "/tmp/hourglass-profile", ba.profileDir)
+}
+
+func TestCDPDecodesSupportedCookiePartitionKeyObject(t *testing.T) {
+	msg := &cdproto.Message{
+		Method: cdproto.EventNetworkResponseReceivedExtraInfo,
+		Params: jsontext.Value(`{
+			"requestId":"request-1",
+			"blockedCookies":[],
+			"headers":{},
+			"resourceIPAddressSpace":"Unknown",
+			"statusCode":200,
+			"cookiePartitionKey":{
+				"topLevelSite":"https://app.hourglass-app.com",
+				"hasCrossSiteAncestor":false
+			},
+			"cookiePartitionKeyOpaque":false
+		}`),
+	}
+
+	event, err := cdproto.UnmarshalMessage(msg, chromedp.DefaultUnmarshalOptions)
+	require.NoError(t, err)
+	require.IsType(t, &network.EventResponseReceivedExtraInfo{}, event)
+}
+
+func TestBrowserAuthRejectsChromeOlderThanCookiePartitionKeySchema(t *testing.T) {
+	restoreBrowserAuthHooks(t)
+
+	t.Setenv("CHROME_BIN", "/usr/bin/chromium-browser")
+	chromeVersionOutput = func(string) ([]byte, error) { return []byte("Chromium 124.0.6367.78"), nil }
+
+	browserStarted := false
+	chromedpRun = func(context.Context, ...chromedp.Action) error {
+		browserStarted = true
+		return errors.New("browser should not start")
+	}
+
+	tokens, err := NewBrowserAuth("https://example.com").authenticateAttempt()
+	require.Error(t, err)
+	assert.Nil(t, tokens)
+	assert.False(t, browserStarted)
+	assert.Contains(t, err.Error(), "requires Chromium 128 or newer")
+}
+
+func TestChromeMajorVersion(t *testing.T) {
+	major, err := chromeMajorVersion("Chromium 149.0.7827.53")
+	require.NoError(t, err)
+	assert.Equal(t, 149, major)
+
+	_, err = chromeMajorVersion("Chromium unknown")
+	require.Error(t, err)
 }
 
 func TestBrowserAuthTimingHelpers(t *testing.T) {

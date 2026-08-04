@@ -190,6 +190,19 @@ jobs:
       with:
         context: .
         push: false
+        load: true
         tags: hourglass-rejections-rpa:latest
+        build-args: |
+          APP_VERSION=ci
+          VCS_REF=${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+    - name: Smoke-test runtime image
+      run: |
+        docker run --rm --entrypoint /bin/sh hourglass-rejections-rpa:latest -ec '
+          chromium-browser --version
+          test -x /app/rpa
+          test -x /app/save-tokens
+          test -x /app/token-refresh
+          test -x /app/setup-auth
+        '
