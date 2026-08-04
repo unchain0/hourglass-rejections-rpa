@@ -83,6 +83,9 @@ func run(ctx context.Context, opts runOptions) error {
 	onceMode := fs.Bool("once", false, "Run once and exit")
 
 	if err := fs.Parse(opts.args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return fmt.Errorf("failed to parse flags: %w", err)
 	}
 

@@ -1,95 +1,47 @@
-# AGENTS.md - WebAuthn Authentication
+# WebAuthn authentication
 
-**Directory**: `internal/auth/webauthn/`  
-**Purpose**: WebAuthn authentication with browser automation fallback  
-**Complexity**: High  
-**Lines**: ~3,000
+## OVERVIEW
 
-## 🎯 Overview
+- Package path: `src/integrations/auth/webauthn/`; do not use the former `internal/...` path.
+- Owns native WebAuthn, Chrome/chromedp fallback, and persisted-token renewal.
+- Auth cookies are `hglogin` and `X-Hourglass-XSRF-Token`; both are required.
 
-Sistema de autenticação WebAuthn com fallback para browser automation. Gerencia credenciais, tokens e autenticação automática na VPS.
+## AUTH AND CONFIGURATION
 
-## 📁 Structure
+- Credential path precedence: constructor argument, `WEBAUTHN_CREDENTIALS_PATH`, then
+  `~/.hourglass-rpa/webauthn-credentials.json`.
+- Token path precedence: `WithTokensPath`, `WEBAUTHN_TOKENS_PATH`, then `auth-tokens.json` beside
+  the credential file. `NewTokenManager` also normalizes the base URL.
+- Headless + stored credentials: native WebAuthn is attempted first; configured browser profile may
+  be the fallback. Otherwise, browser auth is first when enabled, followed by native WebAuthn.
+- `WithBrowserProfileDir` overrides `CHROME_PROFILE_DIR`; either keeps browser auth available in a
+  headless environment. `BrowserAuth` defaults to headless; `WithHeadless`/`WithProfileDir` tune it.
+- Browser auth retries transient failures up to three times. Profile extraction reads cookies without
+  triggering the login control.
+- `Start` validates loaded tokens before starting its five-minute renewal loop. Successful native
+  authentication updates the credential sign count before saving.
 
-```
-internal/auth/webauthn/
-├── authenticator.go          # Core WebAuthn authentication
-├── authentication.go         # Authentication flow
-├── browser_auth.go           # ChromeDP browser automation
-├── environment.go            # VPS/headless detection
-├── token_manager.go          # Token lifecycle management
-├── storage.go (types.go)     # Credential storage
-├── types.go                  # Data structures
-└── priority_coverage_test.go # Complex test scenarios
-```
+## STORAGE AND SECURITY
 
-## 🔍 Key Components
+- Credential, token, and Chrome-profile directories are `0700`; credential and token files are
+  `0600`. Credentials write directly, while tokens use a `0600` temporary file plus atomic rename;
+  remove the temporary file when rename fails.
+- Cookies, private keys, browser profiles, and complete auth files are secret. Log only presence,
+  paths, and expiry metadata, never secret values or full file contents.
+- `CHROME_BIN` then `CHROME_PATH` override lookup; otherwise common system paths are probed.
 
-### TokenManager
-Central orchestrator for authentication:
-- Checks token expiration
-- Attempts browser auth first (if available)
-- Falls back to WebAuthn credentials
-- Handles token renewal
+## TESTING
 
-### Authenticator
-WebAuthn protocol implementation:
-- Credential generation
-- Attestation handling
-- Assertion creation
-- Token extraction from cookies
+- Run `go test ./src/integrations/auth/webauthn`; add `-race` for synchronization or renewal changes.
+- Restore every injected package hook with `t.Cleanup`. Most browser tests mock chromedp, so the
+  package suite does not generally require a real Chrome installation.
+- Timing branches: CI/GitHub Actions use a 1s auth timeout; `TEST_TIMEOUT_SHORT=1` uses 5s;
+  both shorten polling and retry delays.
 
-### BrowserAuth
-ChromeDP-based browser automation:
-- Opens Chrome/Chromium
-- Navigates to login page
-- Extracts tokens from cookies
-- Headless mode support
+## ANTI-PATTERNS
 
-## 🏗️ Authentication Flow
-
-```
-authenticateWithFallback()
-├── Try browser auth (if not headless)
-│   └── ChromeDP automation
-├── Check WebAuthn credentials
-├── Try WebAuthn authentication
-│   ├── Load stored credential
-│   ├── Begin authentication
-│   ├── Create assertion
-│   └── Finish authentication
-└── Return tokens or error
-```
-
-## ⚙️ Environment Detection
-
-VPS/headless environments are detected via:
-- `CI` environment variable
-- `GITHUB_ACTIONS` environment variable
-- `TEST_TIMEOUT_SHORT` environment variable
-
-## 🧪 Testing Notes
-
-- Tests require Chrome/Chromium
-- Set `CHROME_BIN` environment variable
-- CI uses shorter timeouts (1s vs 2min)
-- Excluded from pre-commit hooks (slow)
-
-## 🔐 Security
-
-- Credentials stored with 0600 permissions
-- Separate token and credential files
-- Atomic token writes (temp + rename)
-- No credentials in logs
-
-## 🚨 Common Issues
-
-1. **"chrome not found"**: Set `CHROME_BIN` or install Chrome
-2. **Timeout on VPS**: Browser auth disabled in headless mode
-3. **"no credentials stored"**: Run `make setup-auth` first
-
-## 📚 See Also
-
-- Root `AGENTS.md` for project overview
-- `cmd/setup-auth/` for authentication setup
-- `cmd/save-tokens/` for token extraction
+- Do not reorder browser/native fallback; it is environment- and credential-sensitive.
+- Do not bypass atomic token writes, weaken permissions, or persist/log secrets elsewhere.
+- Do not share a live Chrome profile, remove singleton locks without stale-PID checks, or suppress
+  cleanup errors that protect profile integrity.
+- Do not leave injected global hooks modified across tests.

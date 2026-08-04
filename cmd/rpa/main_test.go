@@ -228,8 +228,8 @@ func TestRun_HelpFlag(t *testing.T) {
 	}
 
 	err := run(context.Background(), opts)
-	if err == nil {
-		t.Error("expected error for help flag")
+	if err != nil {
+		t.Errorf("expected no error for help flag, got: %v", err)
 	}
 }
 
