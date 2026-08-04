@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"hourglass-rejections-rpa/src/domain_models"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -145,6 +147,28 @@ func TestJobExecution(t *testing.T) {
 
 	err = store.RecordJobExecution("test-job", false, "error message")
 	require.NoError(t, err)
+}
+
+func TestStore_SaveRejections(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	require.NoError(t, store.SaveRejections(t.Context(), nil))
+
+	occurredAt := time.Date(2026, time.August, 4, 12, 30, 0, 0, time.UTC)
+	rejections := []domain.Rejection{
+		{Section: "Field Ministry", Who: "Alice", What: "Assignment", When: "today", Timestamp: occurredAt},
+		{Section: "Mechanical Parts", Who: "Bob", What: "Microphone", When: "tomorrow"},
+	}
+	require.NoError(t, store.SaveRejections(t.Context(), rejections))
+
+	var logs []RejectionLog
+	require.NoError(t, store.db.Order("who ASC").Find(&logs).Error)
+	require.Len(t, logs, 2)
+	assert.Equal(t, occurredAt, logs[0].OccurredAt)
+	assert.False(t, logs[1].OccurredAt.IsZero())
+	assert.False(t, logs[1].RecordedAt.IsZero())
 }
 
 func TestCleanupExpiredData(t *testing.T) {

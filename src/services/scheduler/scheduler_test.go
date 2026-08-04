@@ -433,3 +433,26 @@ func TestScheduler_runWithTicker_AnalysisError(t *testing.T) {
 		t.Errorf("runWithTicker should return nil even on analysis error, got: %v", err)
 	}
 }
+
+func TestScheduler_runWithTicker_RecordExecutionError(t *testing.T) {
+	s := &Scheduler{
+		telemetryClient: &telemetry.Client{},
+		store:           &mockStorage{err: errors.New("record failed")},
+		runAnalysisFn:   func(context.Context) error { return nil },
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	err := s.runWithTicker(ctx, time.NewTicker(time.Millisecond))
+	if err != nil {
+		t.Fatalf("runWithTicker() error = %v", err)
+	}
+}
+
+func TestScheduler_recordExecutionWithoutStore(t *testing.T) {
+	err := (&Scheduler{}).recordExecution(errors.New("ignored"))
+	if err != nil {
+		t.Fatalf("recordExecution() error = %v", err)
+	}
+}

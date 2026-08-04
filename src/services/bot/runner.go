@@ -74,9 +74,11 @@ var newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (N
 	return notifier.NewTelegramNotifier(token, chatID, whitelist)
 }
 
-var newPreferenceStoreFromDatabaseURL = func(databaseURL string) (preferences.PreferenceStore, error) {
+func openPreferenceStoreFromDatabaseURL(databaseURL string) (preferences.PreferenceStore, error) {
 	return preferences.NewStoreFromConfig(&preferences.DatabaseConfig{Type: "postgres", DSN: databaseURL})
 }
+
+var newPreferenceStoreFromDatabaseURL = openPreferenceStoreFromDatabaseURL
 
 var i18nInit = i18n.Init
 

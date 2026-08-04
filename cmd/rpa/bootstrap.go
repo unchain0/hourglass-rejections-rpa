@@ -20,7 +20,7 @@ type authPaths struct {
 	browserProfileDir string
 }
 
-var newPreferenceStore = func(cfg *config.Config) (*preferences.Store, error) {
+func openPreferenceStore(cfg *config.Config) (*preferences.Store, error) {
 	if cfg.DatabaseURL != "" {
 		return preferences.NewStoreFromConfig(&preferences.DatabaseConfig{
 			Type: "postgres",
@@ -30,6 +30,8 @@ var newPreferenceStore = func(cfg *config.Config) (*preferences.Store, error) {
 
 	return preferences.NewStoreFromConfig(nil)
 }
+
+var newPreferenceStore = openPreferenceStore
 
 func buildDependencies(cfg *config.Config) (dependencyBundle, error) {
 	paths := resolveAuthPaths(cfg)

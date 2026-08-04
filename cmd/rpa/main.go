@@ -73,10 +73,12 @@ func main() {
 }
 
 var telemetryClientGlobal *telemetry.Client
+var newTelemetryClient = telemetry.New
 var enableWebAuthnClient = func(apiClient *hourglass.Client, credentialsPath string) error {
 	return apiClient.EnableWebAuthn(credentialsPath, captureError)
 }
-var bootstrapWebAuthnCredential = func(credentialsPath, baseURL, xsrfToken, hgLogin string) error {
+
+func registerBootstrapWebAuthnCredential(credentialsPath, baseURL, xsrfToken, hgLogin string) error {
 	authenticator, err := webauthn.NewAuthenticator(credentialsPath, baseURL)
 	if err != nil {
 		return err
@@ -86,6 +88,8 @@ var bootstrapWebAuthnCredential = func(credentialsPath, baseURL, xsrfToken, hgLo
 	_, err = authenticator.Register("Hourglass RPA")
 	return err
 }
+
+var bootstrapWebAuthnCredential = registerBootstrapWebAuthnCredential
 
 func captureError(err error, extras map[string]any) {
 	if telemetryClientGlobal != nil && telemetryClientGlobal.IsEnabled() {
@@ -153,7 +157,7 @@ func setupLogging(level string) {
 }
 
 func setupTelemetry(cfg *config.Config) *telemetry.Client {
-	client, err := telemetry.New(telemetry.Config{
+	client, err := newTelemetryClient(telemetry.Config{
 		Endpoint:       cfg.OTLPEndpoint,
 		Headers:        cfg.OTLPHeaders,
 		Environment:    cfg.DeploymentEnvironment,
@@ -164,7 +168,7 @@ func setupTelemetry(cfg *config.Config) *telemetry.Client {
 	})
 	if err != nil {
 		setupLogging(cfg.LogLevel)
-		fallback, _ := telemetry.New(telemetry.Config{Level: cfg.LogLevel})
+		fallback, _ := newTelemetryClient(telemetry.Config{Level: cfg.LogLevel})
 		return fallback
 	}
 	return client
@@ -286,6 +290,10 @@ var newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client,
 	return scheduler.New(cfg, telemetryClient, analyzer, store)
 }
 
+var newBotRunnerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) runner {
+	return bot.New(cfg, telemetryClient, analyzer).WithPreferenceStore(store)
+}
+
 func runOnceMode(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 	if err := runOnceFn(ctx, cfg, telemetryClient, analyzer, store); err != nil {
 		telemetryClient.CaptureError(err, map[string]any{
@@ -300,7 +308,7 @@ func runFullMode(ctx context.Context, cfg *config.Config, telemetryClient *telem
 	slog.Info("starting full mode (scheduler + bot)")
 
 	go func() {
-		botRunner := bot.New(cfg, telemetryClient, analyzer).WithPreferenceStore(store)
+		botRunner := newBotRunnerFn(cfg, telemetryClient, analyzer, store)
 		if err := botRunner.Run(ctx); err != nil {
 			slog.Error("bot error", "error", err)
 			telemetryClient.CaptureError(err, map[string]any{

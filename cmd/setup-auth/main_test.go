@@ -165,6 +165,48 @@ func TestSetupRunnerUsesEnvironmentSessionWithoutBrowser(t *testing.T) {
 	assert.True(t, tokens.IsExpired(), "the refresh command must immediately exchange the bootstrapping session")
 }
 
+func TestEnvironmentBootstrapTokensSkipsExistingCredential(t *testing.T) {
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
+	require.NoError(t, os.WriteFile(credentialsPath, []byte("{}"), 0o600))
+
+	runner := newSetupRunner()
+	runner.getenv = func(key string) string {
+		return map[string]string{
+			"HOURGLASS_HGLOGIN_COOKIE": "hglogin",
+			"HOURGLASS_XSRF_TOKEN":     "xsrf",
+		}[key]
+	}
+
+	assert.Nil(t, runner.environmentBootstrapTokens(credentialsPath))
+}
+
+func TestBootstrapEnvironmentSessionErrors(t *testing.T) {
+	tokens := &webauthn.AuthTokens{HGLogin: "hglogin", XSRFToken: "xsrf"}
+
+	t.Run("credential registration", func(t *testing.T) {
+		runner := newSetupRunner()
+		runner.authFactory = func(string, string) (credentialRegistrar, error) {
+			return &mockCredentialRegistrar{registerErr: errors.New("register failed")}, nil
+		}
+
+		err := runner.bootstrapEnvironmentSession("tokens.json", "credentials.json", tokens)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to bootstrap automatic renewal")
+	})
+
+	t.Run("token persistence", func(t *testing.T) {
+		runner := newSetupRunner()
+		runner.authFactory = func(string, string) (credentialRegistrar, error) {
+			return &mockCredentialRegistrar{}, nil
+		}
+		runner.fs = &mockFileSystem{writeFileError: errors.New("write failed")}
+
+		err := runner.bootstrapEnvironmentSession("tokens.json", "credentials.json", tokens)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to save bootstrap tokens")
+	})
+}
+
 func TestCheckExistingTokens(t *testing.T) {
 	tempDir := t.TempDir()
 

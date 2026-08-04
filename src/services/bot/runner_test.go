@@ -17,6 +17,8 @@ import (
 	"hourglass-rejections-rpa/src/integrations/i18n"
 	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	"hourglass-rejections-rpa/src/services/notification"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
@@ -34,6 +36,26 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Exit(m.Run())
+}
+
+func TestOpenPreferenceStoreFromDatabaseURLRejectsInvalidDSN(t *testing.T) {
+	store, err := openPreferenceStoreFromDatabaseURL("://invalid")
+	assert.Error(t, err)
+	assert.Nil(t, store)
+}
+
+func TestEnsurePreferenceStoreReturnsFactoryError(t *testing.T) {
+	original := newPreferenceStoreFromDatabaseURL
+	t.Cleanup(func() { newPreferenceStoreFromDatabaseURL = original })
+	newPreferenceStoreFromDatabaseURL = func(string) (preferences.PreferenceStore, error) {
+		return nil, errors.New("open failed")
+	}
+
+	runner := &BotRunner{cfg: &config.Config{DatabaseURL: "configured"}}
+	store, closeStore, err := runner.ensurePreferenceStore()
+	assert.Error(t, err)
+	assert.Nil(t, store)
+	assert.NotNil(t, closeStore)
 }
 
 type MockAnalyzer struct {
