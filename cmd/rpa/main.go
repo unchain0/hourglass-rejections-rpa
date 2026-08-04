@@ -286,11 +286,21 @@ type runner interface {
 	Run(ctx context.Context) error
 }
 
-var newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) runner {
+type schedulerRunner interface {
+	runner
+	SetNotifier(scheduler.RejectionNotifier)
+}
+
+type telegramRunner interface {
+	runner
+	scheduler.RejectionNotifier
+}
+
+var newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) schedulerRunner {
 	return scheduler.New(cfg, telemetryClient, analyzer, store)
 }
 
-var newBotRunnerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) runner {
+var newBotRunnerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) telegramRunner {
 	return bot.New(cfg, telemetryClient, analyzer).WithPreferenceStore(store)
 }
 
@@ -306,9 +316,9 @@ func runOnceMode(ctx context.Context, cfg *config.Config, telemetryClient *telem
 
 func runFullMode(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 	slog.Info("starting full mode (scheduler + bot)")
+	botRunner := newBotRunnerFn(cfg, telemetryClient, analyzer, store)
 
 	go func() {
-		botRunner := newBotRunnerFn(cfg, telemetryClient, analyzer, store)
 		if err := botRunner.Run(ctx); err != nil {
 			slog.Error("bot error", "error", err)
 			telemetryClient.CaptureError(err, map[string]any{
@@ -318,6 +328,7 @@ func runFullMode(ctx context.Context, cfg *config.Config, telemetryClient *telem
 	}()
 
 	sched := newSchedulerFn(cfg, telemetryClient, analyzer, store)
+	sched.SetNotifier(botRunner)
 	if err := sched.Run(ctx); err != nil {
 		telemetryClient.CaptureError(err, map[string]any{
 			"phase": "scheduler_run",

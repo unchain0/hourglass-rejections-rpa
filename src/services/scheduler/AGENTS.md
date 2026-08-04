@@ -2,7 +2,7 @@
 
 ## Scope
 
-- `Scheduler` drives periodic Hourglass analysis and optional completion notifications.
+- `Scheduler` drives periodic Hourglass analysis and changed-rejection notifications.
 - `New` owns an in-memory `RejectionCache`; callers provide the analyzer, storage, telemetry, and optional notifier.
 - Keep `domain.AllSections` as the canonical fan-out source.
 
@@ -22,10 +22,12 @@
 - Empty results never notify. Non-empty results notify only when `RejectionCache.HasChanges` detects a change and a notifier is configured.
 - Cache comparison is positional and uses `Section`, `Who`, and `What`; a `When`-only difference does not open the notification gate.
 - Preserve first-seen section order in `buildNotificationSummary`.
-- Notifier errors propagate as the scheduled run error; a nil notifier is a deliberate no-op.
+- The notifier receives the changed rejection snapshot so the delivery layer can filter it per recipient.
+- `cmd/rpa/runFullMode` wires the shared `BotRunner` as the notifier. Notifier errors propagate as the scheduled run error; a nil notifier remains a deliberate no-op for isolated tests and alternate callers.
+- A missing notifier or failed delivery resets the candidate cache entry so an identical snapshot remains eligible for the next run.
 
 ## Operational boundaries
 
 - Logging, tracing, metrics, and `telemetry.Client.CaptureError` are best-effort observability; they must not turn section or persistence failures into scheduler failures.
 - `Analyzer.AnalyzeSection` has no context parameter. The 10-minute context bounds context-aware work but cannot forcibly stop an in-flight analyzer call.
-- `SetNotifier` exists, but `cmd/rpa/runFullMode` does not call it. Scheduled delivery remains unwired unless another caller sets the notifier.
+- Telegram long polling still requires a single daemon instance per bot token; scheduled sends reuse that instance's notifier and do not start another poller.

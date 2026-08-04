@@ -65,3 +65,9 @@ func (c *RejectionCache) LastCheck() time.Time {
 	defer c.mu.RUnlock()
 	return c.lastCheck
 }
+
+func (c *RejectionCache) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastResult = nil
+}

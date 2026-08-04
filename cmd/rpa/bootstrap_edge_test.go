@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	domain "hourglass-rejections-rpa/src/domain_models"
 	"hourglass-rejections-rpa/src/integrations/config"
 	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	hourglass "hourglass-rejections-rpa/src/services/hourglass"
+	"hourglass-rejections-rpa/src/services/scheduler"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,6 +25,37 @@ type runnerFunc func(context.Context) error
 
 func (f runnerFunc) Run(ctx context.Context) error {
 	return f(ctx)
+}
+
+func (f runnerFunc) SendRejections([]domain.Rejection) error {
+	return nil
+}
+
+func (f runnerFunc) SetNotifier(scheduler.RejectionNotifier) {}
+
+type schedulerRunnerSpy struct {
+	run      runnerFunc
+	notifier scheduler.RejectionNotifier
+}
+
+func (s *schedulerRunnerSpy) Run(ctx context.Context) error {
+	return s.run(ctx)
+}
+
+func (s *schedulerRunnerSpy) SetNotifier(notifier scheduler.RejectionNotifier) {
+	s.notifier = notifier
+}
+
+type telegramRunnerSpy struct {
+	run runnerFunc
+}
+
+func (t *telegramRunnerSpy) Run(ctx context.Context) error {
+	return t.run(ctx)
+}
+
+func (t *telegramRunnerSpy) SendRejections([]domain.Rejection) error {
+	return nil
 }
 
 func TestOpenPreferenceStore(t *testing.T) {
@@ -144,13 +177,13 @@ func TestRunFullModeCapturesBotError(t *testing.T) {
 	})
 
 	botFinished := make(chan struct{})
-	newBotRunnerFn = func(*config.Config, *telemetry.Client, *hourglass.APIAnalyzer, *preferences.Store) runner {
+	newBotRunnerFn = func(*config.Config, *telemetry.Client, *hourglass.APIAnalyzer, *preferences.Store) telegramRunner {
 		return runnerFunc(func(context.Context) error {
 			close(botFinished)
 			return errors.New("bot failed")
 		})
 	}
-	newSchedulerFn = func(*config.Config, *telemetry.Client, *hourglass.APIAnalyzer, *preferences.Store) runner {
+	newSchedulerFn = func(*config.Config, *telemetry.Client, *hourglass.APIAnalyzer, *preferences.Store) schedulerRunner {
 		return runnerFunc(func(context.Context) error {
 			<-botFinished
 			return nil
@@ -160,4 +193,27 @@ func TestRunFullModeCapturesBotError(t *testing.T) {
 	client := hourglass.NewClient()
 	err := runFullMode(t.Context(), &config.Config{}, &telemetry.Client{}, hourglass.NewAPIAnalyzer(client), newTestStore(t))
 	require.NoError(t, err)
+}
+
+func TestRunFullModeWiresBotToScheduler(t *testing.T) {
+	originalBot := newBotRunnerFn
+	originalScheduler := newSchedulerFn
+	t.Cleanup(func() {
+		newBotRunnerFn = originalBot
+		newSchedulerFn = originalScheduler
+	})
+
+	botRunner := &telegramRunnerSpy{run: func(context.Context) error { return nil }}
+	schedSpy := &schedulerRunnerSpy{run: func(context.Context) error { return nil }}
+	newBotRunnerFn = func(*config.Config, *telemetry.Client, *hourglass.APIAnalyzer, *preferences.Store) telegramRunner {
+		return botRunner
+	}
+	newSchedulerFn = func(*config.Config, *telemetry.Client, *hourglass.APIAnalyzer, *preferences.Store) schedulerRunner {
+		return schedSpy
+	}
+
+	client := hourglass.NewClient()
+	err := runFullMode(t.Context(), &config.Config{}, &telemetry.Client{}, hourglass.NewAPIAnalyzer(client), newTestStore(t))
+	require.NoError(t, err)
+	assert.Same(t, botRunner, schedSpy.notifier)
 }

@@ -38,6 +38,10 @@ type Storage interface {
 	RecordJobExecution(jobName string, success bool, errorMsg string) error
 }
 
+type RejectionNotifier interface {
+	SendRejections(rejections []domain.Rejection) error
+}
+
 // Scheduler manages periodic analysis and notification jobs.
 type Scheduler struct {
 	cfg             *config.Config
@@ -45,13 +49,13 @@ type Scheduler struct {
 	analyzer        Analyzer
 	store           Storage
 	cache           *cache.RejectionCache
-	notifier        domain.Notifier
+	notifier        RejectionNotifier
 
 	runAnalysisFn func(ctx context.Context) error
 }
 
 // SetNotifier sets the notifier for sending notifications.
-func (s *Scheduler) SetNotifier(n domain.Notifier) {
+func (s *Scheduler) SetNotifier(n RejectionNotifier) {
 	s.notifier = n
 }
 
@@ -230,13 +234,13 @@ func (s *Scheduler) sendNotifications(rejections []domain.Rejection, duration ti
 	}
 
 	if s.notifier == nil {
+		s.cache.Reset()
 		slog.Warn("no notifier configured, skipping notification")
 		return nil
 	}
 
-	summary := buildNotificationSummary(rejections)
-
-	if err := s.notifier.SendJobCompletion(summary, duration); err != nil {
+	if err := s.notifier.SendRejections(rejections); err != nil {
+		s.cache.Reset()
 		slog.Error("failed to send notification", "error", err)
 		s.telemetryClient.CaptureError(err, map[string]any{
 			"phase": "send_notification",
@@ -244,6 +248,6 @@ func (s *Scheduler) sendNotifications(rejections []domain.Rejection, duration ti
 		return err
 	}
 
-	slog.Info("notification sent", "summary", summary, "duration", duration)
+	slog.Info("notification sent", "rejections_count", len(rejections), "duration", duration)
 	return nil
 }

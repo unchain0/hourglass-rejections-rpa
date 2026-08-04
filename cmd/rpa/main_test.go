@@ -15,6 +15,7 @@ import (
 	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	hourglass "hourglass-rejections-rpa/src/services/hourglass"
+	"hourglass-rejections-rpa/src/services/scheduler"
 )
 
 func newTestStore(t *testing.T) *preferences.Store {
@@ -880,11 +881,13 @@ func (r *errorRunner) Run(ctx context.Context) error {
 	return r.err
 }
 
+func (r *errorRunner) SetNotifier(scheduler.RejectionNotifier) {}
+
 func TestRunFullMode_SchedulerError(t *testing.T) {
 	origFn := newSchedulerFn
 	defer func() { newSchedulerFn = origFn }()
 
-	newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) runner {
+	newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) schedulerRunner {
 		return &errorRunner{err: fmt.Errorf("mock scheduler failure")}
 	}
 
