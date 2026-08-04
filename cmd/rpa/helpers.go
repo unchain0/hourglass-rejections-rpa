@@ -14,7 +14,7 @@ func parseWhitelist(s string) []int64 {
 		return nil
 	}
 	var result []int64
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
 		if err == nil {
 			result = append(result, id)

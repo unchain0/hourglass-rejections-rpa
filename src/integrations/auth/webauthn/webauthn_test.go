@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -168,6 +169,20 @@ func TestAuthenticator_Register(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, storedCreds.Credentials, 1)
 	assert.Equal(t, cred.ID, storedCreds.Credentials[0].ID)
+}
+
+func TestCreateAttestationObject(t *testing.T) {
+	authData := []byte{1, 2, 3}
+	auth := &Authenticator{}
+
+	encoded, err := auth.createAttestationObject(authData)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, cbor.Unmarshal(encoded, &decoded))
+	assert.Equal(t, "none", decoded["fmt"])
+	assert.Equal(t, authData, decoded["authData"])
+	assert.Equal(t, map[any]any{}, decoded["attStmt"])
 }
 
 func TestAuthenticator_Authenticate(t *testing.T) {

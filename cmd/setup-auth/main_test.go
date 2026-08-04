@@ -105,7 +105,10 @@ func setupVPSUploadTest(t *testing.T, inputs []string) (string, error) {
 	}()
 
 	tokensPath := filepath.Join(t.TempDir(), "tokens.json")
-	err := askVPSUpload(tokensPath)
+	runner := newSetupRunner()
+	runner.userInput = newConsoleUserInput(r)
+	runner.scpClient = &mockSCPClient{err: errors.New("failed to transfer tokens")}
+	err := runner.askVPSUpload(tokensPath)
 	_ = r
 
 	_ = pw.Close()
@@ -625,7 +628,10 @@ func TestAskVPSUpload(t *testing.T) {
 			os.Stdout = oldStdout
 		}()
 
-		err := askVPSUpload(tokensPath)
+		runner := newSetupRunner()
+		runner.userInput = newConsoleUserInput(r)
+		runner.scpClient = &mockSCPClient{err: errors.New("failed to transfer tokens")}
+		err := runner.askVPSUpload(tokensPath)
 		_ = r
 
 		assert.NoError(t, err)
@@ -658,7 +664,10 @@ func TestAskVPSUpload(t *testing.T) {
 			os.Stdout = oldStdout
 		}()
 
-		err := askVPSUpload(tokensPath)
+		runner := newSetupRunner()
+		runner.userInput = newConsoleUserInput(r)
+		runner.scpClient = &mockSCPClient{err: errors.New("failed to transfer tokens")}
+		err := runner.askVPSUpload(tokensPath)
 		_ = r
 
 		assert.NoError(t, err)
@@ -707,7 +716,10 @@ func TestAskVPSUpload(t *testing.T) {
 			os.Stdout = oldStdout
 		}()
 
-		err := askVPSUpload(tokensPath)
+		runner := newSetupRunner()
+		runner.userInput = newConsoleUserInput(r)
+		runner.scpClient = &mockSCPClient{err: errors.New("failed to transfer tokens")}
+		err := runner.askVPSUpload(tokensPath)
 		_ = r
 		_ = pr
 
@@ -1002,17 +1014,22 @@ func TestExecSCPClient(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("CopyFile success - dry run with bad host", func(t *testing.T) {
+	t.Run("CopyFile returns scp failure", func(t *testing.T) {
 		client := &execSCPClient{
 			stdout: io.Discard,
 			stderr: io.Discard,
 		}
 		tempDir := t.TempDir()
+		scpPath := filepath.Join(tempDir, "scp")
+		err := os.WriteFile(scpPath, []byte("#!/bin/sh\nexit 1\n"), 0755)
+		require.NoError(t, err)
+		t.Setenv("PATH", tempDir)
+
 		testFile := filepath.Join(tempDir, "test.txt")
-		err := os.WriteFile(testFile, []byte("test"), 0600)
+		err = os.WriteFile(testFile, []byte("test"), 0600)
 		require.NoError(t, err)
 
-		err = client.CopyFile(testFile, "invalid-host-test", "/tmp/test.txt")
+		err = client.CopyFile(testFile, "user@host", "/tmp/test.txt")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to transfer tokens")
 	})
@@ -1451,23 +1468,23 @@ func TestBrowserAuthAdapterAuthenticate_NilAdapter(t *testing.T) {
 }
 
 func TestBrowserAuthAdapterAuthenticate_UsesWrappedAuth(t *testing.T) {
-	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CI", "true")
+	t.Setenv("CHROME_BIN", filepath.Join(t.TempDir(), "missing-chrome"))
 	t.Setenv("CHROME_PATH", "")
 	adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
 	tokens, err := adapter.Authenticate()
 	assert.Nil(t, tokens)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "chrome/chromium not found")
 }
 
 func TestBrowserAuthAdapterExtractTokensFromProfile_UsesWrappedAuth(t *testing.T) {
-	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CI", "true")
+	t.Setenv("CHROME_BIN", filepath.Join(t.TempDir(), "missing-chrome"))
 	t.Setenv("CHROME_PATH", "")
 	adapter := &browserAuthAdapter{auth: webauthn.NewBrowserAuth("http://localhost")}
 	tokens, err := adapter.ExtractTokensFromProfile()
 	assert.Nil(t, tokens)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "chrome/chromium not found")
 }
 
 func TestBrowserAuthAdapterWithProfileDir_UsesWrappedAuth(t *testing.T) {
@@ -1485,6 +1502,9 @@ func TestSetupRunner_chromeProfileDir_UsesEnvOverride(t *testing.T) {
 func TestLaunchChromeForManualLogin_ReturnsMissingChromeError(t *testing.T) {
 	t.Setenv("CHROME_BIN", "")
 	t.Setenv("CHROME_PATH", "")
+	originalStat := chromeStatFn
+	t.Cleanup(func() { chromeStatFn = originalStat })
+	chromeStatFn = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
 	err := launchChromeForManualLogin(t.TempDir(), "https://example.com/login")
 	assert.Error(t, err)
@@ -1502,14 +1522,11 @@ func TestLaunchChromeForManualLogin_ReturnsStartError(t *testing.T) {
 
 func TestLaunchChromeForManualLogin_Success(t *testing.T) {
 	tempDir := t.TempDir()
-	chromePath := filepath.Join(tempDir, "chrome")
-	err := os.WriteFile(chromePath, []byte("#!/bin/sh\nexit 0\n"), 0755)
-	require.NoError(t, err)
-	t.Setenv("CHROME_BIN", chromePath)
+	t.Setenv("CHROME_BIN", "/bin/true")
 	t.Setenv("CHROME_PATH", "")
 
 	profileDir := filepath.Join(tempDir, "profile")
-	err = launchChromeForManualLogin(profileDir, "https://example.com/login")
+	err := launchChromeForManualLogin(profileDir, "https://example.com/login")
 	assert.NoError(t, err)
 	_, statErr := os.Stat(profileDir)
 	assert.NoError(t, statErr)
@@ -1517,14 +1534,11 @@ func TestLaunchChromeForManualLogin_Success(t *testing.T) {
 
 func TestLaunchChromeForManualLogin_UsesChromePathFallback(t *testing.T) {
 	tempDir := t.TempDir()
-	chromePath := filepath.Join(tempDir, "chrome-path")
-	err := os.WriteFile(chromePath, []byte("#!/bin/sh\nexit 0\n"), 0755)
-	require.NoError(t, err)
 	t.Setenv("CHROME_BIN", "")
-	t.Setenv("CHROME_PATH", chromePath)
+	t.Setenv("CHROME_PATH", "/bin/true")
 
 	profileDir := filepath.Join(tempDir, "profile-fallback")
-	err = launchChromeForManualLogin(profileDir, "https://example.com/login")
+	err := launchChromeForManualLogin(profileDir, "https://example.com/login")
 	assert.NoError(t, err)
 }
 

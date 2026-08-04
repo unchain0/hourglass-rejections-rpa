@@ -114,7 +114,7 @@ func (s *Scheduler) runWithTicker(ctx context.Context, ticker *time.Ticker) erro
 			if err != nil {
 				schedulerErrorCounter.Add(ctx, 1)
 				logger.Error("scheduled analysis failed", "error", err)
-				s.telemetryClient.CaptureError(err, map[string]interface{}{
+				s.telemetryClient.CaptureError(err, map[string]any{
 					"phase": "scheduled_analysis",
 				})
 			}
@@ -177,7 +177,7 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 			if err != nil {
 				sectionSpan.RecordError(err)
 				slog.Error("failed to analyze section", "section", sec, "error", err)
-				s.telemetryClient.CaptureError(err, map[string]interface{}{
+				s.telemetryClient.CaptureError(err, map[string]any{
 					"section": sec,
 					"phase":   "analysis",
 				})
@@ -187,7 +187,7 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 			if result.Error != nil {
 				sectionSpan.RecordError(result.Error)
 				slog.Error("analysis returned error", "section", sec, "error", result.Error)
-				s.telemetryClient.CaptureError(result.Error, map[string]interface{}{
+				s.telemetryClient.CaptureError(result.Error, map[string]any{
 					"section": sec,
 					"phase":   "analysis_result",
 					"total":   result.Total,
@@ -205,7 +205,7 @@ func (s *Scheduler) runAnalysis(ctx context.Context) error {
 
 				if err := s.store.SaveRejections(ctx, result.Rejections); err != nil {
 					slog.Error("failed to save rejections", "section", sec, "error", err)
-					s.telemetryClient.CaptureError(err, map[string]interface{}{
+					s.telemetryClient.CaptureError(err, map[string]any{
 						"section": sec,
 						"phase":   "save_rejections",
 						"count":   len(result.Rejections),
@@ -238,7 +238,7 @@ func (s *Scheduler) sendNotifications(rejections []domain.Rejection, duration ti
 
 	if err := s.notifier.SendJobCompletion(summary, duration); err != nil {
 		slog.Error("failed to send notification", "error", err)
-		s.telemetryClient.CaptureError(err, map[string]interface{}{
+		s.telemetryClient.CaptureError(err, map[string]any{
 			"phase": "send_notification",
 		})
 		return err

@@ -6,35 +6,37 @@
 commit-msg:
   commands:
     message:
-      run: env GOTOOLCHAIN=auto bash -c '
-        # Conventional Commits validation
-        PATTERN="^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\(.+\))?!?: .{1,100}$"
-        if ! [[ $(cat {1}) =~ $PATTERN ]]; then
-          echo "ERROR: Commit message must follow Conventional Commits"
-          echo "Examples:"
-          echo "  feat: add new notification handler"
-          echo "  fix(api): resolve timeout issue"
-          echo "  refactor(auth): simplify token refresh"
-          echo ""
-          echo "Valid types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test"
-          exit 1
-        fi
-      '
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          # Conventional Commits validation
+          PATTERN="^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\(.+\))?!?: .{1,100}$"
+          if ! [[ $(cat {1}) =~ $PATTERN ]]; then
+            echo "ERROR: Commit message must follow Conventional Commits"
+            echo "Examples:"
+            echo "  feat: add new notification handler"
+            echo "  fix(api): resolve timeout issue"
+            echo "  refactor(auth): simplify token refresh"
+            echo ""
+            echo "Valid types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test"
+            exit 1
+          fi
+        '
 
 pre-commit:
   parallel: true
   commands:
     format-check:
       glob: "*.go"
-      run: env GOTOOLCHAIN=auto bash -c '
-        UNFORMATTED=$(gofmt -l {staged_files})
-        if [ -n "$UNFORMATTED" ]; then
-          echo "ERROR: The following files are not formatted:"
-          echo "$UNFORMATTED"
-          echo "Run \"make fmt\" to fix"
-          exit 1
-        fi
-      '
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          UNFORMATTED=$(gofmt -l {staged_files})
+          if [ -n "$UNFORMATTED" ]; then
+            echo "ERROR: The following files are not formatted:"
+            echo "$UNFORMATTED"
+            echo "Run \"make fmt\" to fix"
+            exit 1
+          fi
+        '
     vet:
       glob: "*.go"
       run: env GOTOOLCHAIN=auto go vet ./...
@@ -43,65 +45,68 @@ pre-commit:
       run: env GOTOOLCHAIN=auto golangci-lint run --new-from-rev HEAD --timeout=2m
     tidy:
       glob: "*.go"
-      run: env GOTOOLCHAIN=auto bash -c '
-        go mod tidy
-        go mod verify
-        if [ -n "$(git diff --name-only go.mod go.sum)" ]; then
-          echo "ERROR: go.mod or go.sum changed after tidy"
-          echo "Run \"make tidy\" and stage the changes"
-          exit 1
-        fi
-      '
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          go mod tidy
+          go mod verify
+          if [ -n "$(git diff --name-only go.mod go.sum)" ]; then
+            echo "ERROR: go.mod or go.sum changed after tidy"
+            echo "Run \"make tidy\" and stage the changes"
+            exit 1
+          fi
+        '
 
 pre-push:
-  parallel: true
+  parallel: false
   commands:
     test:
-      run: env GOTOOLCHAIN=auto bash -c '
-        # Run tests with race detector, skipping known Chrome-dependent tests
-        SKIP_TESTS="TestBrowserAuthAdapter.*UsesWrappedAuth|TestBrowserAuthAdapterExtractTokensFromProfile_UsesWrappedAuth|TestClient_EnableWebAuthn_ErrorCallbackInvoked"
-        TEST_PKGS=$(go list ./... | grep -v -E "cmd/(save-tokens|setup-auth)")
-        go test -short -race -timeout 5m -coverprofile=coverage.out -skip "$SKIP_TESTS" $TEST_PKGS
-      '
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          go test -short -race -timeout 5m -coverprofile=coverage.out ./...
+        '
     coverage:
-      run: env GOTOOLCHAIN=auto bash -c '
-        if [ ! -f coverage.out ]; then
-          echo "ERROR: coverage.out not found. Run tests first."
-          exit 1
-        fi
-        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk "{print \$3}" | sed "s/%//")
-        echo "Total coverage: ${COVERAGE}%"
-        # Use bc if available, otherwise awk for comparison
-        if command -v bc >/dev/null 2>&1; then
-          if [ "$(echo "${COVERAGE} < 95" | bc -l)" = "1" ]; then
-            echo "ERROR: Coverage ${COVERAGE}% is below 95%"
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          if [ ! -f coverage.out ]; then
+            echo "ERROR: coverage.out not found. Run tests first."
             exit 1
           fi
-        else
-          if [ "$(echo "${COVERAGE}" | awk "{print (\$1 < 95)}")" = "1" ]; then
-            echo "ERROR: Coverage ${COVERAGE}% is below 95%"
-            exit 1
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk "{print \$3}" | sed "s/%//")
+          echo "Total coverage: ${COVERAGE}%"
+          # Use bc if available, otherwise awk for comparison
+          if command -v bc >/dev/null 2>&1; then
+            if [ "$(echo "${COVERAGE} < 95" | bc -l)" = "1" ]; then
+              echo "ERROR: Coverage ${COVERAGE}% is below 95%"
+              exit 1
+            fi
+          else
+            if [ "$(echo "${COVERAGE}" | awk "{print (\$1 < 95)}")" = "1" ]; then
+              echo "ERROR: Coverage ${COVERAGE}% is below 95%"
+              exit 1
+            fi
           fi
-        fi
-      '
+        '
     build:
-      run: env GOTOOLCHAIN=auto bash -c '
-        echo "Building all binaries..."
-        go build -o /dev/null ./cmd/rpa
-        go build -o /dev/null ./cmd/save-tokens
-        go build -o /dev/null ./cmd/token-refresh
-        go build -o /dev/null ./cmd/setup-auth
-      '
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          echo "Building all binaries..."
+          go build -o /dev/null ./cmd/rpa
+          go build -o /dev/null ./cmd/save-tokens
+          go build -o /dev/null ./cmd/token-refresh
+          go build -o /dev/null ./cmd/setup-auth
+        '
     vulncheck:
-      run: env GOTOOLCHAIN=auto bash -c '
-        if ! command -v govulncheck >/dev/null 2>&1; then
-          echo "WARNING: govulncheck not installed. Skipping vulnerability check."
-          echo "Install with: go install golang.org/x/vuln/cmd/govulncheck@latest"
-          exit 0
-        fi
-        govulncheck ./...
-      '
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          if ! command -v govulncheck >/dev/null 2>&1; then
+            echo "WARNING: govulncheck not installed. Skipping vulnerability check."
+            echo "Install with: go install golang.org/x/vuln/cmd/govulncheck@latest"
+            exit 0
+          fi
+          govulncheck ./...
+        '
     lint-full:
-      run: env GOTOOLCHAIN=auto bash -c '
-        golangci-lint run --timeout=5m ./...
-      '
+      run: |
+        env GOTOOLCHAIN=auto bash -c '
+          golangci-lint run --timeout=5m ./...
+        '

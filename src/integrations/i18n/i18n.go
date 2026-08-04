@@ -70,7 +70,7 @@ func GetLocalizer(langTag string) *i18n.Localizer {
 }
 
 // Localize resolves a message ID for the requested language and falls back to the ID on errors.
-func Localize(lang string, messageID string, templateData map[string]interface{}) string {
+func Localize(lang string, messageID string, templateData map[string]any) string {
 	localizer := GetLocalizer(lang)
 	msg, err := localizer.Localize(&i18n.LocalizeConfig{
 		MessageID:    messageID,

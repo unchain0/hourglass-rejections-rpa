@@ -208,7 +208,7 @@ func TestRejectionCache_ConcurrentAccess(t *testing.T) {
 	done := make(chan bool)
 
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			c.HasChanges([]domain.Rejection{
 				{Section: "Field Ministry", Who: "John", What: "Test", When: "01/03/2026"},
 			})
@@ -217,7 +217,7 @@ func TestRejectionCache_ConcurrentAccess(t *testing.T) {
 	}()
 
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			c.LastCheck()
 		}
 		done <- true

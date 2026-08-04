@@ -50,14 +50,10 @@ test:
 	@echo "Running tests..."
 	$(GO) test $(GOFLAGS) -race -coverprofile=coverage.out ./...
 
-# Testes que criam contextos ChromeDP e travam em ambientes headless/sandboxed
-SKIP_CHROME_TESTS ?= -skip 'TestBrowserAuthAdapter.*UsesWrappedAuth|TestBrowserAuthAdapterExtractTokensFromProfile_UsesWrappedAuth|TestClient_EnableWebAuthn_ErrorCallbackInvoked'
-
-## test-short: Run tests without race detector (faster), skips known Chrome-dependent tests
+## test-short: Run tests without race detector (faster)
 test-short:
 	@echo "Running tests (short)..."
-	$(GO) test $(GOFLAGS) -short -timeout 5m $(SKIP_CHROME_TESTS) \
-		$$(go list ./... | grep -v -E "cmd/(save-tokens|setup-auth)")
+	$(GO) test $(GOFLAGS) -short -timeout 5m ./...
 
 ## coverage: Generate and display test coverage
 coverage: test

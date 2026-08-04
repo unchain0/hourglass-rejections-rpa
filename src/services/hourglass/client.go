@@ -115,7 +115,7 @@ func (c *Client) LoadTokensFromFile(path string) error {
 }
 
 // NewClientWithWebAuthn creates a new Hourglass API client with WebAuthn authentication.
-func NewClientWithWebAuthn(credentialsPath string, capture func(error, map[string]interface{})) (*Client, error) {
+func NewClientWithWebAuthn(credentialsPath string, capture func(error, map[string]any)) (*Client, error) {
 	client := NewClient()
 
 	err := client.EnableWebAuthn(credentialsPath, capture)
@@ -127,7 +127,7 @@ func NewClientWithWebAuthn(credentialsPath string, capture func(error, map[strin
 }
 
 // EnableWebAuthn enables WebAuthn authentication with the given credentials path.
-func (c *Client) EnableWebAuthn(credentialsPath string, capture func(error, map[string]interface{})) error {
+func (c *Client) EnableWebAuthn(credentialsPath string, capture func(error, map[string]any)) error {
 	tokenManager, err := c.newTokenManager(credentialsPath, capture)
 	if err != nil {
 		return fmt.Errorf("failed to create token manager: %w", err)
@@ -138,14 +138,14 @@ func (c *Client) EnableWebAuthn(credentialsPath string, capture func(error, map[
 	return nil
 }
 
-func (c *Client) newTokenManager(credentialsPath string, capture func(error, map[string]interface{})) (authTokenManager, error) {
+func (c *Client) newTokenManager(credentialsPath string, capture func(error, map[string]any)) (authTokenManager, error) {
 	opts := []webauthn.TokenManagerOption{
 		webauthn.WithOnTokenRenewed(func(tokens *webauthn.AuthTokens) {
 			c.UpdateTokensFromManager(tokens)
 		}),
 		webauthn.WithOnError(func(err error) {
 			if capture != nil {
-				capture(err, map[string]interface{}{
+				capture(err, map[string]any{
 					"component": "token_manager",
 					"action":    "token_renewal",
 				})
@@ -285,7 +285,7 @@ func (c *Client) GetNotifications(start, end, notificationType string) ([]Notifi
 }
 
 // getJSON performs a GET request and decodes the JSON response into the target.
-func (c *Client) getJSON(url string, target interface{}) error {
+func (c *Client) getJSON(url string, target any) error {
 	resp, err := c.doAuthenticatedGet(url)
 	if err != nil {
 		return err

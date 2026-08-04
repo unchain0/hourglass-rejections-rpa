@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"hourglass-rejections-rpa/src/domain_models"
@@ -42,12 +45,12 @@ func (r *ResendNotifier) SendJobCompletion(summary string, duration time.Duratio
 <h1>Análise Concluída ✅</h1>
 
 <p><strong>Resumo:</strong> %s</p>
-<p><strong>Duração:</u003e/strong> %s</p>
-<p><strong>Timestamp:</u003e/strong> %s</p>
+<p><strong>Duração:</strong> %s</p>
+<p><strong>Timestamp:</strong> %s</p>
 
 <hr>
 <p>Hourglass Rejections RPA</p>
-`, summary, duration, time.Now().Format(time.RFC3339))
+`, html.EscapeString(summary), duration, time.Now().Format(time.RFC3339))
 
 	return r.sendEmail(subject, body)
 }
@@ -58,32 +61,35 @@ func (r *ResendNotifier) SendJobFailure(step string, err error) error {
 	body := fmt.Sprintf(`
 <h1>Falha na Execução ❌</h1>
 
-<p><strong>Etapa:</u003e/strong> %s</p>
-<p><strong>Erro:</u003e/strong> %s</p>
-<p><strong>Timestamp:</u003e/strong> %s</p>
+<p><strong>Etapa:</strong> %s</p>
+<p><strong>Erro:</strong> %s</p>
+<p><strong>Timestamp:</strong> %s</p>
 
 <hr>
 <p>Hourglass Rejections RPA</p>
-`, step, err.Error(), time.Now().Format(time.RFC3339))
+`, html.EscapeString(step), html.EscapeString(err.Error()), time.Now().Format(time.RFC3339))
 
 	return r.sendEmail(subject, body)
 }
 
 // SendDailyReport sends a daily summary report.
 func (r *ResendNotifier) SendDailyReport(stats domain.DailyStats) error {
-	// Build sections summary
-	sectionsHTML := ""
+	var sectionsHTML strings.Builder
 	for section, count := range stats.Sections {
-		sectionsHTML += fmt.Sprintf("\u003cli><strong>%s:</strong> %d rejections</li>\n", section, count)
+		sectionsHTML.WriteString("<li><strong>")
+		sectionsHTML.WriteString(html.EscapeString(section))
+		sectionsHTML.WriteString(":</strong> ")
+		sectionsHTML.WriteString(strconv.Itoa(count))
+		sectionsHTML.WriteString(" rejections</li>\n")
 	}
 
 	subject := "📊 Hourglass RPA - Relatório Diário"
 	body := fmt.Sprintf(`
 <h1>Relatório Diário 📊</h1>
 
-<p><strong>Date:</u003e/strong> %s</p>
-<p><strong>Total Jobs:</u003e/strong> %d</p>
-<p><strong>Total Rejections:</u003e/strong> %d</p>
+<p><strong>Date:</strong> %s</p>
+<p><strong>Total Jobs:</strong> %d</p>
+<p><strong>Total Rejections:</strong> %d</p>
 
 <h2>By Section:</h2>
 <ul>
@@ -92,7 +98,7 @@ func (r *ResendNotifier) SendDailyReport(stats domain.DailyStats) error {
 
 <hr>
 <p>Hourglass Rejections RPA</p>
-`, stats.Date.Format("2006-01-02"), stats.TotalJobs, stats.TotalRejections, sectionsHTML)
+`, stats.Date.Format("2006-01-02"), stats.TotalJobs, stats.TotalRejections, sectionsHTML.String())
 
 	return r.sendEmail(subject, body)
 }

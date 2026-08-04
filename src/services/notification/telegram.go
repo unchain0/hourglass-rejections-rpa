@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -138,12 +139,7 @@ func (t *TelegramNotifier) IsAuthorized(chatID int64) bool {
 	if len(t.whitelist) == 0 {
 		return true
 	}
-	for _, id := range t.whitelist {
-		if id == chatID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(t.whitelist, chatID)
 }
 
 func (t *TelegramNotifier) SendNoRejectionsMessage(chatID int64, message string) error {
@@ -180,9 +176,9 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 
 	lang := t.getUserLanguage(chatID)
 
-	rejectionsList := make([]map[string]interface{}, 0, len(rejections))
+	rejectionsList := make([]map[string]any, 0, len(rejections))
 	for i, r := range rejections {
-		rejectionsList = append(rejectionsList, map[string]interface{}{
+		rejectionsList = append(rejectionsList, map[string]any{
 			"Number":  i + 1,
 			"Who":     html.EscapeString(r.Who),
 			"Section": html.EscapeString(translateSectionName(lang, r.Section)),
@@ -191,7 +187,7 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 		})
 	}
 
-	msg := i18n.Localize(lang, "rejections_detected", map[string]interface{}{
+	msg := i18n.Localize(lang, "rejections_detected", map[string]any{
 		"Count":      len(rejections),
 		"Rejections": rejectionsList,
 	})
@@ -339,7 +335,7 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 	lang := t.getUserLanguage(chatID)
 
 	if !t.IsAuthorized(chatID) {
-		text := i18n.Localize(lang, "welcome_unauthorized", map[string]interface{}{
+		text := i18n.Localize(lang, "welcome_unauthorized", map[string]any{
 			"ChatID": fmt.Sprintf("%d", chatID),
 		})
 
@@ -464,7 +460,7 @@ func (t *TelegramNotifier) handleStatus(ctx context.Context, b *bot.Bot, update 
 		notificationStatus = "enabled"
 	}
 
-	msg := i18n.Localize(lang, "your_preferences", map[string]interface{}{
+	msg := i18n.Localize(lang, "your_preferences", map[string]any{
 		"Sections":           sectionsList,
 		"NotificationStatus": notificationStatus,
 	})
@@ -539,7 +535,7 @@ func (t *TelegramNotifier) handleStats(ctx context.Context, b *bot.Bot, update *
 		totalChecks, rejectionsToday = t.stats.snapshot()
 	}
 
-	msg := i18n.Localize(lang, "stats_overview", map[string]interface{}{
+	msg := i18n.Localize(lang, "stats_overview", map[string]any{
 		"TotalUsers":      totalUsers,
 		"TotalChecks":     totalChecks,
 		"RejectionsToday": rejectionsToday,
@@ -641,7 +637,7 @@ func (t *TelegramNotifier) handleWhoAmI(ctx context.Context, b *bot.Bot, update 
 		}
 	}
 
-	msg := i18n.Localize(lang, "whoami_info", map[string]interface{}{
+	msg := i18n.Localize(lang, "whoami_info", map[string]any{
 		"ChatID":     chatID,
 		"Authorized": authorizedStatus,
 		"Language":   languagePreference,
@@ -699,7 +695,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 		if err := callback(ctx, chatID); err != nil {
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:    chatID,
-				Text:      i18n.Localize(lang, "verification_error", map[string]interface{}{"Error": html.EscapeString(err.Error())}),
+				Text:      i18n.Localize(lang, "verification_error", map[string]any{"Error": html.EscapeString(err.Error())}),
 				ParseMode: models.ParseModeHTML,
 			})
 			if t.stats != nil {
@@ -815,7 +811,7 @@ func (t *TelegramNotifier) handleSave(ctx context.Context, b *bot.Bot, update *m
 	// Preferences are already saved by toggle handler; confirm to user
 	sectionsList := pref.Sections()
 
-	msg := i18n.Localize(lang, "preferences_saved", map[string]interface{}{
+	msg := i18n.Localize(lang, "preferences_saved", map[string]any{
 		"Sections": sectionsList,
 	})
 
@@ -990,12 +986,7 @@ func (t *TelegramNotifier) buildConfigKeyboard(pref *preferences.UserPreference,
 
 // containsSection checks if a section is in the list.
 func containsSection(sections []string, section string) bool {
-	for _, s := range sections {
-		if s == section {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(sections, section)
 }
 
 // removeSection removes a section from the list.

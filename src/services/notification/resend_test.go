@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -180,6 +181,50 @@ func TestResendNotifier_SendDailyReport_Success(t *testing.T) {
 	err := n.SendDailyReport(stats)
 	if err != nil {
 		t.Errorf("SendDailyReport() error = %v", err)
+	}
+}
+
+func TestResendNotifier_EmailHTMLIsValidAndEscaped(t *testing.T) {
+	var bodies []string
+	server, n := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		bodies = append(bodies, payload["html"])
+		w.WriteHeader(http.StatusOK)
+	})
+	defer server.Close()
+
+	if err := n.SendJobCompletion("<script>alert(1)</script>", time.Second); err != nil {
+		t.Fatalf("SendJobCompletion() error = %v", err)
+	}
+	if err := n.SendJobFailure("<step>", errors.New("<failure>")); err != nil {
+		t.Fatalf("SendJobFailure() error = %v", err)
+	}
+	if err := n.SendDailyReport(domain.DailyStats{
+		Date:     time.Date(2026, time.August, 4, 0, 0, 0, 0, time.UTC),
+		Sections: map[string]int{"<section>": 1},
+	}); err != nil {
+		t.Fatalf("SendDailyReport() error = %v", err)
+	}
+
+	if len(bodies) != 3 {
+		t.Fatalf("got %d email bodies, want 3", len(bodies))
+	}
+	for _, body := range bodies {
+		if strings.Contains(body, "u003e/strong") {
+			t.Errorf("email contains malformed closing tag: %s", body)
+		}
+	}
+	if !strings.Contains(bodies[0], "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Errorf("completion summary was not escaped: %s", bodies[0])
+	}
+	if !strings.Contains(bodies[1], "&lt;step&gt;") || !strings.Contains(bodies[1], "&lt;failure&gt;") {
+		t.Errorf("failure fields were not escaped: %s", bodies[1])
+	}
+	if !strings.Contains(bodies[2], "<li><strong>&lt;section&gt;:</strong> 1 rejections</li>") {
+		t.Errorf("daily report section is malformed or unescaped: %s", bodies[2])
 	}
 }
 

@@ -157,7 +157,7 @@ func (c *Client) Logger() *slog.Logger {
 }
 
 // CaptureError records an error through OpenTelemetry logs and metrics.
-func (c *Client) CaptureError(err error, extras map[string]interface{}) {
+func (c *Client) CaptureError(err error, extras map[string]any) {
 	if c == nil || err == nil {
 		return
 	}
@@ -225,7 +225,7 @@ func (c *Client) IsEnabled() bool {
 
 func parseHeaders(raw string) map[string]string {
 	headers := map[string]string{}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue

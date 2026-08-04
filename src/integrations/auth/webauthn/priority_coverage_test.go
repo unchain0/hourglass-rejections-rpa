@@ -255,10 +255,7 @@ func TestPriority_TokenManagerStartStopRenewalAndGetters(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		require.NoError(t, tm.Start(ctx))
+		require.NoError(t, tm.Start(t.Context()))
 		select {
 		case <-renewed:
 		case <-time.After(300 * time.Millisecond):
@@ -477,7 +474,7 @@ func TestPriority_HTTPGetAndPostErrors(t *testing.T) {
 func TestPriority_FinishAuthenticationErrorPaths(t *testing.T) {
 	t.Run("marshal assertion error", func(t *testing.T) {
 		a := &Authenticator{}
-		assertion := &AssertionResponse{ClientExtensionResults: map[string]interface{}{"bad": make(chan int)}}
+		assertion := &AssertionResponse{ClientExtensionResults: map[string]any{"bad": make(chan int)}}
 		_, err := a.finishAuthentication(assertion)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "marshal assertion")

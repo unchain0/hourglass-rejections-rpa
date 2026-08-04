@@ -171,13 +171,16 @@ func LoadCredentialFromPEM(pemPath, credentialID, rpID, userID, userName string)
 }
 
 func createCOSEPublicKey(pubKey ecdsa.PublicKey) ([]byte, error) {
-	xBytes := pubKey.X.Bytes()
-	yBytes := pubKey.Y.Bytes()
+	encoded, err := pubKey.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode ECDSA public key: %w", err)
+	}
+	if len(encoded) != 65 {
+		return nil, fmt.Errorf("unexpected ECDSA public key length: %d", len(encoded))
+	}
 
-	xPadded := make([]byte, 32)
-	yPadded := make([]byte, 32)
-	copy(xPadded[32-len(xBytes):], xBytes)
-	copy(yPadded[32-len(yBytes):], yBytes)
+	xBytes := encoded[1:33]
+	yBytes := encoded[33:65]
 
 	type COSEKey struct {
 		Kty int64  `cbor:"1,keyasint"`
@@ -191,8 +194,8 @@ func createCOSEPublicKey(pubKey ecdsa.PublicKey) ([]byte, error) {
 		Kty: 2,
 		Alg: -7,
 		Crv: 1,
-		X:   xPadded,
-		Y:   yPadded,
+		X:   xBytes,
+		Y:   yBytes,
 	}
 
 	return cborMarshalTypes(coseKey)

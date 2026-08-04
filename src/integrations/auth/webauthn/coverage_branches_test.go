@@ -677,7 +677,7 @@ func TestAuthenticatorCoverage(t *testing.T) {
 		auth := &Authenticator{}
 		err := auth.finishRegistration(&AttestationResponse{
 			Type:                   "public-key",
-			ClientExtensionResults: map[string]interface{}{"bad": make(chan int)},
+			ClientExtensionResults: map[string]any{"bad": make(chan int)},
 		})
 		require.Error(t, err)
 

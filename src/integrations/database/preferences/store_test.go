@@ -19,13 +19,13 @@ type fakeConnPool struct{}
 func (f *fakeConnPool) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
 	return nil, nil
 }
-func (f *fakeConnPool) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (f *fakeConnPool) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return nil, nil
 }
-func (f *fakeConnPool) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+func (f *fakeConnPool) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	return nil, nil
 }
-func (f *fakeConnPool) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+func (f *fakeConnPool) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return nil
 }
 

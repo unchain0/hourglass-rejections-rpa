@@ -131,7 +131,7 @@ func TestLocalize(t *testing.T) {
 		name         string
 		lang         string
 		messageID    string
-		templateData map[string]interface{}
+		templateData map[string]any
 		wantContain  string
 	}{
 		{
@@ -152,14 +152,14 @@ func TestLocalize(t *testing.T) {
 			name:         "English with template data",
 			lang:         "en",
 			messageID:    "welcome_unauthorized",
-			templateData: map[string]interface{}{"ChatID": "12345"},
+			templateData: map[string]any{"ChatID": "12345"},
 			wantContain:  "12345",
 		},
 		{
 			name:         "Portuguese with template data",
 			lang:         "pt-BR",
 			messageID:    "welcome_unauthorized",
-			templateData: map[string]interface{}{"ChatID": "12345"},
+			templateData: map[string]any{"ChatID": "12345"},
 			wantContain:  "12345",
 		},
 		{
@@ -260,7 +260,7 @@ func TestLocalize_RejectionsTemplate(t *testing.T) {
 	err := Init()
 	require.NoError(t, err)
 
-	rejections := []map[string]interface{}{
+	rejections := []map[string]any{
 		{
 			"Number":  1,
 			"Who":     "John",
@@ -282,7 +282,7 @@ func TestLocalize_RejectionsTemplate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := Localize(tt.lang, "rejections_detected", map[string]interface{}{
+			result := Localize(tt.lang, "rejections_detected", map[string]any{
 				"Count":      1,
 				"Rejections": rejections,
 			})

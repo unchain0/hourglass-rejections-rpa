@@ -28,7 +28,7 @@ func TestClient_DisabledMethods(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	client.CaptureError(errors.New("test error"), map[string]interface{}{"key": "value"})
+	client.CaptureError(errors.New("test error"), map[string]any{"key": "value"})
 	client.CaptureMessage("test message", "info")
 	client.Flush(time.Millisecond)
 	client.Close()

@@ -815,7 +815,7 @@ func TestCleanupStaleSingletonArtifacts_RemoveError(t *testing.T) {
 	lockPath := filepath.Join(profileDir, "SingletonLock")
 	require.NoError(t, os.Symlink("mint-424242", lockPath))
 	processExists = func(pid int) bool { return false }
-	osRemove = func(path string) error { return errors.New("remove failed") }
+	osRemove = func(_ string) error { return errors.New("remove failed") }
 	err := cleanupStaleSingletonArtifacts(profileDir)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove stale chrome singleton artifact")
@@ -824,7 +824,7 @@ func TestCleanupStaleSingletonArtifacts_RemoveError(t *testing.T) {
 func TestRunBrowserFlow_PrepareProfileError(t *testing.T) {
 	restoreBrowserAuthHooks(t)
 	t.Setenv("CHROME_BIN", "/tmp/chrome")
-	osMkdirAll = func(path string, perm os.FileMode) error { return errors.New("mkdir failed") }
+	osMkdirAll = func(_ string, _ os.FileMode) error { return errors.New("mkdir failed") }
 	_, err := NewBrowserAuth("https://example.com").WithProfileDir(t.TempDir()).runBrowserFlow(true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create chrome profile directory")

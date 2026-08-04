@@ -12,8 +12,7 @@ import (
 	"net/http"
 	"os/exec"
 
-	"github.com/go-webauthn/webauthn/protocol"
-	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
+	"github.com/fxamacker/cbor/v2"
 )
 
 var (
@@ -154,7 +153,7 @@ const (
 	PublicKey Type = "public-key"
 )
 
-func (a *Authenticator) beginRegistration(userName string) (*BeginRegistrationResponse, error) {
+func (a *Authenticator) beginRegistration(_ string) (*BeginRegistrationResponse, error) {
 	url := fmt.Sprintf("%s/auth/webauthn/register/begin", a.baseURL)
 
 	var body []byte
@@ -233,26 +232,39 @@ func (a *Authenticator) httpGet(url string) ([]byte, error) {
 }
 
 type AttestationResponse struct {
-	Type                    string                 `json:"type"`
-	ID                      string                 `json:"id"`
-	RawID                   string                 `json:"rawId"`
-	AuthenticatorAttachment string                 `json:"authenticatorAttachment,omitempty"`
-	Response                AttestationData        `json:"response"`
-	ClientExtensionResults  map[string]interface{} `json:"clientExtensionResults,omitempty"`
+	Type                    string          `json:"type"`
+	ID                      string          `json:"id"`
+	RawID                   string          `json:"rawId"`
+	AuthenticatorAttachment string          `json:"authenticatorAttachment,omitempty"`
+	Response                AttestationData `json:"response"`
+	ClientExtensionResults  map[string]any  `json:"clientExtensionResults,omitempty"`
 }
 
 type AttestationData struct {
-	ClientDataJSON         string                 `json:"clientDataJSON"`
-	AttestationObject      string                 `json:"attestationObject"`
-	Transports             []string               `json:"transports,omitempty"`
-	ClientExtensionResults map[string]interface{} `json:"clientExtensionResults,omitempty"`
+	ClientDataJSON         string         `json:"clientDataJSON"`
+	AttestationObject      string         `json:"attestationObject"`
+	Transports             []string       `json:"transports,omitempty"`
+	ClientExtensionResults map[string]any `json:"clientExtensionResults,omitempty"`
+}
+
+type collectedClientData struct {
+	Type        string `json:"type"`
+	Challenge   string `json:"challenge"`
+	Origin      string `json:"origin"`
+	CrossOrigin bool   `json:"crossOrigin,omitempty"`
+}
+
+type attestationObject struct {
+	Format       string         `cbor:"fmt"`
+	RawAuthData  []byte         `cbor:"authData"`
+	AttStatement map[string]any `cbor:"attStmt"`
 }
 
 func (a *Authenticator) createAttestation(cred *Credential, beginResp *BeginRegistrationResponse) (*AttestationResponse, error) {
 	challenge := beginResp.PublicKey.Challenge
 	origin := fmt.Sprintf("https://app.%s", beginResp.PublicKey.Rp.ID)
 
-	clientData := protocol.CollectedClientData{
+	clientData := collectedClientData{
 		Type:        "webauthn.create",
 		Challenge:   challenge,
 		Origin:      origin,
@@ -288,11 +300,11 @@ func (a *Authenticator) createAttestation(cred *Credential, beginResp *BeginRegi
 			AttestationObject: base64.RawURLEncoding.EncodeToString(attestationObject),
 			Transports:        []string{"internal", "hybrid"},
 		},
-		ClientExtensionResults: map[string]interface{}{},
+		ClientExtensionResults: map[string]any{},
 	}, nil
 }
 
-func (a *Authenticator) createAuthenticatorData(cred *Credential, clientDataHash []byte) ([]byte, error) {
+func (a *Authenticator) createAuthenticatorData(cred *Credential, _ []byte) ([]byte, error) {
 	rpIDHash := sha256.Sum256([]byte(cred.RPID))
 
 	flags := byte(0x41)
@@ -324,13 +336,18 @@ func (a *Authenticator) createAuthenticatorData(cred *Credential, clientDataHash
 }
 
 func (a *Authenticator) createAttestationObject(authData []byte) ([]byte, error) {
-	attObj := protocol.AttestationObject{
+	attObj := attestationObject{
 		Format:       "none",
 		RawAuthData:  authData,
 		AttStatement: map[string]any{},
 	}
 
-	return webauthncbor.Marshal(attObj)
+	encMode, err := cbor.CTAP2EncOptions().EncMode()
+	if err != nil {
+		return nil, fmt.Errorf("create CTAP2 CBOR encoder: %w", err)
+	}
+
+	return encMode.Marshal(attObj)
 }
 
 func debugAuthData(authData []byte) {

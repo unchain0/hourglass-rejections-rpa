@@ -162,7 +162,7 @@ func TestClient_GetAVAttendants(t *testing.T) {
 		{
 			ID:        57428,
 			Type:      "video",
-			Assignee:  intPtr(31944),
+			Assignee:  new(31944),
 			Slot:      1,
 			Date:      "2026-03-01",
 			Extra:     false,
@@ -273,11 +273,6 @@ func TestClient_Timeout(t *testing.T) {
 
 	_, err := client.GetUsers()
 	assert.Error(t, err)
-}
-
-// Helper function
-func intPtr(i int) *int {
-	return &i
 }
 
 func TestClient_GetUsers_DecodeError(t *testing.T) {
@@ -574,7 +569,7 @@ func TestClient_LoadTokensFromFile(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		tokensFile := tmpDir + "/auth-tokens.json"
-		tokens := map[string]interface{}{
+		tokens := map[string]any{
 			"hg_login":   "test-hg-login",
 			"xsrf_token": "test-xsrf-token",
 			"expires_at": time.Now().Add(8 * time.Hour).Format(time.RFC3339),
@@ -615,7 +610,7 @@ func TestClient_LoadTokensFromFile(t *testing.T) {
 	t.Run("expired tokens", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		tokensFile := tmpDir + "/auth-tokens.json"
-		tokens := map[string]interface{}{
+		tokens := map[string]any{
 			"hg_login":   "test-hg-login",
 			"xsrf_token": "test-xsrf-token",
 			"expires_at": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
@@ -969,13 +964,14 @@ func TestClient_EnableWebAuthn_UsesCustomTokensPath(t *testing.T) {
 
 func TestClient_EnableWebAuthn_ErrorCallbackInvoked(t *testing.T) {
 	t.Setenv("CI", "true")
+	t.Setenv("CHROME_BIN", filepath.Join(t.TempDir(), "missing-chrome"))
 
 	client := NewClient()
 	tmpDir := t.TempDir()
 	credentialsPath := tmpDir + "/webauthn-credentials.json"
 
 	var capturedErr error
-	err := client.EnableWebAuthn(credentialsPath, func(err error, extras map[string]interface{}) {
+	err := client.EnableWebAuthn(credentialsPath, func(err error, extras map[string]any) {
 		capturedErr = err
 		assert.Equal(t, "token_manager", extras["component"])
 		assert.Equal(t, "token_renewal", extras["action"])

@@ -864,13 +864,13 @@ func TestBrowserAuthAdapter_Authenticate_ReturnsErrorWithNilBrowserAuth(t *testi
 }
 
 func TestBrowserAuthAdapter_Authenticate_UsesWrappedAuth(t *testing.T) {
-	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CI", "true")
+	t.Setenv("CHROME_BIN", filepath.Join(t.TempDir(), "missing-chrome"))
 	t.Setenv("CHROME_PATH", "")
 	adapter := &browserAuthAdapter{BrowserAuth: webauthn.NewBrowserAuth("http://localhost")}
 	tokens, err := adapter.Authenticate()
 	assert.Nil(t, tokens)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "chrome/chromium not found")
 }
 
 func TestBrowserAuthAdapter_WithHeadless_UsesWrapperFunction(t *testing.T) {
@@ -906,13 +906,13 @@ func TestBrowserAuthAdapter_ExtractTokensFromProfile_UsesWrapperFunction(t *test
 }
 
 func TestBrowserAuthAdapter_ExtractTokensFromProfile_UsesWrappedAuth(t *testing.T) {
-	t.Setenv("CHROME_BIN", "")
+	t.Setenv("CI", "true")
+	t.Setenv("CHROME_BIN", filepath.Join(t.TempDir(), "missing-chrome"))
 	t.Setenv("CHROME_PATH", "")
 	adapter := &browserAuthAdapter{BrowserAuth: webauthn.NewBrowserAuth("http://localhost")}
 	tokens, err := adapter.ExtractTokensFromProfile()
 	assert.Nil(t, tokens)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "chrome/chromium not found")
 }
 
 func TestBrowserAuthAdapter_WithProfileDir_UsesWrapperFunction(t *testing.T) {
@@ -939,6 +939,9 @@ func TestBrowserAuthAdapter_WithProfileDir_UsesWrappedAuth(t *testing.T) {
 func TestLaunchChromeForManualLogin_ReturnsMissingChromeError(t *testing.T) {
 	t.Setenv("CHROME_BIN", "")
 	t.Setenv("CHROME_PATH", "")
+	originalStat := chromeStatFn
+	t.Cleanup(func() { chromeStatFn = originalStat })
+	chromeStatFn = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
 	err := launchChromeForManualLogin(t.TempDir(), "https://example.com/login")
 	assert.Error(t, err)

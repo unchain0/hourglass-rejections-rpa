@@ -67,7 +67,7 @@ func (s *manualCheckService) run(ctx context.Context, targetChatID int64) error 
 		manualCheckErrorCounter.Add(ctx, 1)
 		logger.Error("failed to get user preferences", "chat_id", targetChatID, "error", err)
 		if s.telemetryClient != nil {
-			s.telemetryClient.CaptureError(err, map[string]interface{}{
+			s.telemetryClient.CaptureError(err, map[string]any{
 				"phase":   "get_user_preferences",
 				"chat_id": targetChatID,
 			})
@@ -161,7 +161,7 @@ func (s *manualCheckService) captureAnalysisError(err error, chatID int64, secti
 		return
 	}
 
-	extras := map[string]interface{}{
+	extras := map[string]any{
 		"section":  section,
 		"phase":    phase,
 		"chat_id":  chatID,

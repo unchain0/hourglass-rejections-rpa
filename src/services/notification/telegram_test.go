@@ -1187,10 +1187,7 @@ func TestNewTelegramNotifier_DefaultHandlerCalled(t *testing.T) {
 	require.NoError(t, err)
 
 	_ = called.Load()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	tn.bot.ProcessUpdate(ctx, &models.Update{})
+	tn.bot.ProcessUpdate(t.Context(), &models.Update{})
 }
 
 // --- Success paths (SendMessage via mock server) ---
@@ -1224,10 +1221,7 @@ func TestStartBot_SuccessWithMockServer(t *testing.T) {
 	tn := newTestNotifierWithServer(t, srv, nil)
 	pm := newTestPrefManager(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	err := tn.StartBot(ctx, pm)
+	err := tn.StartBot(t.Context(), pm)
 	assert.NoError(t, err)
 	assert.NotNil(t, tn.cancelFunc)
 
@@ -1316,7 +1310,7 @@ func TestRateLimiterAllow_WithinLimitAndCleanup(t *testing.T) {
 	chatID := int64(12345)
 
 	old := time.Now().Add(-2 * time.Minute)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		rl.attempts[chatID] = append(rl.attempts[chatID], old)
 	}
 
@@ -1330,7 +1324,7 @@ func TestRateLimiterAllow_Exceeded(t *testing.T) {
 	chatID := int64(12345)
 
 	now := time.Now()
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		rl.attempts[chatID] = append(rl.attempts[chatID], now)
 	}
 
@@ -1369,7 +1363,7 @@ func TestCheckRateLimit_Exceeded(t *testing.T) {
 	chatID := int64(12345)
 
 	now := time.Now()
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		tn.rateLimiter.attempts[chatID] = append(tn.rateLimiter.attempts[chatID], now)
 	}
 
@@ -1614,7 +1608,7 @@ func TestHandlers_ReturnEarlyWhenRateLimited(t *testing.T) {
 	chatID := int64(12345)
 
 	now := time.Now()
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		tn.rateLimiter.attempts[chatID] = append(tn.rateLimiter.attempts[chatID], now)
 	}
 

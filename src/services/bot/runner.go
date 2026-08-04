@@ -84,7 +84,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 	logger := slog.Default()
 
 	if err := i18nInit(); err != nil {
-		b.telemetryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]any{
 			"phase": "init_i18n",
 		})
 		return fmt.Errorf("failed to initialize i18n: %w", err)
@@ -92,7 +92,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 
 	prefStore, closePreferenceStore, err := b.ensurePreferenceStore()
 	if err != nil {
-		b.telemetryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]any{
 			"phase":            "init_preference_store",
 			"database_url_set": b.cfg != nil && b.cfg.DatabaseURL != "",
 		})
@@ -109,7 +109,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 		if len(whitelist) > 0 {
 			chatID = whitelist[0]
 		}
-		b.telemetryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]any{
 			"phase":     "create_notifier",
 			"chat_id":   chatID,
 			"has_token": b.getBotToken() != "",
@@ -125,7 +125,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 	logger.Info("starting telegram bot")
 
 	if err := tgBot.StartBot(ctx, prefManager); err != nil {
-		b.telemetryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]any{
 			"phase": "start_bot",
 		})
 		return fmt.Errorf("failed to start bot: %w", err)
@@ -137,7 +137,7 @@ func (b *BotRunner) Run(ctx context.Context) error {
 
 	if err := tgBot.StopBot(); err != nil {
 		logger.Error("error stopping bot", "error", err)
-		b.telemetryClient.CaptureError(err, map[string]interface{}{
+		b.telemetryClient.CaptureError(err, map[string]any{
 			"phase": "stop_bot",
 		})
 	}
@@ -164,7 +164,7 @@ func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error 
 	if err != nil {
 		logger.Error("TELEGRAM_BOT_TOKEN not configured")
 		if b.telemetryClient != nil && err.Error() != "TELEGRAM_BOT_TOKEN not configured" {
-			b.telemetryClient.CaptureError(err, map[string]interface{}{
+			b.telemetryClient.CaptureError(err, map[string]any{
 				"phase":   "create_temp_notifier",
 				"chat_id": chatID,
 			})
@@ -269,7 +269,7 @@ func (b *BotRunner) getWhitelist() []int64 {
 		whitelistEnv = os.Getenv("TELEGRAM_WHITELIST")
 	}
 	if whitelistEnv != "" {
-		for _, idStr := range strings.Split(whitelistEnv, ",") {
+		for idStr := range strings.SplitSeq(whitelistEnv, ",") {
 			id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
 			if err != nil {
 				continue

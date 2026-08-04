@@ -71,7 +71,7 @@ var enableWebAuthnClient = func(apiClient *hourglass.Client, credentialsPath str
 	return apiClient.EnableWebAuthn(credentialsPath, captureError)
 }
 
-func captureError(err error, extras map[string]interface{}) {
+func captureError(err error, extras map[string]any) {
 	if telemetryClientGlobal != nil && telemetryClientGlobal.IsEnabled() {
 		telemetryClientGlobal.CaptureError(err, extras)
 		telemetryClientGlobal.Flush(2 * time.Second)
@@ -268,7 +268,7 @@ var newSchedulerFn = func(cfg *config.Config, telemetryClient *telemetry.Client,
 
 func runOnceMode(ctx context.Context, cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer, store *preferences.Store) error {
 	if err := runOnceFn(ctx, cfg, telemetryClient, analyzer, store); err != nil {
-		telemetryClient.CaptureError(err, map[string]interface{}{
+		telemetryClient.CaptureError(err, map[string]any{
 			"phase": "run_once_mode",
 		})
 		return fmt.Errorf("run failed: %w", err)
@@ -283,7 +283,7 @@ func runFullMode(ctx context.Context, cfg *config.Config, telemetryClient *telem
 		botRunner := bot.New(cfg, telemetryClient, analyzer).WithPreferenceStore(store)
 		if err := botRunner.Run(ctx); err != nil {
 			slog.Error("bot error", "error", err)
-			telemetryClient.CaptureError(err, map[string]interface{}{
+			telemetryClient.CaptureError(err, map[string]any{
 				"phase": "bot_run",
 			})
 		}
@@ -291,7 +291,7 @@ func runFullMode(ctx context.Context, cfg *config.Config, telemetryClient *telem
 
 	sched := newSchedulerFn(cfg, telemetryClient, analyzer, store)
 	if err := sched.Run(ctx); err != nil {
-		telemetryClient.CaptureError(err, map[string]interface{}{
+		telemetryClient.CaptureError(err, map[string]any{
 			"phase": "scheduler_run",
 		})
 		return fmt.Errorf("scheduler failed: %w", err)

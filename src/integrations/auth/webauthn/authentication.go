@@ -139,12 +139,12 @@ func (a *Authenticator) beginAuthentication() (*BeginAuthenticationResponse, err
 }
 
 type AssertionResponse struct {
-	Type                    string                 `json:"type"`
-	ID                      string                 `json:"id"`
-	RawID                   string                 `json:"rawId"`
-	AuthenticatorAttachment string                 `json:"authenticatorAttachment"`
-	Response                AssertionData          `json:"response"`
-	ClientExtensionResults  map[string]interface{} `json:"clientExtensionResults"`
+	Type                    string         `json:"type"`
+	ID                      string         `json:"id"`
+	RawID                   string         `json:"rawId"`
+	AuthenticatorAttachment string         `json:"authenticatorAttachment"`
+	Response                AssertionData  `json:"response"`
+	ClientExtensionResults  map[string]any `json:"clientExtensionResults"`
 }
 
 type AssertionData struct {
@@ -202,11 +202,11 @@ func (a *Authenticator) createAssertion(cred *Credential, beginResp *BeginAuthen
 			Signature:         base64.RawURLEncoding.EncodeToString(signature),
 			UserHandle:        base64.RawURLEncoding.EncodeToString(userHandle),
 		},
-		ClientExtensionResults: map[string]interface{}{},
+		ClientExtensionResults: map[string]any{},
 	}, nil
 }
 
-func (a *Authenticator) createAssertionAuthenticatorData(cred *Credential, clientDataHash []byte) ([]byte, error) {
+func (a *Authenticator) createAssertionAuthenticatorData(cred *Credential, _ []byte) ([]byte, error) {
 	rpIDHash := sha256.Sum256([]byte(cred.RPID))
 
 	flags := byte(0x1d)

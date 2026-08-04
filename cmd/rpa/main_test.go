@@ -894,7 +894,7 @@ func TestCaptureError(t *testing.T) {
 		mockClient := &telemetry.Client{}
 		telemetryClientGlobal = mockClient
 		assert.NotPanics(t, func() {
-			captureError(fmt.Errorf("test error"), map[string]interface{}{"key": "value"})
+			captureError(fmt.Errorf("test error"), map[string]any{"key": "value"})
 		})
 	})
 
@@ -915,7 +915,7 @@ func TestCaptureError(t *testing.T) {
 
 		telemetryClientGlobal = enabledClient
 		assert.NotPanics(t, func() {
-			captureError(fmt.Errorf("test error with enabled telemetry"), map[string]interface{}{"test": "data"})
+			captureError(fmt.Errorf("test error with enabled telemetry"), map[string]any{"test": "data"})
 		})
 	})
 }
