@@ -9,6 +9,14 @@ import (
 	"hourglass-rejections-rpa/src/integrations/i18n"
 )
 
+const (
+	sectionFieldMinistry    = "Field Ministry"
+	sectionMidweekMeeting   = "Midweek Meeting"
+	sectionMechanicalParts  = "Mechanical Parts"
+	sectionPublicWitnessing = "Public Witnessing"
+	isoDateLayout           = "2006-01-02"
+)
+
 // APIAnalyzer uses the Hourglass REST API to detect rejections.
 type APIAnalyzer struct {
 	client          *Client
@@ -68,13 +76,13 @@ func (a *APIAnalyzer) AnalyzeSection(section string) (*domain.JobResult, error) 
 	var err error
 
 	switch section {
-	case "Mechanical Parts", "avattendant", "Partes Mecânicas":
+	case sectionMechanicalParts, "avattendant", "Partes Mecânicas":
 		rejections, err = a.analyzeMechanicalParts()
-	case "Field Ministry", "fsMeeting", "Campo":
+	case sectionFieldMinistry, "fsMeeting", "Campo":
 		rejections, err = a.analyzeFieldMinistry()
-	case "Public Witnessing", "publicWitnessing", "Testemunho Público":
+	case sectionPublicWitnessing, "publicWitnessing", "Testemunho Público":
 		rejections, err = a.analyzePublicWitnessing()
-	case "Midweek Meeting", "midweekMeeting", "Reunião Meio de Semana":
+	case sectionMidweekMeeting, "midweekMeeting", "Reunião Meio de Semana":
 		rejections, err = a.analyzeMidweekMeetings()
 	default:
 		return &domain.JobResult{
@@ -129,8 +137,8 @@ func (a *APIAnalyzer) getUserName(userID int) string {
 // analyzeGenericNotifications is a generic function to analyze notifications for a section.
 func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType string) ([]domain.Rejection, error) {
 	now := time.Now()
-	start := now.Format("2006-01-02")
-	end := now.AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
+	start := now.Format(isoDateLayout)
+	end := now.AddDate(0, 0, a.daysToLookAhead).Format(isoDateLayout)
 
 	notifications, err := a.client.GetNotifications(start, end, notificationType)
 	if err != nil {
@@ -162,7 +170,7 @@ func getFriendlyTypeName(typeName string) string {
 	case "attendant":
 		return "Attendant"
 	case "pubwit":
-		return "Public Witnessing"
+		return sectionPublicWitnessing
 	case "fm":
 		return "Field Ministry Meeting"
 	default:
@@ -180,8 +188,8 @@ func (a *APIAnalyzer) analyzePublicWitnessing() ([]domain.Rejection, error) {
 
 // analyzeMidweekMeetings analyzes midweek meeting assignments for rejections.
 func (a *APIAnalyzer) analyzeMidweekMeetings() ([]domain.Rejection, error) {
-	start := time.Now().Format("2006-01-02")
-	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format("2006-01-02")
+	start := time.Now().Format(isoDateLayout)
+	end := time.Now().AddDate(0, 0, a.daysToLookAhead).Format(isoDateLayout)
 
 	notifications, err := a.client.GetNotifications(start, end, "mm")
 	if err != nil {

@@ -50,6 +50,10 @@ func New(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourgl
 	}
 }
 
+// noOpPreferenceStoreClose intentionally keeps the same signature as the production close function
+// while avoiding nil checks when no preference store was configured.
+func noOpPreferenceStoreClose() {}
+
 func (b *BotRunner) WithNotifier(n Notifier) *BotRunner {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -153,27 +157,35 @@ func (b *BotRunner) SendRejections(rejections []domain.Rejection) error {
 		return nil
 	}
 
-	b.mu.RLock()
-	prefStore := b.prefStore
-	b.mu.RUnlock()
-	if prefStore == nil {
+	if b.prefStore == nil && (b.cfg == nil || b.cfg.DatabaseURL == "") {
 		return fmt.Errorf("preference store not configured")
 	}
 
+	prefStore, closePrefStore, err := b.ensurePreferenceStore()
+	if err != nil {
+		return err
+	}
+	if prefStore == nil {
+		return fmt.Errorf("preference store not configured")
+	}
+	if closePrefStore != nil {
+		defer closePrefStore()
+	}
+
+	return b.sendRejectionsToUsers(prefStore, rejections, b.getWhitelist())
+}
+
+func (b *BotRunner) sendRejectionsToUsers(prefStore preferences.PreferenceStore, rejections []domain.Rejection, whitelist []int64) error {
 	prefs, err := prefStore.List()
 	if err != nil {
 		return fmt.Errorf("failed to list notification preferences: %w", err)
 	}
 
-	whitelist := b.getWhitelist()
-	allowed := make(map[int64]struct{}, len(whitelist))
-	for _, chatID := range whitelist {
-		allowed[chatID] = struct{}{}
-	}
-
-	var tgBot Notifier
+	allowed := toAllowedRecipientsMap(whitelist)
 	var sendErrors []error
 	recipients := 0
+	var tgBot Notifier
+
 	for _, pref := range prefs {
 		if !pref.Enabled || !isAllowedRecipient(pref.ChatID, allowed) {
 			continue
@@ -185,21 +197,32 @@ func (b *BotRunner) SendRejections(rejections []domain.Rejection) error {
 		}
 
 		if tgBot == nil {
-			tgBot, err = b.ensureNotifier()
+			createdBot, err := b.ensureNotifier()
 			if err != nil {
-				return fmt.Errorf("failed to create telegram notifier: %w", err)
+				sendErrors = append(sendErrors, fmt.Errorf("failed to create telegram notifier: %w", err))
+				continue
 			}
+			tgBot = createdBot
 		}
 
 		if err := tgBot.SendRejectionsNotification(pref.ChatID, selected); err != nil {
 			sendErrors = append(sendErrors, fmt.Errorf("failed to send scheduled notification: %w", err))
 			continue
 		}
+
 		recipients++
 	}
 
 	slog.Info("scheduled notification fan-out complete", "recipients", recipients, "rejections_count", len(rejections))
 	return errors.Join(sendErrors...)
+}
+
+func toAllowedRecipientsMap(whitelist []int64) map[int64]struct{} {
+	allowed := make(map[int64]struct{}, len(whitelist))
+	for _, chatID := range whitelist {
+		allowed[chatID] = struct{}{}
+	}
+	return allowed
 }
 
 func isAllowedRecipient(chatID int64, whitelist map[int64]struct{}) bool {
@@ -263,19 +286,19 @@ func (b *BotRunner) sendRejectionsNotification(chatID int64, rejections []domain
 
 func (b *BotRunner) ensurePreferenceStore() (preferences.PreferenceStore, func(), error) {
 	if b.prefStore != nil {
-		return b.prefStore, func() {}, nil
+		return b.prefStore, noOpPreferenceStoreClose, nil
 	}
 	if b.cfg == nil || b.cfg.DatabaseURL == "" {
-		return nil, func() {}, fmt.Errorf("DATABASE_URL not configured")
+		return nil, noOpPreferenceStoreClose, fmt.Errorf("DATABASE_URL not configured")
 	}
 
 	store, err := newPreferenceStoreFromDatabaseURL(b.cfg.DatabaseURL)
 	if err != nil {
-		return nil, func() {}, err
+		return nil, noOpPreferenceStoreClose, err
 	}
 	prefStore := store
 
-	closeStore := func() {}
+	closeStore := noOpPreferenceStoreClose
 	if closer, ok := any(prefStore).(interface{ Close() error }); ok {
 		closeStore = func() { _ = closer.Close() }
 	}

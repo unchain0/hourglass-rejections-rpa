@@ -98,6 +98,8 @@ type Store struct {
 	db *gorm.DB
 }
 
+const chatIDWhereClause = "chat_id = ?"
+
 var setSecurePermissionsFn = setSecurePermissions
 
 // NewStore creates a SQLite database for user preferences
@@ -155,7 +157,7 @@ func setSecurePermissions(dbPath string) error {
 // Get retrieves a user's preferences by chat ID.
 func (s *Store) Get(chatID int64) (*UserPreference, error) {
 	var pref UserPreference
-	result := s.db.Where("chat_id = ?", chatID).First(&pref)
+	result := s.db.Where(chatIDWhereClause, chatID).First(&pref)
 	if result.Error == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -189,13 +191,13 @@ func (s *Store) Save(pref *UserPreference) error {
 // Delete removes a user's preferences from the database.
 func (s *Store) Delete(chatID int64) error {
 	var pref UserPreference
-	if err := s.db.Where("chat_id = ?", chatID).First(&pref).Error; err != nil {
+	if err := s.db.Where(chatIDWhereClause, chatID).First(&pref).Error; err != nil {
 		return err
 	}
 
 	s.logAccess(pref.ID, "data_deleted", "user_deletion")
 
-	return s.db.Where("chat_id = ?", chatID).Delete(&UserPreference{}).Error
+	return s.db.Where(chatIDWhereClause, chatID).Delete(&UserPreference{}).Error
 }
 
 // List returns all user preferences.
@@ -277,7 +279,7 @@ func (s *Store) CleanupExpiredData() (int64, error) {
 // SaveDiscoveredChat saves or updates a discovered chat (user who messaged the bot)
 func (s *Store) SaveDiscoveredChat(chatID int64, username string) error {
 	var chat DiscoveredChat
-	result := s.db.Where("chat_id = ?", chatID).First(&chat)
+	result := s.db.Where(chatIDWhereClause, chatID).First(&chat)
 
 	now := time.Now()
 	if result.Error == gorm.ErrRecordNotFound {
@@ -304,7 +306,7 @@ func (s *Store) SaveDiscoveredChat(chatID int64, username string) error {
 // GetDiscoveredChat retrieves a discovered chat by chatID
 func (s *Store) GetDiscoveredChat(chatID int64) (*DiscoveredChat, error) {
 	var chat DiscoveredChat
-	result := s.db.Where("chat_id = ?", chatID).First(&chat)
+	result := s.db.Where(chatIDWhereClause, chatID).First(&chat)
 	if result.Error == gorm.ErrRecordNotFound {
 		return nil, nil
 	}

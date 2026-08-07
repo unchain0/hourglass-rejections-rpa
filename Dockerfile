@@ -15,10 +15,26 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -p=1 -trimpath -ldflags="-w -s -X main.version=${APP_VERSION} -X main.revision=${VCS_REF}" -o /out/rpa ./cmd/rpa && \
-    go build -p=1 -trimpath -ldflags="-w -s" -o /out/save-tokens ./cmd/save-tokens && \
-    go build -p=1 -trimpath -ldflags="-w -s" -o /out/token-refresh ./cmd/token-refresh && \
-    go build -p=1 -trimpath -ldflags="-w -s" -o /out/setup-auth ./cmd/setup-auth
+    go build -p=1 \
+        -trimpath \
+        -ldflags="-w -s -X main.version=${APP_VERSION} -X main.revision=${VCS_REF}" \
+        -o /out/rpa \
+        ./cmd/rpa && \
+    go build -p=1 \
+        -trimpath \
+        -ldflags="-w -s" \
+        -o /out/save-tokens \
+        ./cmd/save-tokens && \
+    go build -p=1 \
+        -trimpath \
+        -ldflags="-w -s" \
+        -o /out/token-refresh \
+        ./cmd/token-refresh && \
+    go build -p=1 \
+        -trimpath \
+        -ldflags="-w -s" \
+        -o /out/setup-auth \
+        ./cmd/setup-auth
 
 FROM alpine:3.23
 

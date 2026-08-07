@@ -17,6 +17,11 @@ import (
 	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 )
 
+const (
+	testBaseURL       = "https://app.hourglass-app.com"
+	testConfigDirName = ".hourglass-rpa"
+)
+
 type mockTokenSaver struct {
 	mock.Mock
 }
@@ -634,7 +639,7 @@ func TestCreateTestTokens(t *testing.T) {
 }
 
 func TestBrowserAuthAdapter(t *testing.T) {
-	ba := webauthn.NewBrowserAuth("https://app.hourglass-app.com")
+	ba := webauthn.NewBrowserAuth(testBaseURL)
 	adapter := &browserAuthAdapter{BrowserAuth: ba}
 
 	baWithHeadless := adapter.WithHeadless(false)
@@ -642,15 +647,15 @@ func TestBrowserAuthAdapter(t *testing.T) {
 }
 
 func TestBrowserAuthAdapter_Authenticate(t *testing.T) {
-	ba := webauthn.NewBrowserAuth("https://app.hourglass-app.com")
+	ba := webauthn.NewBrowserAuth(testBaseURL)
 	adapter := &browserAuthAdapter{BrowserAuth: ba}
 
 	assert.NotNil(t, adapter)
-	assert.NotNil(t, adapter.BrowserAuth)
+	assert.Same(t, ba, adapter.BrowserAuth)
 }
 
 func TestBrowserAuthAdapter_WithHeadlessTrue(t *testing.T) {
-	ba := webauthn.NewBrowserAuth("https://app.hourglass-app.com")
+	ba := webauthn.NewBrowserAuth(testBaseURL)
 	adapter := &browserAuthAdapter{BrowserAuth: ba}
 
 	headlessAdapter := adapter.WithHeadless(true)
@@ -660,7 +665,7 @@ func TestBrowserAuthAdapter_WithHeadlessTrue(t *testing.T) {
 }
 
 func TestBrowserAuthAdapter_Chaining(t *testing.T) {
-	ba := webauthn.NewBrowserAuth("https://app.hourglass-app.com")
+	ba := webauthn.NewBrowserAuth(testBaseURL)
 	adapter := &browserAuthAdapter{BrowserAuth: ba}
 
 	adapter1 := adapter.WithHeadless(false)
@@ -821,19 +826,20 @@ func TestBrowserAuthAdapter_NilBrowserAuth(t *testing.T) {
 }
 
 func TestBrowserAuthAdapter_AuthenticateReturnsTokens(t *testing.T) {
-	ba := webauthn.NewBrowserAuth("https://app.hourglass-app.com")
-	adapter := &browserAuthAdapter{BrowserAuth: ba}
+	tokens := createTestTokens()
+	called := false
+	adapter := &browserAuthAdapter{
+		authenticateFunc: func() (*webauthn.AuthTokens, error) {
+			called = true
+			return tokens, nil
+		},
+	}
 
-	assert.NotNil(t, adapter.BrowserAuth)
-	assert.NotNil(t, adapter)
-}
+	got, err := adapter.Authenticate()
 
-func TestBrowserAuthAdapter_AuthenticateCalled(t *testing.T) {
-	ba := webauthn.NewBrowserAuth("https://app.hourglass-app.com")
-	adapter := &browserAuthAdapter{BrowserAuth: ba}
-
-	assert.NotNil(t, adapter)
-	assert.NotNil(t, adapter.BrowserAuth)
+	assert.True(t, called)
+	assert.NoError(t, err)
+	assert.Equal(t, tokens, got)
 }
 
 func TestBrowserAuthAdapter_Authenticate_UsesWrapperFunction(t *testing.T) {
@@ -879,7 +885,7 @@ func TestBrowserAuthAdapter_WithHeadless_UsesWrapperFunction(t *testing.T) {
 		withHeadlessFunc: func(headless bool) *webauthn.BrowserAuth {
 			called = true
 			assert.True(t, headless)
-			return webauthn.NewBrowserAuth("https://app.hourglass-app.com")
+			return webauthn.NewBrowserAuth(testBaseURL)
 		},
 	}
 
@@ -921,7 +927,7 @@ func TestBrowserAuthAdapter_WithProfileDir_UsesWrapperFunction(t *testing.T) {
 		withProfileDirFunc: func(profileDir string) *webauthn.BrowserAuth {
 			called = true
 			assert.Equal(t, "/tmp/profile", profileDir)
-			return webauthn.NewBrowserAuth("https://app.hourglass-app.com")
+			return webauthn.NewBrowserAuth(testBaseURL)
 		},
 	}
 
@@ -1142,8 +1148,8 @@ func TestMain_Success(t *testing.T) {
 	loaderCalled := false
 	newTokenLoader = func(configDir, tokensPath string) (tokenLoader, error) {
 		loaderCalled = true
-		assert.Equal(t, "/home/main-test/.hourglass-rpa", configDir)
-		assert.Equal(t, "/home/main-test/.hourglass-rpa/auth-tokens.json", tokensPath)
+		assert.Equal(t, filepath.Join("/home/main-test", testConfigDirName), configDir)
+		assert.Equal(t, filepath.Join("/home/main-test", testConfigDirName, "auth-tokens.json"), tokensPath)
 		return loader, nil
 	}
 
@@ -1155,7 +1161,7 @@ func TestMain_Success(t *testing.T) {
 	printCalled := false
 	printSuccessFn = func(tokensPath string, tokens *webauthn.AuthTokens) {
 		printCalled = true
-		assert.Equal(t, "/home/main-test/.hourglass-rpa/auth-tokens.json", tokensPath)
+		assert.Equal(t, filepath.Join("/home/main-test", testConfigDirName, "auth-tokens.json"), tokensPath)
 		assert.Equal(t, testTokens, tokens)
 	}
 
@@ -1354,7 +1360,7 @@ func TestTokenSaverImpl_newTokenSaver_RealFactories(t *testing.T) {
 	t.Run("tokenManagerFactory creates real manager", func(t *testing.T) {
 		tempDir := t.TempDir()
 		credsPath := filepath.Join(tempDir, "creds.json")
-		baseURL := "https://app.hourglass-app.com"
+		baseURL := testBaseURL
 
 		mgr, err := ts.tokenManagerFactory(credsPath, baseURL)
 		assert.NoError(t, err)
@@ -1362,7 +1368,7 @@ func TestTokenSaverImpl_newTokenSaver_RealFactories(t *testing.T) {
 	})
 
 	t.Run("browserAuthFactory creates real browser auth", func(t *testing.T) {
-		baseURL := "https://app.hourglass-app.com"
+		baseURL := testBaseURL
 		auth := ts.browserAuthFactory(baseURL)
 		assert.NotNil(t, auth)
 	})
@@ -1393,8 +1399,8 @@ func TestTokenSaver_Run_CompleteFlow(t *testing.T) {
 
 	homeDir := "/home/test"
 	expectedPaths := []string{
-		filepath.Join(homeDir, ".hourglass-rpa"),
-		filepath.Join(homeDir, ".hourglass-rpa", "chrome-profile"),
+		filepath.Join(homeDir, testConfigDirName),
+		filepath.Join(homeDir, testConfigDirName, "chrome-profile"),
 	}
 	callIndex := 0
 
@@ -1454,5 +1460,8 @@ func TestTokenSaver_Run_MkdirAllWithCorrectPath(t *testing.T) {
 
 	_ = ts.run()
 
-	assert.Equal(t, []string{"/home/testuser/.hourglass-rpa", "/home/testuser/.hourglass-rpa/chrome-profile"}, mkdirPaths)
+	assert.Equal(t, []string{
+		filepath.Join("/home/testuser", testConfigDirName),
+		filepath.Join("/home/testuser", testConfigDirName, "chrome-profile"),
+	}, mkdirPaths)
 }

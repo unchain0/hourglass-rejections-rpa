@@ -26,9 +26,11 @@ var (
 )
 
 const (
-	defaultBaseURL    = "https://app.hourglass-app.com"
-	defaultConfigDir  = ".hourglass-rpa"
-	defaultTokensFile = "auth-tokens.json"
+	defaultBaseURL       = "https://app.hourglass-app.com"
+	defaultConfigDir     = ".hourglass-rpa"
+	defaultTokensFile    = "auth-tokens.json"
+	tokenDateLayout      = "2006-01-02 15:04:05"
+	vpsDefaultTokensPath = "~/.hourglass-rpa/auth-tokens.json"
 )
 
 // FileSystem abstracts filesystem operations used by setup.
@@ -307,59 +309,111 @@ func (r *setupRunner) run() error {
 	fmt.Println("============================================")
 	fmt.Println()
 
+	paths, err := r.prepareRunPaths()
+	if err != nil {
+		return err
+	}
+
+	return r.processRunFlow(paths)
+}
+
+func (r *setupRunner) prepareRunPaths() (setupPaths, error) {
 	homeDir, err := r.fs.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return setupPaths{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(homeDir, r.configDir)
-	tokensPath := filepath.Join(configDir, r.tokensFile)
-	credentialsPath := filepath.Join(configDir, "webauthn-credentials.json")
-	profileDir := r.chromeProfileDir(configDir)
-
-	fmt.Println("📍 Configuration Directory:", configDir)
-	fmt.Println("📄 Tokens File:        ", tokensPath)
-	fmt.Println("🔐 WebAuthn File:      ", credentialsPath)
-	fmt.Println("🌐 Chrome Profile:     ", profileDir)
-	fmt.Println()
-
-	if err := r.fs.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+	paths := r.buildSetupPaths(homeDir)
+	r.printSetupPaths(paths)
+	if err := r.prepareSetupDirectories(paths.configDir, paths.profileDir); err != nil {
+		return setupPaths{}, err
 	}
 
-	if err := r.fs.MkdirAll(profileDir, 0700); err != nil {
-		return fmt.Errorf("failed to create chrome profile directory: %w", err)
-	}
+	return paths, nil
+}
 
-	existingTokens, err := r.checkExistingTokens(tokensPath)
+func (r *setupRunner) processRunFlow(paths setupPaths) error {
+	existingTokens, err := r.checkExistingTokens(paths.tokensPath)
 	if err != nil {
 		return fmt.Errorf("failed to check existing tokens: %w", err)
 	}
 
-	if environmentTokens := r.environmentBootstrapTokens(credentialsPath); environmentTokens != nil {
-		return r.bootstrapEnvironmentSession(tokensPath, credentialsPath, environmentTokens)
+	if environmentTokens := r.environmentBootstrapTokens(paths.credentialsPath); environmentTokens != nil {
+		return r.bootstrapEnvironmentSession(paths.tokensPath, paths.credentialsPath, environmentTokens)
 	}
 
-	if existingTokens != nil {
-		if !existingTokens.IsExpired() {
-			fmt.Println("✅ Valid tokens found!")
-			fmt.Printf("   ⏰ Expires: %s\n", existingTokens.ExpiresAt.Format("2006-01-02 15:04:05"))
-			fmt.Printf("   ⏳ Time remaining: %s\n", time.Until(existingTokens.ExpiresAt).Round(time.Minute))
+	if existingTokens == nil {
+		return r.authenticateAndPersistTokens(paths.profileDir, paths.tokensPath, paths.credentialsPath)
+	}
 
-			reauth, err := r.userInput.Confirm("\n🔄 Re-authenticate anyway? (yes/no): ")
-			if err != nil {
-				return fmt.Errorf("failed to read re-authentication confirmation: %w", err)
-			}
-			if !reauth {
-				fmt.Println("\n✅ Using existing tokens.")
-				return nil
-			}
-		} else {
-			fmt.Println("⚠️  Existing tokens have expired.")
-			fmt.Printf("   ⏰ Expired at: %s\n", existingTokens.ExpiresAt.Format("2006-01-02 15:04:05"))
-			fmt.Println()
+	continueFlow, err := r.handleExistingTokens(existingTokens)
+	if err != nil || !continueFlow {
+		return err
+	}
+
+	return r.authenticateAndPersistTokens(paths.profileDir, paths.tokensPath, paths.credentialsPath)
+}
+
+type setupPaths struct {
+	configDir       string
+	tokensPath      string
+	credentialsPath string
+	profileDir      string
+}
+
+func (r *setupRunner) buildSetupPaths(homeDir string) setupPaths {
+	configDir := filepath.Join(homeDir, r.configDir)
+	return setupPaths{
+		configDir:       configDir,
+		tokensPath:      filepath.Join(configDir, r.tokensFile),
+		credentialsPath: filepath.Join(configDir, "webauthn-credentials.json"),
+		profileDir:      r.chromeProfileDir(configDir),
+	}
+}
+
+func (r *setupRunner) printSetupPaths(paths setupPaths) {
+	fmt.Println("📍 Configuration Directory:", paths.configDir)
+	fmt.Println("📄 Tokens File:        ", paths.tokensPath)
+	fmt.Println("🔐 WebAuthn File:      ", paths.credentialsPath)
+	fmt.Println("🌐 Chrome Profile:     ", paths.profileDir)
+	fmt.Println()
+}
+
+func (r *setupRunner) prepareSetupDirectories(configDir, profileDir string) error {
+	if err := r.fs.MkdirAll(configDir, 0700); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := r.fs.MkdirAll(profileDir, 0700); err != nil {
+		return fmt.Errorf("failed to create chrome profile directory: %w", err)
+	}
+	return nil
+}
+
+func (r *setupRunner) handleExistingTokens(tokens *webauthn.AuthTokens) (bool, error) {
+	if !tokens.IsExpired() {
+		fmt.Println("✅ Valid tokens found!")
+		fmt.Printf("   ⏰ Expires: %s\n", tokens.ExpiresAt.Format(tokenDateLayout))
+		fmt.Printf("   ⏳ Time remaining: %s\n", time.Until(tokens.ExpiresAt).Round(time.Minute))
+
+		reauth, err := r.userInput.Confirm("\n🔄 Re-authenticate anyway? (yes/no): ")
+		if err != nil {
+			return false, fmt.Errorf("failed to read re-authentication confirmation: %w", err)
 		}
+		if !reauth {
+			fmt.Println("\n✅ Using existing tokens.")
+			return false, nil
+		}
+		return true, nil
 	}
+
+	fmt.Println("⚠️  Existing tokens have expired.")
+	fmt.Printf("   ⏰ Expired at: %s\n", tokens.ExpiresAt.Format(tokenDateLayout))
+	fmt.Println()
+
+	return true, nil
+}
+
+func (r *setupRunner) authenticateAndPersistTokens(profileDir, tokensPath, credentialsPath string) error {
 
 	fmt.Println("🌐 Starting browser authentication...")
 	fmt.Println("📌 A normal Chrome window will open with the persistent profile - complete the login manually.")
@@ -386,7 +440,7 @@ func (r *setupRunner) run() error {
 	fmt.Println("\n✅ Authentication successful!")
 	fmt.Printf("   🔑 HGLogin Token:  %s...\n", r.truncate(tokens.HGLogin, 30))
 	fmt.Printf("   🔒 XSRF Token:     %s...\n", r.truncate(tokens.XSRFToken, 30))
-	fmt.Printf("   ⏰ Expires At:      %s\n", tokens.ExpiresAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("   ⏰ Expires At:      %s\n", tokens.ExpiresAt.Format(tokenDateLayout))
 	fmt.Printf("   ⏳ Valid for:       %s\n", time.Until(tokens.ExpiresAt).Round(time.Minute))
 	fmt.Println()
 
@@ -597,14 +651,14 @@ func (r *setupRunner) askVPSUpload(tokensPath string) error {
 		return nil
 	}
 
-	fmt.Print("📂 VPS target path (default: ~/.hourglass-rpa/auth-tokens.json): ")
+	fmt.Print("📂 VPS target path (default: " + vpsDefaultTokensPath + "): ")
 	vpsPath, err := r.userInput.ReadLine()
 	if err != nil {
 		return fmt.Errorf("failed to read VPS target path: %w", err)
 	}
 
 	if vpsPath == "" {
-		vpsPath = "~/.hourglass-rpa/auth-tokens.json"
+		vpsPath = vpsDefaultTokensPath
 	}
 
 	fmt.Println()
@@ -658,14 +712,14 @@ func (r *setupRunner) askVPSUploadWithCredentials(tokensPath, credentialsPath st
 		return nil
 	}
 
-	fmt.Print("📂 VPS target path for tokens (default: ~/.hourglass-rpa/auth-tokens.json): ")
+	fmt.Print("📂 VPS target path for tokens (default: " + vpsDefaultTokensPath + "): ")
 	vpsTokensPath, err := r.userInput.ReadLine()
 	if err != nil {
 		return fmt.Errorf("failed to read VPS target path: %w", err)
 	}
 
 	if vpsTokensPath == "" {
-		vpsTokensPath = "~/.hourglass-rpa/auth-tokens.json"
+		vpsTokensPath = vpsDefaultTokensPath
 	}
 
 	vpsCredentialsPath := path.Join(path.Dir(vpsTokensPath), "webauthn-credentials.json")

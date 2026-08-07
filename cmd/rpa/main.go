@@ -35,16 +35,23 @@ var (
 	revision = "unknown"
 )
 
+const (
+	defaultEnvFile   = ".env"
+	defaultConfigDir = ".hourglass-rpa"
+	authTokensFile   = "auth-tokens.json"
+	webauthnCredFile = "webauthn-credentials.json"
+)
+
 func init() {
 	loadEnvFiles()
 }
 
 func loadEnvFiles() {
 	locations := []string{
-		".env",
-		"../.env",
-		"../../.env",
-		filepath.Join(os.Getenv("HOME"), ".hourglass-rpa", ".env"),
+		defaultEnvFile,
+		filepath.Join("..", defaultEnvFile),
+		filepath.Join("..", "..", defaultEnvFile),
+		filepath.Join(os.Getenv("HOME"), defaultConfigDir, defaultEnvFile),
 	}
 
 	for _, location := range locations {
@@ -197,7 +204,7 @@ func resolveTokensPath(cfg *config.Config) string {
 	}
 
 	if homeDir, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(homeDir, ".hourglass-rpa", "auth-tokens.json")
+		return filepath.Join(homeDir, defaultConfigDir, authTokensFile)
 	}
 
 	return ""
@@ -213,7 +220,7 @@ func resolveWebAuthnCredentialsPath(cfg *config.Config) string {
 	}
 
 	if homeDir, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(homeDir, ".hourglass-rpa", "webauthn-credentials.json")
+		return filepath.Join(homeDir, defaultConfigDir, webauthnCredFile)
 	}
 
 	return ""

@@ -55,6 +55,16 @@ func newTestPrefManager(t *testing.T) *preferences.PreferenceManager {
 	return preferences.NewPreferenceManager(store)
 }
 
+func getSectionsFromPrefManager(pm *preferences.PreferenceManager, chatID int64) []string {
+	pref, err := pm.Get(chatID)
+	if err != nil || pref == nil {
+		return nil
+	}
+
+	sections := pref.Sections()
+	return append([]string(nil), sections...)
+}
+
 func newClosedPrefManager(t *testing.T) *preferences.PreferenceManager {
 	t.Helper()
 	store, err := preferences.NewStore(filepath.Join(t.TempDir(), "test.db"))
@@ -575,6 +585,12 @@ func TestHandleCheckNow_NilMessage(t *testing.T) {
 func TestHandleCheckNow_NoCallback(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	b := newTestBot(t)
+	var called atomic.Bool
+	tn.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
+		called.Store(true)
+		return nil
+	})
+	tn.SetCheckNowCallback(nil)
 
 	update := &models.Update{
 		Message: &models.Message{
@@ -583,6 +599,7 @@ func TestHandleCheckNow_NoCallback(t *testing.T) {
 	}
 
 	tn.handleCheckNow(context.Background(), b, update)
+	assert.False(t, called.Load())
 }
 
 func TestHandleCheckNow_WithCallback(t *testing.T) {
@@ -782,24 +799,13 @@ func TestHandleCancel_Success(t *testing.T) {
 	tn.handleCancel(context.Background(), b, update)
 }
 
-func TestHandleCheckNow_Authorized(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	b := newTestBot(t)
-
-	update := &models.Update{
-		Message: &models.Message{
-			Chat: models.Chat{ID: 12345},
-		},
-	}
-
-	tn.handleCheckNow(context.Background(), b, update)
-}
-
 func TestHandleSectionToggle_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	pm := newTestPrefManager(t)
 	tn.prefManager = pm
 	b := newTestBot(t)
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	originalSections := getSectionsFromPrefManager(pm, 12345)
 
 	update := &models.Update{
 		CallbackQuery: &models.CallbackQuery{
@@ -810,6 +816,7 @@ func TestHandleSectionToggle_NilMessage(t *testing.T) {
 	}
 
 	tn.handleSectionToggle(context.Background(), b, update)
+	assert.Equal(t, originalSections, getSectionsFromPrefManager(pm, 12345))
 }
 
 func TestHandleSave_NilMessage(t *testing.T) {

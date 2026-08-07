@@ -29,6 +29,8 @@ const (
 	testPollInterval     = 100 * time.Millisecond
 	minimumChromeMajor   = 128
 	browserCloseTimeout  = 2 * time.Second
+	authCookieName       = "hglogin"
+	xsrfCookieName       = "X-Hourglass-XSRF-Token"
 )
 
 var (
@@ -389,46 +391,81 @@ func (ba *BrowserAuth) waitForAuthentication(ctx context.Context, cookies *[]*ne
 	clickedAuthButton := false
 
 	for {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("authentication timeout reached: %w", err)
-		}
-
-		state, err := ba.getPageState(ctx)
+		isAuthenticated, err := ba.processAuthenticationStep(ctx, cookies, allowAuthTrigger, &clickedAuthButton)
 		if err != nil {
-			return fmt.Errorf("failed to inspect authentication page: %w", err)
+			return err
 		}
-
-		slog.Debug("detected auth state", "hasAuthButton", state.HasAuthButton, "hasWebAuthnPrompt", state.HasWebAuthnPrompt)
-
-		if allowAuthTrigger && !clickedAuthButton && state.HasAuthButton {
-			clicked, clickErr := ba.tryTriggerWebAuthn(ctx)
-			if clickErr != nil {
-				return fmt.Errorf("failed to trigger webauthn prompt: %w", clickErr)
-			}
-			clickedAuthButton = clicked
-		}
-
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("context cancelled before reading cookies: %w", err)
-		}
-
-		currentCookies, err := getCookies(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to read browser cookies: %w", err)
-		}
-
-		if hasAuthCookies(currentCookies) {
-			*cookies = currentCookies
+		if isAuthenticated {
 			return nil
 		}
-
-		if state.IsAuthenticatedURL && !state.HasWebAuthnPrompt {
-			sleepFn(getPollInterval())
-			continue
-		}
-
-		sleepFn(getPollInterval())
 	}
+}
+
+func (ba *BrowserAuth) processAuthenticationStep(ctx context.Context, cookies *[]*network.Cookie, allowAuthTrigger bool, clickedAuthButton *bool) (bool, error) {
+	if err := ba.verifyAuthContext(ctx, "authentication timeout reached"); err != nil {
+		return false, err
+	}
+
+	state, err := ba.getPageState(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect authentication page: %w", err)
+	}
+
+	slog.Debug("detected auth state", "hasAuthButton", state.HasAuthButton, "hasWebAuthnPrompt", state.HasWebAuthnPrompt)
+	if err := ba.handleAuthTrigger(ctx, state, allowAuthTrigger, clickedAuthButton); err != nil {
+		return false, err
+	}
+
+	if err := ba.waitForAuthCookies(ctx, cookies); err != nil {
+		return false, err
+	}
+
+	if hasAuthCookies(*cookies) {
+		return true, nil
+	}
+
+	sleepFn(getPollInterval())
+	return false, nil
+}
+
+func (ba *BrowserAuth) verifyAuthContext(ctx context.Context, messagePrefix string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", messagePrefix, err)
+	}
+
+	return nil
+}
+
+func (ba *BrowserAuth) handleAuthTrigger(ctx context.Context, state *authPageState, allowAuthTrigger bool, clickedAuthButton *bool) error {
+	if !allowAuthTrigger || *clickedAuthButton || !state.HasAuthButton {
+		return nil
+	}
+
+	clicked, clickErr := ba.tryTriggerWebAuthn(ctx)
+	if clickErr != nil {
+		return fmt.Errorf("failed to trigger webauthn prompt: %w", clickErr)
+	}
+
+	*clickedAuthButton = clicked
+	return nil
+}
+
+func (ba *BrowserAuth) waitForAuthCookies(ctx context.Context, cookies *[]*network.Cookie) error {
+	if err := ba.verifyAuthContext(ctx, "context cancelled before reading cookies"); err != nil {
+		return err
+	}
+
+	currentCookies, err := getCookies(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to read browser cookies: %w", err)
+	}
+
+	if hasAuthCookies(currentCookies) {
+		*cookies = currentCookies
+		return nil
+	}
+
+	return nil
 }
 
 type authPageState struct {
@@ -543,10 +580,10 @@ func extractTokens(cookies []*network.Cookie) (*AuthTokens, error) {
 
 	for _, cookie := range cookies {
 		switch cookie.Name {
-		case "hglogin":
+		case authCookieName:
 			tokens.HGLogin = cookie.Value
 			setCookieExpiry(cookie, &earliestExpiry)
-		case "X-Hourglass-XSRF-Token":
+		case xsrfCookieName:
 			tokens.XSRFToken = cookie.Value
 			setCookieExpiry(cookie, &earliestExpiry)
 		}
@@ -569,9 +606,9 @@ func hasAuthCookies(cookies []*network.Cookie) bool {
 
 	for _, cookie := range cookies {
 		switch cookie.Name {
-		case "hglogin":
+		case authCookieName:
 			hasHGLogin = cookie.Value != ""
-		case "X-Hourglass-XSRF-Token":
+		case xsrfCookieName:
 			hasXSRF = cookie.Value != ""
 		}
 	}
