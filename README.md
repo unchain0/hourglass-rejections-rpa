@@ -88,14 +88,16 @@ make copy-to-vps VPS=user@your-seedbox
 # On the seedbox, import both files into the persistent Docker volume:
 AUTH_SOURCE_DIR="$HOME/.hourglass-rpa" docker compose --profile bootstrap run --rm auth-bootstrap
 
-# Rebuild from the current runtime base and start the services.
+# Copy .env.example to .env and set a strong, persistent POSTGRES_PASSWORD,
+# along with the required Telegram and Hourglass credentials. Then rebuild
+# from the current runtime base and start the services.
 export APP_VERSION="$(git describe --always --dirty)"
 export GIT_COMMIT="$(git rev-parse --short=12 HEAD)"
 docker compose build --pull --no-cache rpa
 docker compose up -d rpa
 ```
 
-The default compose file starts the main `rpa` service with a persisted authentication volume. When valid Hourglass token/cookie variables are present, a fresh deployment creates its WebAuthn credential directly from that session; importing files is optional. Leave `CHROME_PROFILE_DIR` unset unless you also imported a previously authenticated browser profile.
+The default compose file starts the main `rpa` service with a persisted authentication volume and requires `POSTGRES_PASSWORD` in `.env`; reuse the same value while the PostgreSQL volume exists. When valid Hourglass token/cookie variables are present, a fresh deployment creates its WebAuthn credential directly from that session; importing files is optional. Leave `CHROME_PROFILE_DIR` unset unless you also imported a previously authenticated browser profile.
 
 The main service already renews tokens automatically. The optional `autorefresh` profile should only be used when `AUTO_REFRESH_TOKENS=false`, so two processes do not renew the same files concurrently:
 
