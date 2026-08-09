@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"hourglass-rejections-rpa/src/domain_models"
@@ -27,6 +28,8 @@ var (
 
 type noRejectionsSender func(chatID int64, message string) error
 type rejectionsSender func(chatID int64, rejections []domain.Rejection) error
+
+const rejectionDateLayout = "2006-01-02"
 
 type manualCheckService struct {
 	analyzer         Analyzer
@@ -106,8 +109,43 @@ func (s *manualCheckService) run(ctx context.Context, targetChatID int64) error 
 		return s.sendNoRejections(targetChatID, i18n.Localize(lang, "no_rejections_found", nil))
 	}
 
+	sortRejectionsByDate(allRejections, time.Now())
 	logger.Info("sending rejections notification", "count", len(allRejections))
 	return s.sendRejections(targetChatID, allRejections)
+}
+
+func sortRejectionsByDate(rejections []domain.Rejection, now time.Time) {
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	slices.SortStableFunc(rejections, func(left, right domain.Rejection) int {
+		leftDate, leftErr := time.ParseInLocation(rejectionDateLayout, left.When, now.Location())
+		rightDate, rightErr := time.ParseInLocation(rejectionDateLayout, right.When, now.Location())
+
+		if leftErr != nil || rightErr != nil {
+			switch {
+			case leftErr == nil:
+				return -1
+			case rightErr == nil:
+				return 1
+			default:
+				return 0
+			}
+		}
+
+		leftIsPast := leftDate.Before(today)
+		rightIsPast := rightDate.Before(today)
+		if leftIsPast != rightIsPast {
+			if leftIsPast {
+				return -1
+			}
+			return 1
+		}
+
+		if leftIsPast {
+			return rightDate.Compare(leftDate)
+		}
+		return leftDate.Compare(rightDate)
+	})
 }
 
 func (s *manualCheckService) collectRejections(ctx context.Context, sections []string) ([]domain.Rejection, error) {

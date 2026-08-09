@@ -787,6 +787,97 @@ func TestRunOnceForUser_WithRejections(t *testing.T) {
 	}
 }
 
+func TestSortRejectionsByDate(t *testing.T) {
+	now := time.Date(2026, time.August, 8, 15, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		rejections []domain.Rejection
+		expected   []string
+	}{
+		{
+			name: "past dates first and closest within each period",
+			rejections: []domain.Rejection{
+				{When: "2026-08-10"},
+				{When: "2026-08-01"},
+				{When: "2026-08-08"},
+				{When: "2026-08-07"},
+				{When: "2026-08-09"},
+			},
+			expected: []string{"2026-08-07", "2026-08-01", "2026-08-08", "2026-08-09", "2026-08-10"},
+		},
+		{
+			name: "invalid dates stay last and stable",
+			rejections: []domain.Rejection{
+				{When: "unknown-1"},
+				{When: "2026-08-09"},
+				{When: "unknown-2"},
+				{When: "2026-08-07"},
+			},
+			expected: []string{"2026-08-07", "2026-08-09", "unknown-1", "unknown-2"},
+		},
+		{
+			name: "equal dates preserve source order",
+			rejections: []domain.Rejection{
+				{When: "2026-08-09", Who: "first"},
+				{When: "2026-08-09", Who: "second"},
+			},
+			expected: []string{"first", "second"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sortRejectionsByDate(tt.rejections, now)
+
+			actual := make([]string, 0, len(tt.rejections))
+			for _, rejection := range tt.rejections {
+				if rejection.Who != "" {
+					actual = append(actual, rejection.Who)
+					continue
+				}
+				actual = append(actual, rejection.When)
+			}
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}
+
+func TestRunOnceForUser_SortsRejectionsByDate(t *testing.T) {
+	runner := &BotRunner{}
+
+	mockNotifier := &MockNotifier{
+		SendRejectionsNotificationFunc: func(_ int64, rejections []domain.Rejection) error {
+			actual := make([]string, 0, len(rejections))
+			for _, rejection := range rejections {
+				actual = append(actual, rejection.When)
+			}
+			assert.Equal(t, []string{"2026-01-02", "2025-01-02", "2999-01-02", "2999-01-03"}, actual)
+			return nil
+		},
+	}
+	runner.WithNotifier(mockNotifier)
+	runner.WithAnalyzer(&MockAnalyzer{
+		AnalyzeSectionFunc: func(string) (*domain.JobResult, error) {
+			return &domain.JobResult{Rejections: []domain.Rejection{
+				{When: "2999-01-03"},
+				{When: "2025-01-02"},
+				{When: "2999-01-02"},
+				{When: "2026-01-02"},
+			}}, nil
+		},
+	})
+
+	pref := &preferences.UserPreference{}
+	pref.SetSections([]string{"Field Ministry"})
+	prefManager := preferences.NewPreferenceManager(&MockPreferenceStore{
+		GetFunc: func(int64) (*preferences.UserPreference, error) {
+			return pref, nil
+		},
+	})
+
+	assert.NoError(t, runner.runOnceForUser(context.Background(), prefManager, 123))
+}
+
 func TestSendNoRejectionsMessage_NoNotifier_NoToken(t *testing.T) {
 	os.Unsetenv("TELEGRAM_BOT_TOKEN")
 	runner := &BotRunner{}
