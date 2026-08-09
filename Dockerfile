@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS builder
 
 ARG APP_VERSION=dev
 ARG VCS_REF=unknown
@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -o /out/setup-auth \
         ./cmd/setup-auth
 
-FROM alpine:3.23
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 ARG APP_VERSION=dev
 ARG VCS_REF=unknown
@@ -52,6 +52,7 @@ RUN apk add --no-cache ca-certificates tzdata chromium nss freetype harfbuzz ttf
     addgroup -g 1000 -S rpa && \
     adduser -u 1000 -S rpa -G rpa && \
     mkdir -p /home/rpa/.hourglass-rpa && \
+    chmod 700 /home/rpa/.hourglass-rpa && \
     chown -R rpa:rpa /app /home/rpa
 
 USER rpa
