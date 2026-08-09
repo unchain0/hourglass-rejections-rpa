@@ -186,7 +186,7 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 			"Who":     html.EscapeString(r.Who),
 			"Section": html.EscapeString(translateSectionName(lang, r.Section)),
 			"What":    html.EscapeString(translateAssignmentType(lang, r.What)),
-			"When":    html.EscapeString(r.When),
+			"When":    html.EscapeString(i18n.FormatDate(r.When, lang)),
 		})
 	}
 

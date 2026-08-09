@@ -1220,6 +1220,52 @@ func TestSendRejectionsNotification_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSendRejectionsNotification_FormatsDateForUserLanguage(t *testing.T) {
+	tests := []struct {
+		language string
+		expected string
+	}{
+		{language: "en", expected: "03/14/2026"},
+		{language: "pt-BR", expected: "14/03/2026"},
+		{language: "es", expected: "14/03/2026"},
+		{language: "fr", expected: "14/03/2026"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.language, func(t *testing.T) {
+			var sentText string
+			srv := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if strings.HasSuffix(r.URL.Path, "/getMe") {
+					_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
+					return
+				}
+
+				sentText = r.FormValue("text")
+				_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"date":0,"chat":{"id":12345,"type":"private"}}}`))
+			}))
+			defer srv.Close()
+
+			pm := newTestPrefManager(t)
+			_, err := pm.GetOrCreate(12345, "testuser")
+			require.NoError(t, err)
+			require.NoError(t, pm.UpdateLanguage(12345, tt.language))
+
+			tn := newTestNotifierWithServer(t, srv, nil)
+			tn.prefManager = pm
+			err = tn.SendRejectionsNotification(12345, []domain.Rejection{{
+				Section: "Field Ministry",
+				Who:     "John",
+				What:    "Test",
+				When:    "2026-03-14",
+			}})
+
+			require.NoError(t, err)
+			assert.Contains(t, sentText, tt.expected)
+		})
+	}
+}
+
 // --- StartBot success ---
 
 func TestStartBot_SuccessWithMockServer(t *testing.T) {

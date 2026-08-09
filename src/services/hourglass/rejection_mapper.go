@@ -8,17 +8,14 @@ import (
 )
 
 type rejectionTitleResolver func(notificationType string, notification Notification) string
-type rejectionDateFormatter func(date, language string) string
 type rejectionUserResolver func(userID int) string
 
 func mapDeclinedNotifications(
 	notifications []Notification,
 	sectionName string,
 	timestamp time.Time,
-	language string,
 	resolveUser rejectionUserResolver,
 	resolveTitle rejectionTitleResolver,
-	formatDate rejectionDateFormatter,
 ) []domain.Rejection {
 	var rejections []domain.Rejection
 	seen := make(map[string]bool)
@@ -32,7 +29,7 @@ func mapDeclinedNotifications(
 			Section:   sectionName,
 			Who:       resolveUser(notif.Assignee),
 			What:      resolveTitle(notif.Type, notif),
-			When:      formatDate(notif.Date, language),
+			When:      notif.Date,
 			Timestamp: timestamp,
 		}
 

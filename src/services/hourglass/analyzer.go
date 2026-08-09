@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"hourglass-rejections-rpa/src/domain_models"
-	"hourglass-rejections-rpa/src/integrations/i18n"
 )
 
 const (
@@ -25,8 +24,6 @@ type APIAnalyzer struct {
 	userCacheErr    error
 	congregationID  int
 	daysToLookAhead int
-	language        string
-	formatDate      func(date, language string) string
 }
 
 // NewAPIAnalyzer creates a new API-based analyzer.
@@ -36,8 +33,6 @@ func NewAPIAnalyzer(client *Client) *APIAnalyzer {
 		userCache:       make(map[int]*User),
 		congregationID:  48092,
 		daysToLookAhead: 730,
-		language:        "en",
-		formatDate:      i18n.FormatDate,
 	}
 }
 
@@ -49,11 +44,6 @@ func (a *APIAnalyzer) SetCongregationID(id int) {
 // SetDaysToLookAhead sets the number of days to look ahead for rejections.
 func (a *APIAnalyzer) SetDaysToLookAhead(days int) {
 	a.daysToLookAhead = days
-}
-
-// SetLanguage sets the language for the analyzer.
-func (a *APIAnalyzer) SetLanguage(lang string) {
-	a.language = lang
 }
 
 // AnalyzeSection analyzes a specific section for rejections.
@@ -146,9 +136,9 @@ func (a *APIAnalyzer) analyzeGenericNotifications(sectionName, notificationType 
 	}
 
 	timestamp := now
-	return mapDeclinedNotifications(notifications, sectionName, timestamp, a.language, a.getUserName, func(notificationType string, _ Notification) string {
+	return mapDeclinedNotifications(notifications, sectionName, timestamp, a.getUserName, func(notificationType string, _ Notification) string {
 		return getFriendlyTypeName(notificationType)
-	}, a.formatDate), nil
+	}), nil
 }
 
 // analyzeMechanicalParts analyzes mechanical assignments for rejections.
@@ -216,14 +206,14 @@ func (a *APIAnalyzer) analyzeMidweekMeetings() ([]domain.Rejection, error) {
 
 	timestamp := time.Now()
 
-	return mapDeclinedNotifications(notifications, "Midweek Meeting", timestamp, a.language, a.getUserName, func(notifType string, notif Notification) string {
+	return mapDeclinedNotifications(notifications, "Midweek Meeting", timestamp, a.getUserName, func(notifType string, notif Notification) string {
 		title := partTitles[notif.Part]
 		if title != "" {
 			return title
 		}
 
 		return getMidweekFlagName(notif.Flag)
-	}, a.formatDate), nil
+	}), nil
 }
 
 // getMidweekFlagName converts flag values to assignment names
