@@ -701,7 +701,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 		return
 	}
 
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+	statusMessage, _ := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      i18n.Localize(lang, "check_now_requested", nil),
 		ParseMode: models.ParseModeHTML,
@@ -717,10 +717,12 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 			Text:      i18n.Localize(lang, "check_now_unavailable", nil),
 			ParseMode: models.ParseModeHTML,
 		})
+		deleteMessageBestEffort(ctx, b, chatID, statusMessage)
 		return
 	}
 
 	go func() {
+		defer deleteMessageBestEffort(ctx, b, chatID, statusMessage)
 		if err := callback(ctx, chatID); err != nil {
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:    chatID,
@@ -732,6 +734,17 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 			}
 		}
 	}()
+}
+
+func deleteMessageBestEffort(ctx context.Context, b *bot.Bot, chatID int64, message *models.Message) {
+	if message == nil || message.ID == 0 {
+		return
+	}
+
+	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    chatID,
+		MessageID: message.ID,
+	})
 }
 
 func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, update *models.Update) {

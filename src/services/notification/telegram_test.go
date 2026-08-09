@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -622,6 +624,75 @@ func TestHandleCheckNow_WithCallback(t *testing.T) {
 
 	// Wait for goroutine
 	assert.Eventually(t, func() bool { return called.Load() }, 2*time.Second, 100*time.Millisecond)
+}
+
+func TestHandleCheckNow_DeletesStatusAfterResult(t *testing.T) {
+	tests := []struct {
+		name           string
+		deleteSucceeds bool
+	}{
+		{name: "successful deletion", deleteSucceeds: true},
+		{name: "deletion failure is best effort", deleteSucceeds: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var callsMu sync.Mutex
+			var calls []string
+			deleted := make(chan struct{}, 1)
+
+			srv := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/getMe"):
+					_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
+				case strings.HasSuffix(r.URL.Path, "/sendMessage"):
+					callsMu.Lock()
+					calls = append(calls, "send:"+r.FormValue("text"))
+					messageID := 40 + len(calls)
+					callsMu.Unlock()
+					_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d,"date":0,"chat":{"id":12345,"type":"private"}}}`, messageID)
+				case strings.HasSuffix(r.URL.Path, "/deleteMessage"):
+					callsMu.Lock()
+					calls = append(calls, "delete:"+r.FormValue("message_id"))
+					callsMu.Unlock()
+					deleted <- struct{}{}
+					if tt.deleteSucceeds {
+						_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+						return
+					}
+					_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"delete failed"}`))
+				}
+			}))
+			defer srv.Close()
+
+			tn := newTestNotifierWithServer(t, srv, nil)
+			b := newTestBotWithServer(t, srv)
+			tn.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
+				_, err := b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "result ready"})
+				return err
+			})
+
+			tn.handleCheckNow(context.Background(), b, &models.Update{Message: &models.Message{
+				Chat: models.Chat{ID: 12345},
+			}})
+
+			select {
+			case <-deleted:
+			case <-time.After(2 * time.Second):
+				t.Fatal("status message was not deleted")
+			}
+
+			callsMu.Lock()
+			actualCalls := append([]string(nil), calls...)
+			callsMu.Unlock()
+			assert.Equal(t, []string{
+				"send:Immediate check requested. Processing...",
+				"send:result ready",
+				"delete:41",
+			}, actualCalls)
+		})
+	}
 }
 
 func TestHandleSectionToggle_NilCallbackQuery(t *testing.T) {
