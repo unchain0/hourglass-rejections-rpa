@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -45,11 +44,8 @@ var (
 	newBrowserContext         = chromedp.NewContext
 	browserContextFromContext = chromedp.FromContext
 	sleepFn                   = time.Sleep
-	processExists             = func(pid int) bool {
-		err := syscall.Kill(pid, 0)
-		return err == nil || errors.Is(err, syscall.EPERM)
-	}
-	defaultReadCookies = func(ctx context.Context) ([]*network.Cookie, error) {
+	processExists             = isProcessRunning
+	defaultReadCookies        = func(ctx context.Context) ([]*network.Cookie, error) {
 		return storage.GetCookies().Do(ctx)
 	}
 	chromedpCancel        = chromedp.Cancel
