@@ -53,8 +53,8 @@ services:
     networks:
       - rpa-network
     depends_on:
-      db:
-        condition: service_healthy
+      db-password-migrate:
+        condition: service_completed_successfully
     logging:
       driver: json-file
       options:
@@ -66,6 +66,38 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  db-password-migrate:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        connect() {
+          PGPASSWORD="$$1" psql -h db -U hourglass -d hourglass -v ON_ERROR_STOP=1 -tAc 'SELECT 1' >/dev/null 2>&1
+        }
+
+        if connect "$$POSTGRES_PASSWORD"; then
+          exit 0
+        fi
+
+        if [ -z "$$POSTGRES_OLD_PASSWORD" ]; then
+          echo "Database password migration requires POSTGRES_OLD_PASSWORD for an existing volume." >&2
+          exit 1
+        fi
+
+        printf '%s\n' "ALTER ROLE hourglass WITH PASSWORD :'new_password';" | \
+          PGPASSWORD="$$POSTGRES_OLD_PASSWORD" psql -h db -U hourglass -d hourglass -v ON_ERROR_STOP=1 \
+            --set=new_password="$$POSTGRES_PASSWORD"
+        connect "$$POSTGRES_PASSWORD"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_OLD_PASSWORD: ${POSTGRES_OLD_PASSWORD:-}
+    networks:
+      - rpa-network
+    depends_on:
+      db:
+        condition: service_healthy
 
   token-refresh:
     <<: *rpa-image

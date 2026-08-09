@@ -99,6 +99,8 @@ docker compose up -d rpa
 
 The default compose file starts the main `rpa` service with a persisted authentication volume and requires `POSTGRES_PASSWORD` in `.env`; reuse the same value while the PostgreSQL volume exists. When valid Hourglass token/cookie variables are present, a fresh deployment creates its WebAuthn credential directly from that session; importing files is optional. Leave `CHROME_PROFILE_DIR` unset unless you also imported a previously authenticated browser profile.
 
+For an existing `postgres_data` volume whose database still uses a previous password, set both the new `POSTGRES_PASSWORD` and the current `POSTGRES_OLD_PASSWORD` in `.env` before starting `rpa`. The `db-password-migrate` service updates the `hourglass` role in place and verifies the new password before `rpa` starts. After it completes successfully, remove `POSTGRES_OLD_PASSWORD` from `.env`. Do not delete the volume; no data reset is required.
+
 The main service already renews tokens automatically. The optional `autorefresh` profile should only be used when `AUTO_REFRESH_TOKENS=false`, so two processes do not renew the same files concurrently:
 
 ```bash
