@@ -19,6 +19,16 @@ var (
 	execCommandFn          = exec.Command
 )
 
+const (
+	appBaseURL            = "https://app.hourglass-app.com"
+	loginPagePath         = "/v2/page/app"
+	defaultConfigDirName  = ".hourglass-rpa"
+	authTokensFileName    = "auth-tokens.json"
+	webauthnFileName      = "webauthn-credentials.json"
+	vpsTokensPathTemplate = "~/.hourglass-rpa/"
+	tokenDateTimeFormat   = "02/01/2006 15:04:05"
+)
+
 var osExit = os.Exit
 
 type tokenLoader interface {
@@ -31,8 +41,8 @@ var userHomeDirForMain = os.UserHomeDir
 
 func defaultNewTokenLoader(configDir, tokensPath string) (tokenLoader, error) {
 	return webauthn.NewTokenManager(
-		filepath.Join(configDir, "webauthn-credentials.json"),
-		"https://app.hourglass-app.com",
+		filepath.Join(configDir, webauthnFileName),
+		appBaseURL,
 		webauthn.WithTokensPath(tokensPath),
 	)
 }
@@ -165,13 +175,13 @@ func (ts *tokenSaverImpl) run() error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(homeDir, ".hourglass-rpa")
+	configDir := filepath.Join(homeDir, defaultConfigDirName)
 
 	if err := ts.mkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	tokensPath := filepath.Join(configDir, "auth-tokens.json")
+	tokensPath := filepath.Join(configDir, authTokensFileName)
 	profileDir := os.Getenv("CHROME_PROFILE_DIR")
 	if profileDir == "" {
 		profileDir = filepath.Join(configDir, "chrome-profile")
@@ -188,7 +198,7 @@ func (ts *tokenSaverImpl) run() error {
 
 	tm, err := ts.tokenManagerFactory(
 		filepath.Join(configDir, "webauthn-credentials.json"),
-		"https://app.hourglass-app.com",
+		appBaseURL,
 		webauthn.WithTokensPath(tokensPath),
 		webauthn.WithOnTokenRenewed(onTokenRenewed),
 	)
@@ -196,7 +206,7 @@ func (ts *tokenSaverImpl) run() error {
 		return fmt.Errorf("failed to create TokenManager: %w", err)
 	}
 
-	loginURL := "https://app.hourglass-app.com/v2/page/app"
+	loginURL := appBaseURL + loginPagePath
 	if ts.launchBrowser != nil {
 		if err := ts.launchBrowser(profileDir, loginURL); err != nil {
 			return fmt.Errorf("failed to launch manual browser: %w", err)
@@ -209,7 +219,7 @@ func (ts *tokenSaverImpl) run() error {
 		}
 	}
 
-	browserAuth := ts.browserAuthFactory("https://app.hourglass-app.com").WithHeadless(false).WithProfileDir(profileDir)
+	browserAuth := ts.browserAuthFactory(appBaseURL).WithHeadless(false).WithProfileDir(profileDir)
 
 	tokens, err := browserAuth.ExtractTokensFromProfile()
 	if err != nil {
@@ -281,12 +291,12 @@ func printSuccess(tokensPath string, tokens *webauthn.AuthTokens) {
 	fmt.Println("🔑 Tokens extraídos e salvos:")
 	fmt.Printf("   HGLogin:  %s...%s\n", tokens.HGLogin[:4], tokens.HGLogin[len(tokens.HGLogin)-4:])
 	fmt.Printf("   XSRF:     %s...%s\n", tokens.XSRFToken[:4], tokens.XSRFToken[len(tokens.XSRFToken)-4:])
-	fmt.Printf("   Expira:   %s\n", tokens.ExpiresAt.Format("02/01/2006 15:04:05"))
+	fmt.Printf("   Expira:   %s\n", tokens.ExpiresAt.Format(tokenDateTimeFormat))
 	fmt.Println()
 	fmt.Printf("💾 Arquivo: %s\n", tokensPath)
 	fmt.Println()
 	fmt.Println("🚀 Agora você pode copiar esse arquivo para a VPS para uso imediato:")
-	fmt.Printf("   scp %s user@vps:~/.hourglass-rpa/\n", tokensPath)
+	fmt.Printf("   scp %s user@vps:%s\n", tokensPath, vpsTokensPathTemplate)
 	fmt.Println()
 	fmt.Println("💡 Para renovação automática na VPS, execute também: make setup-auth")
 }
@@ -297,8 +307,8 @@ func main() {
 	}
 
 	homeDir, _ := userHomeDirForMain()
-	configDir := filepath.Join(homeDir, ".hourglass-rpa")
-	tokensPath := filepath.Join(configDir, "auth-tokens.json")
+	configDir := filepath.Join(homeDir, defaultConfigDirName)
+	tokensPath := filepath.Join(configDir, authTokensFileName)
 
 	tm, err := newTokenLoader(configDir, tokensPath)
 	if err != nil {

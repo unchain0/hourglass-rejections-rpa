@@ -17,11 +17,15 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
+const botStatsDateLayout = "2006-01-02"
+
 // CheckNowCallback is a callback function for triggering immediate checks.
 type CheckNowCallback func(ctx context.Context, chatID int64) error
 
 // botNewFunc is a package-level variable to allow testing the constructor.
 var botNewFunc = bot.New
+
+func noopDefaultUpdateHandler(_ context.Context, _ *bot.Bot, _ *models.Update) {}
 
 // TelegramNotifier sends notifications via Telegram Bot.
 type rateLimiter struct {
@@ -79,14 +83,14 @@ type botStats struct {
 }
 
 func newBotStats() *botStats {
-	return &botStats{lastResetDate: time.Now().Format("2006-01-02")}
+	return &botStats{lastResetDate: time.Now().Format(botStatsDateLayout)}
 }
 
 func (s *botStats) recordCheck(rejectionsFound int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	today := time.Now().Format("2006-01-02")
+	today := time.Now().Format(botStatsDateLayout)
 	if s.lastResetDate != today {
 		s.lastResetDate = today
 		s.rejectionsToday = 0
@@ -119,8 +123,7 @@ func NewTelegramNotifier(token string, chatID int64, whitelist []int64) (*Telegr
 		return nil, fmt.Errorf("telegram chat ID is required")
 	}
 
-	b, err := botNewFunc(token, bot.WithDefaultHandler(func(_ context.Context, _ *bot.Bot, _ *models.Update) {
-	}))
+	b, err := botNewFunc(token, bot.WithDefaultHandler(noopDefaultUpdateHandler))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
 	}
@@ -183,7 +186,7 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 			"Who":     html.EscapeString(r.Who),
 			"Section": html.EscapeString(translateSectionName(lang, r.Section)),
 			"What":    html.EscapeString(translateAssignmentType(lang, r.What)),
-			"When":    html.EscapeString(r.When),
+			"When":    html.EscapeString(i18n.FormatDate(r.When, lang)),
 		})
 	}
 
@@ -506,6 +509,16 @@ func (t *TelegramNotifier) handleStats(ctx context.Context, b *bot.Bot, update *
 
 	lang := t.getUserLanguage(chatID)
 
+	totalUsers, err := t.totalPreferenceUsers()
+	if err != nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      i18n.Localize(lang, "configure_error", nil),
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
 	if !t.IsAuthorized(chatID) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    chatID,
@@ -515,22 +528,7 @@ func (t *TelegramNotifier) handleStats(ctx context.Context, b *bot.Bot, update *
 		return
 	}
 
-	totalUsers := 0
-	if t.prefManager != nil {
-		prefs, err := t.prefManager.List()
-		if err != nil {
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:    chatID,
-				Text:      i18n.Localize(lang, "configure_error", nil),
-				ParseMode: models.ParseModeHTML,
-			})
-			return
-		}
-		totalUsers = len(prefs)
-	}
-
-	totalChecks := 0
-	rejectionsToday := 0
+	totalChecks, rejectionsToday := 0, 0
 	if t.stats != nil {
 		totalChecks, rejectionsToday = t.stats.snapshot()
 	}
@@ -546,6 +544,19 @@ func (t *TelegramNotifier) handleStats(ctx context.Context, b *bot.Bot, update *
 		Text:      msg,
 		ParseMode: models.ParseModeHTML,
 	})
+}
+
+func (t *TelegramNotifier) totalPreferenceUsers() (int, error) {
+	if t.prefManager == nil {
+		return 0, nil
+	}
+
+	prefs, err := t.prefManager.List()
+	if err != nil {
+		return 0, err
+	}
+
+	return len(prefs), nil
 }
 
 func translateSectionName(lang, sectionName string) string {
@@ -611,31 +622,8 @@ func (t *TelegramNotifier) handleWhoAmI(ctx context.Context, b *bot.Bot, update 
 		return
 	}
 
+	authorizedStatus, languagePreference, sectionsDisplay := t.buildWhoAmIData(chatID)
 	lang := t.getUserLanguage(chatID)
-
-	authorizedStatus := i18n.Localize(lang, "status_no", nil)
-	if t.IsAuthorized(chatID) {
-		authorizedStatus = i18n.Localize(lang, "status_yes", nil)
-	}
-
-	languagePreference := lang
-	sectionsDisplay := i18n.Localize(lang, "whoami_no_sections", nil)
-
-	if t.prefManager != nil {
-		if pref, err := t.prefManager.Get(chatID); err == nil && pref != nil {
-			if pref.Language != "" {
-				languagePreference = pref.Language
-			}
-			sections := pref.Sections()
-			if len(sections) > 0 {
-				translatedSections := make([]string, len(sections))
-				for i, section := range sections {
-					translatedSections[i] = translateSectionName(lang, section)
-				}
-				sectionsDisplay = strings.Join(translatedSections, ", ")
-			}
-		}
-	}
 
 	msg := i18n.Localize(lang, "whoami_info", map[string]any{
 		"ChatID":     chatID,
@@ -649,6 +637,47 @@ func (t *TelegramNotifier) handleWhoAmI(ctx context.Context, b *bot.Bot, update 
 		Text:      msg,
 		ParseMode: models.ParseModeHTML,
 	})
+}
+
+func (t *TelegramNotifier) buildWhoAmIData(chatID int64) (string, string, string) {
+	lang := t.getUserLanguage(chatID)
+	authorizedStatus := i18n.Localize(lang, "status_no", nil)
+	if t.IsAuthorized(chatID) {
+		authorizedStatus = i18n.Localize(lang, "status_yes", nil)
+	}
+
+	languagePreference := lang
+	sectionsDisplay := i18n.Localize(lang, "whoami_no_sections", nil)
+
+	pref, err := t.getPreference(chatID)
+	if err != nil || pref == nil {
+		return authorizedStatus, languagePreference, sectionsDisplay
+	}
+
+	if pref.Language != "" {
+		languagePreference = pref.Language
+	}
+
+	sections := pref.Sections()
+	if len(sections) == 0 {
+		return authorizedStatus, languagePreference, sectionsDisplay
+	}
+
+	translatedSections := make([]string, len(sections))
+	for i, section := range sections {
+		translatedSections[i] = translateSectionName(languagePreference, section)
+	}
+
+	sectionsDisplay = strings.Join(translatedSections, ", ")
+	return authorizedStatus, languagePreference, sectionsDisplay
+}
+
+func (t *TelegramNotifier) getPreference(chatID int64) (*preferences.UserPreference, error) {
+	if t.prefManager == nil {
+		return nil, nil
+	}
+
+	return t.prefManager.Get(chatID)
 }
 
 func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -672,7 +701,7 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 		return
 	}
 
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+	statusMessage, _ := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      i18n.Localize(lang, "check_now_requested", nil),
 		ParseMode: models.ParseModeHTML,
@@ -688,10 +717,12 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 			Text:      i18n.Localize(lang, "check_now_unavailable", nil),
 			ParseMode: models.ParseModeHTML,
 		})
+		deleteMessageBestEffort(ctx, b, chatID, statusMessage)
 		return
 	}
 
 	go func() {
+		defer deleteMessageBestEffort(ctx, b, chatID, statusMessage)
 		if err := callback(ctx, chatID); err != nil {
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:    chatID,
@@ -705,8 +736,23 @@ func (t *TelegramNotifier) handleCheckNow(ctx context.Context, b *bot.Bot, updat
 	}()
 }
 
+func deleteMessageBestEffort(ctx context.Context, b *bot.Bot, chatID int64, message *models.Message) {
+	if message == nil || message.ID == 0 {
+		return
+	}
+
+	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    chatID,
+		MessageID: message.ID,
+	})
+}
+
 func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.CallbackQuery == nil {
+		return
+	}
+
+	if update.CallbackQuery.Message.Message == nil {
 		return
 	}
 

@@ -30,16 +30,6 @@ func TestAPIAnalyzer_SetCongregationID(t *testing.T) {
 	assert.Equal(t, 12345, analyzer.congregationID)
 }
 
-func TestAPIAnalyzer_SetLanguage(t *testing.T) {
-	client := NewClient()
-	analyzer := NewAPIAnalyzer(client)
-
-	assert.Equal(t, "en", analyzer.language)
-
-	analyzer.SetLanguage("pt-BR")
-	assert.Equal(t, "pt-BR", analyzer.language)
-}
-
 func TestAPIAnalyzer_AnalyzeSection_UnknownSection(t *testing.T) {
 	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -345,7 +335,6 @@ func TestAPIAnalyzer_MultipleDeclined(t *testing.T) {
 	client := NewClient()
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
-	analyzer.SetLanguage("pt-BR")
 
 	result, err := analyzer.AnalyzeSection("Public Witnessing")
 	require.NoError(t, err)
@@ -354,8 +343,8 @@ func TestAPIAnalyzer_MultipleDeclined(t *testing.T) {
 	assert.Len(t, result.Rejections, 2)
 	assert.Equal(t, "João Silva", result.Rejections[0].Who)
 	assert.Equal(t, "Maria Santos", result.Rejections[1].Who)
-	assert.Equal(t, "01/03/2026", result.Rejections[0].When)
-	assert.Equal(t, "02/03/2026", result.Rejections[1].When)
+	assert.Equal(t, "2026-03-01", result.Rejections[0].When)
+	assert.Equal(t, "2026-03-02", result.Rejections[1].When)
 }
 
 func TestAPIAnalyzer_AnalyzeMidweekMeetings(t *testing.T) {
@@ -590,7 +579,6 @@ func TestAPIAnalyzer_Deduplication(t *testing.T) {
 	client := NewClient()
 	client.baseURL = server.URL
 	analyzer := NewAPIAnalyzer(client)
-	analyzer.SetLanguage("pt-BR")
 
 	result, err := analyzer.AnalyzeSection("Public Witnessing")
 	require.NoError(t, err)
@@ -599,7 +587,7 @@ func TestAPIAnalyzer_Deduplication(t *testing.T) {
 	assert.Len(t, result.Rejections, 1)
 	assert.Equal(t, "Naraiana Pacheco", result.Rejections[0].Who)
 	assert.Equal(t, "Public Witnessing", result.Rejections[0].What)
-	assert.Equal(t, "13/03/2026", result.Rejections[0].When)
+	assert.Equal(t, "2026-03-13", result.Rejections[0].When)
 }
 
 func TestAPIAnalyzer_SetDaysToLookAhead(t *testing.T) {

@@ -70,6 +70,10 @@ temp/
 
 # Sisyphus/Agent artifacts
 .sisyphus/
+.playwright-mcp/
+
+# Local authentication capture
+hourglass-login-requests.txt
 
 # Documentation (keep only README.md)
 HOOKS.md

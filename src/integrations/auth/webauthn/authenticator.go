@@ -33,6 +33,9 @@ var (
 		return a.createAttestationObject(authData)
 	}
 	jsonMarshalAuthenticator = json.Marshal
+	newCTAP2EncMode          = func() (cbor.EncMode, error) {
+		return cbor.CTAP2EncOptions().EncMode()
+	}
 )
 
 type Authenticator struct {
@@ -330,7 +333,7 @@ func (a *Authenticator) createAttestationObject(authData []byte) ([]byte, error)
 		AttStatement: map[string]any{},
 	}
 
-	encMode, err := cbor.CTAP2EncOptions().EncMode()
+	encMode, err := newCTAP2EncMode()
 	if err != nil {
 		return nil, fmt.Errorf("create CTAP2 CBOR encoder: %w", err)
 	}

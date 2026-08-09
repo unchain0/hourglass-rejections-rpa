@@ -203,6 +203,18 @@ func TestRejectionCache_LastCheck(t *testing.T) {
 	}
 }
 
+func TestRejectionCache_Reset(t *testing.T) {
+	c := New()
+	rejections := []domain.Rejection{{Section: "Field Ministry", Who: "A", What: "B"}}
+	if !c.HasChanges(rejections) {
+		t.Fatal("first snapshot should be a change")
+	}
+	c.Reset()
+	if !c.HasChanges(rejections) {
+		t.Fatal("reset snapshot should be eligible again")
+	}
+}
+
 func TestRejectionCache_ConcurrentAccess(t *testing.T) {
 	c := New()
 	done := make(chan bool)

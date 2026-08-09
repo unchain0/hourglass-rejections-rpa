@@ -144,32 +144,27 @@ func TestScheduler_Run_BusinessHours(t *testing.T) {
 	telemetryClient := &telemetry.Client{}
 	analyzer := &mockAnalyzer{}
 	store := &mockStorage{}
+	analysisCalls := 0
 
 	s := New(cfg, telemetryClient, analyzer, store)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	err := s.Run(ctx)
-	if err != nil {
-		t.Errorf("Run should return nil, got: %v", err)
+	s.runAnalysisFn = func(ctx context.Context) error {
+		analysisCalls++
+		return nil
 	}
-}
 
-func TestScheduler_Run_NightHours(t *testing.T) {
-	cfg := &config.Config{}
-	telemetryClient := &telemetry.Client{}
-	analyzer := &mockAnalyzer{}
-	store := &mockStorage{}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
 
-	s := New(cfg, telemetryClient, analyzer, store)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
 	defer cancel()
 
-	err := s.Run(ctx)
+	err := s.runWithTicker(ctx, ticker)
 	if err != nil {
-		t.Errorf("Run should return nil, got: %v", err)
+		t.Errorf("RunWithTicker should return nil, got: %v", err)
+	}
+
+	if analysisCalls == 0 {
+		t.Errorf("expected at least one analysis call, got %d", analysisCalls)
 	}
 }
 
@@ -431,5 +426,28 @@ func TestScheduler_runWithTicker_AnalysisError(t *testing.T) {
 	err := s.runWithTicker(ctx, ticker)
 	if err != nil {
 		t.Errorf("runWithTicker should return nil even on analysis error, got: %v", err)
+	}
+}
+
+func TestScheduler_runWithTicker_RecordExecutionError(t *testing.T) {
+	s := &Scheduler{
+		telemetryClient: &telemetry.Client{},
+		store:           &mockStorage{err: errors.New("record failed")},
+		runAnalysisFn:   func(context.Context) error { return nil },
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	err := s.runWithTicker(ctx, time.NewTicker(time.Millisecond))
+	if err != nil {
+		t.Fatalf("runWithTicker() error = %v", err)
+	}
+}
+
+func TestScheduler_recordExecutionWithoutStore(t *testing.T) {
+	err := (&Scheduler{}).recordExecution(errors.New("ignored"))
+	if err != nil {
+		t.Fatalf("recordExecution() error = %v", err)
 	}
 }

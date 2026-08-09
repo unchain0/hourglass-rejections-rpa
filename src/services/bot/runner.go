@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -49,6 +50,10 @@ func New(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourgl
 	}
 }
 
+// noOpPreferenceStoreClose intentionally keeps the same signature as the production close function
+// while avoiding nil checks when no preference store was configured.
+func noOpPreferenceStoreClose() {}
+
 func (b *BotRunner) WithNotifier(n Notifier) *BotRunner {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -74,9 +79,11 @@ var newTelegramNotifier = func(token string, chatID int64, whitelist []int64) (N
 	return notifier.NewTelegramNotifier(token, chatID, whitelist)
 }
 
-var newPreferenceStoreFromDatabaseURL = func(databaseURL string) (preferences.PreferenceStore, error) {
+func openPreferenceStoreFromDatabaseURL(databaseURL string) (preferences.PreferenceStore, error) {
 	return preferences.NewStoreFromConfig(&preferences.DatabaseConfig{Type: "postgres", DSN: databaseURL})
 }
+
+var newPreferenceStoreFromDatabaseURL = openPreferenceStoreFromDatabaseURL
 
 var i18nInit = i18n.Init
 
@@ -104,21 +111,15 @@ func (b *BotRunner) Run(ctx context.Context) error {
 
 	tgBot, err := b.ensureNotifier()
 	if err != nil {
-		whitelist := b.getWhitelist()
-		var chatID int64
-		if len(whitelist) > 0 {
-			chatID = whitelist[0]
-		}
 		b.telemetryClient.CaptureError(err, map[string]any{
 			"phase":     "create_notifier",
-			"chat_id":   chatID,
 			"has_token": b.getBotToken() != "",
 		})
 		return fmt.Errorf("failed to create telegram notifier: %w", err)
 	}
 
 	tgBot.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
-		logger.Info("manual check triggered via bot", "chat_id", chatID)
+		logger.Info("manual check triggered via bot")
 		return b.runOnceForUser(ctx, prefManager, chatID)
 	})
 
@@ -151,13 +152,109 @@ func (b *BotRunner) runOnceForUser(ctx context.Context, prefManager *preferences
 	return service.run(ctx, targetChatID)
 }
 
+func (b *BotRunner) SendRejections(rejections []domain.Rejection) error {
+	if len(rejections) == 0 {
+		return nil
+	}
+
+	if b.prefStore == nil && (b.cfg == nil || b.cfg.DatabaseURL == "") {
+		return fmt.Errorf("preference store not configured")
+	}
+
+	prefStore, closePrefStore, err := b.ensurePreferenceStore()
+	if err != nil {
+		return err
+	}
+	if prefStore == nil {
+		return fmt.Errorf("preference store not configured")
+	}
+	if closePrefStore != nil {
+		defer closePrefStore()
+	}
+
+	return b.sendRejectionsToUsers(prefStore, rejections, b.getWhitelist())
+}
+
+func (b *BotRunner) sendRejectionsToUsers(prefStore preferences.PreferenceStore, rejections []domain.Rejection, whitelist []int64) error {
+	prefs, err := prefStore.List()
+	if err != nil {
+		return fmt.Errorf("failed to list notification preferences: %w", err)
+	}
+
+	allowed := toAllowedRecipientsMap(whitelist)
+	var sendErrors []error
+	recipients := 0
+	var tgBot Notifier
+
+	for _, pref := range prefs {
+		if !pref.Enabled || !isAllowedRecipient(pref.ChatID, allowed) {
+			continue
+		}
+
+		selected := filterRejectionsBySections(rejections, pref.Sections())
+		if len(selected) == 0 {
+			continue
+		}
+
+		if tgBot == nil {
+			createdBot, err := b.ensureNotifier()
+			if err != nil {
+				sendErrors = append(sendErrors, fmt.Errorf("failed to create telegram notifier: %w", err))
+				continue
+			}
+			tgBot = createdBot
+		}
+
+		if err := tgBot.SendRejectionsNotification(pref.ChatID, selected); err != nil {
+			sendErrors = append(sendErrors, fmt.Errorf("failed to send scheduled notification: %w", err))
+			continue
+		}
+
+		recipients++
+	}
+
+	slog.Info("scheduled notification fan-out complete", "recipients", recipients, "rejections_count", len(rejections))
+	return errors.Join(sendErrors...)
+}
+
+func toAllowedRecipientsMap(whitelist []int64) map[int64]struct{} {
+	allowed := make(map[int64]struct{}, len(whitelist))
+	for _, chatID := range whitelist {
+		allowed[chatID] = struct{}{}
+	}
+	return allowed
+}
+
+func isAllowedRecipient(chatID int64, whitelist map[int64]struct{}) bool {
+	if len(whitelist) == 0 {
+		return true
+	}
+	_, ok := whitelist[chatID]
+	return ok
+}
+
+func filterRejectionsBySections(rejections []domain.Rejection, sections []string) []domain.Rejection {
+	selected := make(map[string]struct{}, len(sections))
+	for _, section := range sections {
+		selected[section] = struct{}{}
+	}
+
+	filtered := make([]domain.Rejection, 0, len(rejections))
+	for _, rejection := range rejections {
+		if _, ok := selected[rejection.Section]; ok {
+			filtered = append(filtered, rejection)
+		}
+	}
+	return filtered
+}
+
 func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error {
 	logger := slog.Default()
-	logger.Info("sending no rejections message", "chat_id", chatID, "message", message)
+	logger.Info("sending no rejections message")
 
-	if b.notifier != nil {
+	if existing := b.currentNotifier(); existing != nil {
 		logger.Info("using existing notifier")
-		return b.notifier.SendNoRejectionsMessage(chatID, message)
+		return existing.SendNoRejectionsMessage(chatID, message)
 	}
 
 	tgBot, err := b.newTransientNotifier(chatID)
@@ -165,8 +262,7 @@ func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error 
 		logger.Error("TELEGRAM_BOT_TOKEN not configured")
 		if b.telemetryClient != nil && err.Error() != "TELEGRAM_BOT_TOKEN not configured" {
 			b.telemetryClient.CaptureError(err, map[string]any{
-				"phase":   "create_temp_notifier",
-				"chat_id": chatID,
+				"phase": "create_temp_notifier",
 			})
 		}
 		return err
@@ -176,8 +272,8 @@ func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error 
 }
 
 func (b *BotRunner) sendRejectionsNotification(chatID int64, rejections []domain.Rejection) error {
-	if b.notifier != nil {
-		return b.notifier.SendRejectionsNotification(chatID, rejections)
+	if existing := b.currentNotifier(); existing != nil {
+		return existing.SendRejectionsNotification(chatID, rejections)
 	}
 
 	tgBot, err := b.newTransientNotifier(chatID)
@@ -190,19 +286,19 @@ func (b *BotRunner) sendRejectionsNotification(chatID int64, rejections []domain
 
 func (b *BotRunner) ensurePreferenceStore() (preferences.PreferenceStore, func(), error) {
 	if b.prefStore != nil {
-		return b.prefStore, func() {}, nil
+		return b.prefStore, noOpPreferenceStoreClose, nil
 	}
 	if b.cfg == nil || b.cfg.DatabaseURL == "" {
-		return nil, func() {}, fmt.Errorf("DATABASE_URL not configured")
+		return nil, noOpPreferenceStoreClose, fmt.Errorf("DATABASE_URL not configured")
 	}
 
 	store, err := newPreferenceStoreFromDatabaseURL(b.cfg.DatabaseURL)
 	if err != nil {
-		return nil, func() {}, err
+		return nil, noOpPreferenceStoreClose, err
 	}
 	prefStore := store
 
-	closeStore := func() {}
+	closeStore := noOpPreferenceStoreClose
 	if closer, ok := any(prefStore).(interface{ Close() error }); ok {
 		closeStore = func() { _ = closer.Close() }
 	}
@@ -211,6 +307,9 @@ func (b *BotRunner) ensurePreferenceStore() (preferences.PreferenceStore, func()
 }
 
 func (b *BotRunner) ensureNotifier() (Notifier, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	if b.notifier != nil {
 		return b.notifier, nil
 	}
@@ -235,6 +334,12 @@ func (b *BotRunner) ensureNotifier() (Notifier, error) {
 	return tgBot, nil
 }
 
+func (b *BotRunner) currentNotifier() Notifier {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.notifier
+}
+
 func (b *BotRunner) newTransientNotifier(chatID int64) (Notifier, error) {
 	token := b.getBotToken()
 	if token == "" {
@@ -242,7 +347,7 @@ func (b *BotRunner) newTransientNotifier(chatID int64) (Notifier, error) {
 	}
 
 	whitelist := append(b.getWhitelist(), chatID)
-	slog.Default().Info("creating temporary notifier", "chat_id", chatID, "whitelist", whitelist)
+	slog.Default().Info("creating temporary notifier")
 
 	tgBot, err := newTelegramNotifier(token, chatID, whitelist)
 	if err != nil {

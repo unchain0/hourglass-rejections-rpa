@@ -49,6 +49,19 @@ type Config struct {
 	Level          string
 }
 
+var (
+	newResource       = resource.New
+	newTraceExporter  = otlptracehttp.New
+	newMetricExporter = otlpmetrichttp.New
+	newLogExporter    = otlploghttp.New
+	newErrorCounter   = func(meter metric.Meter) (metric.Int64Counter, error) {
+		return meter.Int64Counter("hourglass.errors.total")
+	}
+	newMessageCounter = func(meter metric.Meter) (metric.Int64Counter, error) {
+		return meter.Int64Counter("hourglass.messages.total")
+	}
+)
+
 // New initializes OpenTelemetry providers and returns an observability client.
 func New(cfg Config) (*Client, error) {
 	fallback := newFallbackLogger(cfg.Level)
@@ -57,7 +70,7 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	ctx := context.Background()
-	res, err := resource.New(ctx,
+	res, err := newResource(ctx,
 		resource.WithFromEnv(),
 		resource.WithTelemetrySDK(),
 		resource.WithProcess(),
@@ -74,7 +87,7 @@ func New(cfg Config) (*Client, error) {
 
 	headers := parseHeaders(cfg.Headers)
 
-	traceExporter, err := otlptracehttp.New(ctx,
+	traceExporter, err := newTraceExporter(ctx,
 		otlptracehttp.WithEndpointURL(cfg.Endpoint),
 		otlptracehttp.WithHeaders(headers),
 	)
@@ -82,7 +95,7 @@ func New(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to initialize trace exporter: %w", err)
 	}
 
-	metricExporter, err := otlpmetrichttp.New(ctx,
+	metricExporter, err := newMetricExporter(ctx,
 		otlpmetrichttp.WithEndpointURL(cfg.Endpoint),
 		otlpmetrichttp.WithHeaders(headers),
 	)
@@ -90,7 +103,7 @@ func New(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to initialize metric exporter: %w", err)
 	}
 
-	logExporter, err := otlploghttp.New(ctx,
+	logExporter, err := newLogExporter(ctx,
 		otlploghttp.WithEndpointURL(cfg.Endpoint),
 		otlploghttp.WithHeaders(headers),
 	)
@@ -120,11 +133,11 @@ func New(cfg Config) (*Client, error) {
 	logglobal.SetLoggerProvider(logProvider)
 
 	meter := meterProvider.Meter("hourglass-rejections-rpa/observability")
-	errorCounter, err := meter.Int64Counter("hourglass.errors.total")
+	errorCounter, err := newErrorCounter(meter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create error counter: %w", err)
 	}
-	messageCounter, err := meter.Int64Counter("hourglass.messages.total")
+	messageCounter, err := newMessageCounter(meter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create message counter: %w", err)
 	}

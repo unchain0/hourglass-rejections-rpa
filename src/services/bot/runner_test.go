@@ -17,6 +17,8 @@ import (
 	"hourglass-rejections-rpa/src/integrations/i18n"
 	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
 	"hourglass-rejections-rpa/src/services/notification"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
@@ -34,6 +36,26 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Exit(m.Run())
+}
+
+func TestOpenPreferenceStoreFromDatabaseURLRejectsInvalidDSN(t *testing.T) {
+	store, err := openPreferenceStoreFromDatabaseURL("://invalid")
+	assert.Error(t, err)
+	assert.Nil(t, store)
+}
+
+func TestEnsurePreferenceStoreReturnsFactoryError(t *testing.T) {
+	original := newPreferenceStoreFromDatabaseURL
+	t.Cleanup(func() { newPreferenceStoreFromDatabaseURL = original })
+	newPreferenceStoreFromDatabaseURL = func(string) (preferences.PreferenceStore, error) {
+		return nil, errors.New("open failed")
+	}
+
+	runner := &BotRunner{cfg: &config.Config{DatabaseURL: "configured"}}
+	store, closeStore, err := runner.ensurePreferenceStore()
+	assert.Error(t, err)
+	assert.Nil(t, store)
+	assert.NotNil(t, closeStore)
 }
 
 type MockAnalyzer struct {
@@ -163,6 +185,96 @@ func TestWithMethods(t *testing.T) {
 	if runner.analyzer != mockAnalyzer {
 		t.Errorf("expected analyzer to be set")
 	}
+}
+
+func TestBotRunnerSendRejectionsFansOutByEnabledPreferences(t *testing.T) {
+	fieldMinistry := preferences.UserPreference{ChatID: 101, Enabled: true}
+	fieldMinistry.SetSections([]string{"Field Ministry"})
+	publicWitnessing := preferences.UserPreference{ChatID: 202, Enabled: true}
+	publicWitnessing.SetSections([]string{"Public Witnessing"})
+	disabled := preferences.UserPreference{ChatID: 303, Enabled: false}
+	disabled.SetSections([]string{"Field Ministry", "Public Witnessing"})
+
+	deliveries := make(map[int64][]domain.Rejection)
+	runner := (&BotRunner{cfg: &config.Config{TelegramWhitelist: "101,202,303"}, telemetryClient: &telemetry.Client{}}).
+		WithPreferenceStore(&MockPreferenceStore{ListFunc: func() ([]preferences.UserPreference, error) {
+			return []preferences.UserPreference{fieldMinistry, publicWitnessing, disabled}, nil
+		}}).
+		WithNotifier(&MockNotifier{SendRejectionsNotificationFunc: func(chatID int64, rejections []domain.Rejection) error {
+			deliveries[chatID] = append([]domain.Rejection(nil), rejections...)
+			return nil
+		}})
+
+	err := runner.SendRejections([]domain.Rejection{
+		{Section: "Field Ministry", Who: "A"},
+		{Section: "Public Witnessing", Who: "B"},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, []domain.Rejection{{Section: "Field Ministry", Who: "A"}}, deliveries[101])
+	assert.Equal(t, []domain.Rejection{{Section: "Public Witnessing", Who: "B"}}, deliveries[202])
+	assert.NotContains(t, deliveries, int64(303))
+}
+
+func TestBotRunnerSendRejectionsBoundaries(t *testing.T) {
+	rejection := domain.Rejection{Section: "Field Ministry", Who: "A"}
+
+	t.Run("empty snapshot", func(t *testing.T) {
+		assert.NoError(t, (&BotRunner{}).SendRejections(nil))
+	})
+
+	t.Run("missing preference store", func(t *testing.T) {
+		err := (&BotRunner{}).SendRejections([]domain.Rejection{rejection})
+		assert.EqualError(t, err, "preference store not configured")
+	})
+
+	t.Run("preference list failure", func(t *testing.T) {
+		runner := (&BotRunner{}).WithPreferenceStore(&MockPreferenceStore{ListFunc: func() ([]preferences.UserPreference, error) {
+			return nil, errors.New("list failed")
+		}})
+		err := runner.SendRejections([]domain.Rejection{rejection})
+		assert.ErrorContains(t, err, "failed to list notification preferences: list failed")
+	})
+
+	t.Run("disabled unlisted and unmatched users", func(t *testing.T) {
+		disabled := preferences.UserPreference{ChatID: 101, Enabled: false}
+		disabled.SetSections([]string{"Field Ministry"})
+		unlisted := preferences.UserPreference{ChatID: 202, Enabled: true}
+		unlisted.SetSections([]string{"Field Ministry"})
+		unmatched := preferences.UserPreference{ChatID: 101, Enabled: true}
+		unmatched.SetSections([]string{"Public Witnessing"})
+		runner := (&BotRunner{cfg: &config.Config{TelegramWhitelist: "101"}}).
+			WithPreferenceStore(&MockPreferenceStore{ListFunc: func() ([]preferences.UserPreference, error) {
+				return []preferences.UserPreference{disabled, unlisted, unmatched}, nil
+			}})
+		assert.NoError(t, runner.SendRejections([]domain.Rejection{rejection}))
+	})
+
+	t.Run("notifier initialization failure", func(t *testing.T) {
+		t.Setenv("TELEGRAM_BOT_TOKEN", "")
+		pref := preferences.UserPreference{ChatID: 101, Enabled: true}
+		pref.SetSections([]string{"Field Ministry"})
+		runner := (&BotRunner{cfg: &config.Config{TelegramWhitelist: "101"}}).
+			WithPreferenceStore(&MockPreferenceStore{ListFunc: func() ([]preferences.UserPreference, error) {
+				return []preferences.UserPreference{pref}, nil
+			}})
+		err := runner.SendRejections([]domain.Rejection{rejection})
+		assert.ErrorContains(t, err, "failed to create telegram notifier")
+	})
+
+	t.Run("delivery failure", func(t *testing.T) {
+		pref := preferences.UserPreference{ChatID: 101, Enabled: true}
+		pref.SetSections([]string{"Field Ministry"})
+		runner := (&BotRunner{cfg: &config.Config{}}).
+			WithPreferenceStore(&MockPreferenceStore{ListFunc: func() ([]preferences.UserPreference, error) {
+				return []preferences.UserPreference{pref}, nil
+			}}).
+			WithNotifier(&MockNotifier{SendRejectionsNotificationFunc: func(int64, []domain.Rejection) error {
+				return errors.New("send failed")
+			}})
+		err := runner.SendRejections([]domain.Rejection{rejection})
+		assert.ErrorContains(t, err, "failed to send scheduled notification: send failed")
+	})
 }
 
 func TestRun_Success(t *testing.T) {
@@ -675,6 +787,97 @@ func TestRunOnceForUser_WithRejections(t *testing.T) {
 	}
 }
 
+func TestSortRejectionsByDate(t *testing.T) {
+	now := time.Date(2026, time.August, 8, 15, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		rejections []domain.Rejection
+		expected   []string
+	}{
+		{
+			name: "past dates first and closest within each period",
+			rejections: []domain.Rejection{
+				{When: "2026-08-10"},
+				{When: "2026-08-01"},
+				{When: "2026-08-08"},
+				{When: "2026-08-07"},
+				{When: "2026-08-09"},
+			},
+			expected: []string{"2026-08-07", "2026-08-01", "2026-08-08", "2026-08-09", "2026-08-10"},
+		},
+		{
+			name: "invalid dates stay last and stable",
+			rejections: []domain.Rejection{
+				{When: "unknown-1"},
+				{When: "2026-08-09"},
+				{When: "unknown-2"},
+				{When: "2026-08-07"},
+			},
+			expected: []string{"2026-08-07", "2026-08-09", "unknown-1", "unknown-2"},
+		},
+		{
+			name: "equal dates preserve source order",
+			rejections: []domain.Rejection{
+				{When: "2026-08-09", Who: "first"},
+				{When: "2026-08-09", Who: "second"},
+			},
+			expected: []string{"first", "second"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sortRejectionsByDate(tt.rejections, now)
+
+			actual := make([]string, 0, len(tt.rejections))
+			for _, rejection := range tt.rejections {
+				if rejection.Who != "" {
+					actual = append(actual, rejection.Who)
+					continue
+				}
+				actual = append(actual, rejection.When)
+			}
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}
+
+func TestRunOnceForUser_SortsRejectionsByDate(t *testing.T) {
+	runner := &BotRunner{}
+
+	mockNotifier := &MockNotifier{
+		SendRejectionsNotificationFunc: func(_ int64, rejections []domain.Rejection) error {
+			actual := make([]string, 0, len(rejections))
+			for _, rejection := range rejections {
+				actual = append(actual, rejection.When)
+			}
+			assert.Equal(t, []string{"2026-01-02", "2025-01-02", "2999-01-02", "2999-01-03"}, actual)
+			return nil
+		},
+	}
+	runner.WithNotifier(mockNotifier)
+	runner.WithAnalyzer(&MockAnalyzer{
+		AnalyzeSectionFunc: func(string) (*domain.JobResult, error) {
+			return &domain.JobResult{Rejections: []domain.Rejection{
+				{When: "2999-01-03"},
+				{When: "2025-01-02"},
+				{When: "2999-01-02"},
+				{When: "2026-01-02"},
+			}}, nil
+		},
+	})
+
+	pref := &preferences.UserPreference{}
+	pref.SetSections([]string{"Field Ministry"})
+	prefManager := preferences.NewPreferenceManager(&MockPreferenceStore{
+		GetFunc: func(int64) (*preferences.UserPreference, error) {
+			return pref, nil
+		},
+	})
+
+	assert.NoError(t, runner.runOnceForUser(context.Background(), prefManager, 123))
+}
+
 func TestSendNoRejectionsMessage_NoNotifier_NoToken(t *testing.T) {
 	os.Unsetenv("TELEGRAM_BOT_TOKEN")
 	runner := &BotRunner{}
@@ -837,10 +1040,10 @@ func TestGetBotToken(t *testing.T) {
 
 func TestManualCheckService_CaptureAnalysisError(t *testing.T) {
 	service := newManualCheckService(nil, nil, nil, nil, nil)
-	service.captureAnalysisError(errors.New("boom"), 123, "Field Ministry", time.Now(), "phase", nil)
+	service.captureAnalysisError(errors.New("boom"), "Field Ministry", time.Now(), "phase", nil)
 
 	service = newManualCheckService(nil, &telemetry.Client{}, nil, nil, nil)
-	service.captureAnalysisError(errors.New("boom"), 123, "Field Ministry", time.Now(), "phase", &domain.JobResult{Total: 2})
+	service.captureAnalysisError(errors.New("boom"), "Field Ministry", time.Now(), "phase", &domain.JobResult{Total: 2})
 }
 
 func TestManualCheckService_Run_NoSections(t *testing.T) {

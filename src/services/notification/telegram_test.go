@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -53,6 +55,16 @@ func newTestPrefManager(t *testing.T) *preferences.PreferenceManager {
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
 	return preferences.NewPreferenceManager(store)
+}
+
+func getSectionsFromPrefManager(pm *preferences.PreferenceManager, chatID int64) []string {
+	pref, err := pm.Get(chatID)
+	if err != nil || pref == nil {
+		return nil
+	}
+
+	sections := pref.Sections()
+	return append([]string(nil), sections...)
 }
 
 func newClosedPrefManager(t *testing.T) *preferences.PreferenceManager {
@@ -575,6 +587,12 @@ func TestHandleCheckNow_NilMessage(t *testing.T) {
 func TestHandleCheckNow_NoCallback(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	b := newTestBot(t)
+	var called atomic.Bool
+	tn.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
+		called.Store(true)
+		return nil
+	})
+	tn.SetCheckNowCallback(nil)
 
 	update := &models.Update{
 		Message: &models.Message{
@@ -583,6 +601,7 @@ func TestHandleCheckNow_NoCallback(t *testing.T) {
 	}
 
 	tn.handleCheckNow(context.Background(), b, update)
+	assert.False(t, called.Load())
 }
 
 func TestHandleCheckNow_WithCallback(t *testing.T) {
@@ -605,6 +624,75 @@ func TestHandleCheckNow_WithCallback(t *testing.T) {
 
 	// Wait for goroutine
 	assert.Eventually(t, func() bool { return called.Load() }, 2*time.Second, 100*time.Millisecond)
+}
+
+func TestHandleCheckNow_DeletesStatusAfterResult(t *testing.T) {
+	tests := []struct {
+		name           string
+		deleteSucceeds bool
+	}{
+		{name: "successful deletion", deleteSucceeds: true},
+		{name: "deletion failure is best effort", deleteSucceeds: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var callsMu sync.Mutex
+			var calls []string
+			deleted := make(chan struct{}, 1)
+
+			srv := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/getMe"):
+					_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
+				case strings.HasSuffix(r.URL.Path, "/sendMessage"):
+					callsMu.Lock()
+					calls = append(calls, "send:"+r.FormValue("text"))
+					messageID := 40 + len(calls)
+					callsMu.Unlock()
+					_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d,"date":0,"chat":{"id":12345,"type":"private"}}}`, messageID)
+				case strings.HasSuffix(r.URL.Path, "/deleteMessage"):
+					callsMu.Lock()
+					calls = append(calls, "delete:"+r.FormValue("message_id"))
+					callsMu.Unlock()
+					deleted <- struct{}{}
+					if tt.deleteSucceeds {
+						_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+						return
+					}
+					_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"delete failed"}`))
+				}
+			}))
+			defer srv.Close()
+
+			tn := newTestNotifierWithServer(t, srv, nil)
+			b := newTestBotWithServer(t, srv)
+			tn.SetCheckNowCallback(func(ctx context.Context, chatID int64) error {
+				_, err := b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "result ready"})
+				return err
+			})
+
+			tn.handleCheckNow(context.Background(), b, &models.Update{Message: &models.Message{
+				Chat: models.Chat{ID: 12345},
+			}})
+
+			select {
+			case <-deleted:
+			case <-time.After(2 * time.Second):
+				t.Fatal("status message was not deleted")
+			}
+
+			callsMu.Lock()
+			actualCalls := append([]string(nil), calls...)
+			callsMu.Unlock()
+			assert.Equal(t, []string{
+				"send:Immediate check requested. Processing...",
+				"send:result ready",
+				"delete:41",
+			}, actualCalls)
+		})
+	}
 }
 
 func TestHandleSectionToggle_NilCallbackQuery(t *testing.T) {
@@ -782,24 +870,13 @@ func TestHandleCancel_Success(t *testing.T) {
 	tn.handleCancel(context.Background(), b, update)
 }
 
-func TestHandleCheckNow_Authorized(t *testing.T) {
-	tn := newTestNotifier(t, nil)
-	b := newTestBot(t)
-
-	update := &models.Update{
-		Message: &models.Message{
-			Chat: models.Chat{ID: 12345},
-		},
-	}
-
-	tn.handleCheckNow(context.Background(), b, update)
-}
-
 func TestHandleSectionToggle_NilMessage(t *testing.T) {
 	tn := newTestNotifier(t, nil)
 	pm := newTestPrefManager(t)
 	tn.prefManager = pm
 	b := newTestBot(t)
+	_, _ = pm.GetOrCreate(12345, "testuser")
+	originalSections := getSectionsFromPrefManager(pm, 12345)
 
 	update := &models.Update{
 		CallbackQuery: &models.CallbackQuery{
@@ -810,6 +887,7 @@ func TestHandleSectionToggle_NilMessage(t *testing.T) {
 	}
 
 	tn.handleSectionToggle(context.Background(), b, update)
+	assert.Equal(t, originalSections, getSectionsFromPrefManager(pm, 12345))
 }
 
 func TestHandleSave_NilMessage(t *testing.T) {
@@ -1211,6 +1289,52 @@ func TestSendRejectionsNotification_Success(t *testing.T) {
 	}
 	err := tn.SendRejectionsNotification(12345, rejections)
 	assert.NoError(t, err)
+}
+
+func TestSendRejectionsNotification_FormatsDateForUserLanguage(t *testing.T) {
+	tests := []struct {
+		language string
+		expected string
+	}{
+		{language: "en", expected: "03/14/2026"},
+		{language: "pt-BR", expected: "14/03/2026"},
+		{language: "es", expected: "14/03/2026"},
+		{language: "fr", expected: "14/03/2026"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.language, func(t *testing.T) {
+			var sentText string
+			srv := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if strings.HasSuffix(r.URL.Path, "/getMe") {
+					_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
+					return
+				}
+
+				sentText = r.FormValue("text")
+				_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"date":0,"chat":{"id":12345,"type":"private"}}}`))
+			}))
+			defer srv.Close()
+
+			pm := newTestPrefManager(t)
+			_, err := pm.GetOrCreate(12345, "testuser")
+			require.NoError(t, err)
+			require.NoError(t, pm.UpdateLanguage(12345, tt.language))
+
+			tn := newTestNotifierWithServer(t, srv, nil)
+			tn.prefManager = pm
+			err = tn.SendRejectionsNotification(12345, []domain.Rejection{{
+				Section: "Field Ministry",
+				Who:     "John",
+				What:    "Test",
+				When:    "2026-03-14",
+			}})
+
+			require.NoError(t, err)
+			assert.Contains(t, sentText, tt.expected)
+		})
+	}
 }
 
 // --- StartBot success ---

@@ -25,6 +25,11 @@ var loadMessageFile = func(path string) error {
 	return err
 }
 
+const (
+	dateFormatDMY = "02/01/2006"
+	isoDateFormat = "2006-01-02"
+)
+
 // Init loads the embedded translation files into the shared message bundle once.
 func Init() error {
 	initOnce.Do(func() {
@@ -84,14 +89,14 @@ func Localize(lang string, messageID string, templateData map[string]any) string
 
 var dateFormats = map[string]string{
 	"en":    "01/02/2006",
-	"pt-BR": "02/01/2006",
-	"es":    "02/01/2006",
-	"fr":    "02/01/2006",
+	"pt-BR": dateFormatDMY,
+	"es":    dateFormatDMY,
+	"fr":    dateFormatDMY,
 }
 
 // FormatDate formats an ISO date string (YYYY-MM-DD) according to the specified language locale.
 func FormatDate(isoDate string, lang string) string {
-	t, err := time.Parse("2006-01-02", isoDate)
+	t, err := time.Parse(isoDateFormat, isoDate)
 	if err != nil {
 		return isoDate
 	}

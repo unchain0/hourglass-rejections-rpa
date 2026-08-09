@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+const xsrfTokenHeader = "X-Hourglass-XSRF-Token"
+
 var (
 	jsonMarshalAuthentication = json.Marshal
 	createAssertionAuthData   = func(a *Authenticator, cred *Credential, clientDataHash []byte) ([]byte, error) {
@@ -131,7 +133,7 @@ func (a *Authenticator) beginAuthentication() (*BeginAuthenticationResponse, err
 		switch cookie.Name {
 		case "hglogin":
 			a.hgLogin = cookie.Value
-		case "X-Hourglass-XSRF-Token":
+		case xsrfTokenHeader:
 			a.xsrfToken = cookie.Value
 		}
 	}
@@ -264,7 +266,7 @@ func (a *Authenticator) finishAuthentication(assertion *AssertionResponse) (*Aut
 	req.Header.Set("Content-Type", "application/json")
 
 	if a.xsrfToken != "" {
-		req.Header.Set("X-Hourglass-XSRF-Token", a.xsrfToken)
+		req.Header.Set(xsrfTokenHeader, a.xsrfToken)
 	}
 
 	if a.hgLogin != "" {
@@ -296,7 +298,7 @@ func (a *Authenticator) finishAuthentication(assertion *AssertionResponse) (*Aut
 		case "hglogin":
 			tokens.HGLogin = cookie.Value
 			setHTTPCookieExpiry(cookie, &earliestExpiry)
-		case "X-Hourglass-XSRF-Token":
+		case xsrfTokenHeader:
 			tokens.XSRFToken = cookie.Value
 			setHTTPCookieExpiry(cookie, &earliestExpiry)
 		}

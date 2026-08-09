@@ -14,6 +14,7 @@
 - Parse the comma-separated whitelist as int64 IDs, skipping invalid entries; use the first valid ID as constructor chat ID.
 - Transient manual-send notifiers append the target chat to the resolved whitelist.
 - Register the check-now callback before `StartBot`; pass its context and chat ID to a fresh `manualCheckService`.
+- `SendRejections` lists preferences, skips disabled or unauthorized users, filters the changed snapshot to each user's selected sections, and reuses the runner notifier without starting another listener.
 - `StartBot` owns its listener goroutine. After `ctx.Done()`, call `StopBot`; log and capture stop errors without replacing the nil shutdown result.
 - Keep `newTelegramNotifier`, `newPreferenceStoreFromDatabaseURL`, and `i18nInit` injectable; restore overrides after tests.
 
