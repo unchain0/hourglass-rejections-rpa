@@ -63,20 +63,7 @@ pre-push:
       run: |
         env GOTOOLCHAIN=auto bash -c '
           go test -short -race -timeout 5m -coverprofile=coverage.out ./...
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk "{print \$3}" | sed "s/%//")
-          echo "Total coverage: ${COVERAGE}%"
-          # Use bc if available, otherwise awk for comparison
-          if command -v bc >/dev/null 2>&1; then
-            if [ "$(echo "${COVERAGE} < 95" | bc -l)" = "1" ]; then
-              echo "ERROR: Coverage ${COVERAGE}% is below 95%"
-              exit 1
-            fi
-          else
-            if [ "$(echo "${COVERAGE}" | awk "{print (\$1 < 95)}")" = "1" ]; then
-              echo "ERROR: Coverage ${COVERAGE}% is below 95%"
-              exit 1
-            fi
-          fi
+          bash scripts/check-coverage.sh coverage.out
         '
     build:
       run: |

@@ -238,6 +238,142 @@ func TestHandleAllow_NonAdminAndInvalidArgumentsDoNotAuthorize(t *testing.T) {
 	assert.False(t, authorized)
 }
 
+func TestParseChatIDArgument(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		id   int64
+		ok   bool
+	}{
+		{name: "valid", text: "/allow 2468", id: 2468, ok: true},
+		{name: "missing argument", text: "/allow", ok: false},
+		{name: "invalid argument", text: "/allow nope", ok: false},
+		{name: "zero argument", text: "/allow 0", ok: false},
+		{name: "extra argument", text: "/allow 2468 extra", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, ok := parseChatIDArgument(tt.text)
+			assert.Equal(t, tt.id, id)
+			assert.Equal(t, tt.ok, ok)
+		})
+	}
+}
+
+func TestIsAuthorized_PreferenceStoreError(t *testing.T) {
+	tn := newTestNotifier(t, []int64{12345})
+	tn.prefManager = newClosedPrefManager(t)
+
+	assert.False(t, tn.IsAuthorized(9999))
+
+	tn.prefManager = nil
+	tn.whitelist = nil
+	assert.True(t, tn.IsAuthorized(9999))
+}
+
+func TestHandleAuthorizationChange_Boundaries(t *testing.T) {
+	tn := newTestNotifier(t, []int64{12345})
+	b := newTestBot(t)
+
+	tn.handleAllow(context.Background(), b, &models.Update{Message: nil})
+	tn.handleAllow(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		Text: "/allow 2468",
+	}})
+	tn.prefManager = newTestPrefManager(t)
+	tn.handleAllow(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		Text: "/allow 12345",
+	}})
+
+	tn.prefManager = newClosedPrefManager(t)
+	tn.handleDeny(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		Text: "/deny 2468",
+	}})
+}
+
+func TestHandleUsers_Boundaries(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	b := newTestBotWithServer(t, srv)
+
+	tn := newTestNotifierWithServer(t, srv, []int64{12345})
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	require.NoError(t, pm.SetAuthorized(2468, "user", true))
+
+	tn.handleUsers(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+	}})
+	tn.handleUsers(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 9999},
+	}})
+	tn.handleUsers(context.Background(), b, &models.Update{Message: nil})
+
+	tn.prefManager = newClosedPrefManager(t)
+	tn.handleUsers(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+	}})
+
+	tn.prefManager = nil
+	tn.handleUsers(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+	}})
+}
+
+func TestBuildWhoAmIData_UsesLanguageAndTranslatedSections(t *testing.T) {
+	tn := newTestNotifier(t, []int64{12345})
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	require.NoError(t, pm.SetAuthorized(12345, "admin", true))
+	require.NoError(t, pm.UpdateLanguage(12345, "pt-BR"))
+	_, _, noSections := tn.buildWhoAmIData(12345)
+	assert.NotEmpty(t, noSections)
+	require.NoError(t, pm.UpdateSections(12345, []string{"Field Ministry"}))
+
+	authorized, language, sections := tn.buildWhoAmIData(12345)
+	assert.Equal(t, "Sim", authorized)
+	assert.Equal(t, "pt-BR", language)
+	assert.NotEmpty(t, sections)
+}
+
+func TestHandleSectionToggle_AuthorizationAndStorageBoundaries(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+	b := newTestBotWithServer(t, srv)
+	update := &models.Update{CallbackQuery: &models.CallbackQuery{
+		ID:      "callback",
+		From:    models.User{ID: 12345, Username: "admin"},
+		Message: models.MaybeInaccessibleMessage{Message: &models.Message{}},
+		Data:    "section_Field Ministry",
+	}}
+
+	tn := newTestNotifierWithServer(t, srv, []int64{12345})
+	tn.handleSectionToggle(context.Background(), b, &models.Update{CallbackQuery: &models.CallbackQuery{
+		ID:      "unauthorized",
+		From:    models.User{ID: 9999},
+		Message: models.MaybeInaccessibleMessage{Message: &models.Message{}},
+		Data:    "section_Field Ministry",
+	}})
+
+	tn.prefManager = nil
+	tn.handleSectionToggle(context.Background(), b, update)
+
+	tn.prefManager = newClosedPrefManager(t)
+	tn.handleSectionToggle(context.Background(), b, update)
+
+	tn.prefManager = newTestPrefManager(t)
+	tn.rateLimiter = newRateLimiter()
+	now := time.Now()
+	tn.rateLimiter.attempts[12345] = make([]time.Time, 30)
+	for i := range tn.rateLimiter.attempts[12345] {
+		tn.rateLimiter.attempts[12345][i] = now
+	}
+	tn.handleSectionToggle(context.Background(), b, update)
+}
+
 func TestTelegramCommandSurface_AdminAllowDenyAndNonAdminRejection(t *testing.T) {
 	var sentMu sync.Mutex
 	var sent []string
@@ -255,7 +391,7 @@ func TestTelegramCommandSurface_AdminAllowDenyAndNonAdminRejection(t *testing.T)
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/getUpdates") {
-			_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+			<-r.Context().Done()
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
@@ -308,6 +444,28 @@ func TestTelegramCommandSurface_AdminAllowDenyAndNonAdminRejection(t *testing.T)
 	authorized, err = pm.IsAuthorized(2468)
 	require.NoError(t, err)
 	require.False(t, authorized)
+
+	tn.bot.ProcessUpdate(t.Context(), &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		From: &models.User{ID: 12345},
+		Text: "/help",
+	}})
+	select {
+	case <-sentCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("standard /help response was not sent")
+	}
+
+	tn.bot.ProcessUpdate(t.Context(), &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		From: &models.User{ID: 12345},
+		Text: "/help@test_bot",
+	}})
+	select {
+	case <-sentCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("group /help response was not sent")
+	}
 
 	sentMu.Lock()
 	t.Logf("telegram command responses: %v", sent)

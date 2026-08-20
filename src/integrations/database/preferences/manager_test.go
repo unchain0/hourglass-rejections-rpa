@@ -73,6 +73,36 @@ func TestPreferenceManager_AuthorizeUserPersistsAcrossReads(t *testing.T) {
 	}
 }
 
+func TestPreferenceManager_SetAuthorizedReturnsGetError(t *testing.T) {
+	expected := errors.New("get failed")
+	pm := NewPreferenceManager(&mockStore{
+		getFunc: func(int64) (*UserPreference, error) {
+			return nil, expected
+		},
+	})
+
+	if !errors.Is(pm.SetAuthorized(2468, "user", true), expected) {
+		t.Fatal("expected SetAuthorized to return the store error")
+	}
+}
+
+func TestPreferenceManager_IsAuthorizedReturnsGetError(t *testing.T) {
+	expected := errors.New("get failed")
+	pm := NewPreferenceManager(&mockStore{
+		getFunc: func(int64) (*UserPreference, error) {
+			return nil, expected
+		},
+	})
+
+	authorized, err := pm.IsAuthorized(2468)
+	if !errors.Is(err, expected) {
+		t.Fatal("expected IsAuthorized to return the store error")
+	}
+	if authorized {
+		t.Fatal("expected authorization to be false on error")
+	}
+}
+
 func TestPreferenceManager_Get(t *testing.T) {
 	expected := &UserPreference{ChatID: 123}
 	store := &mockStore{

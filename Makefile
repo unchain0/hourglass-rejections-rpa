@@ -1,5 +1,5 @@
 # Hourglass Rejections RPA Makefile
-.PHONY: all build build-rpa build-save-tokens build-token-refresh build-setup-auth test clean lint fmt vet coverage docker-build docker-run docker-compose-up docker-compose-down docker-auth-bootstrap help run run-once save-tokens token-refresh setup-auth copy-to-vps copy-to-vps-password
+.PHONY: all build build-rpa build-save-tokens build-token-refresh build-setup-auth test clean lint fmt vet coverage coverage-check docker-build docker-run docker-compose-up docker-compose-down docker-auth-bootstrap help run run-once save-tokens token-refresh setup-auth copy-to-vps copy-to-vps-password
 
 # Variables
 BINARY_NAME=rpa
@@ -51,6 +51,11 @@ build-setup-auth:
 test:
 	@echo "Running tests..."
 	$(GO) test $(GOFLAGS) -race -coverprofile=coverage.out ./...
+	$(MAKE) coverage-check
+
+## coverage-check: Require 100% statement coverage in every package
+coverage-check:
+	@bash scripts/check-coverage.sh coverage.out
 
 ## test-short: Run tests without race detector (faster)
 test-short:

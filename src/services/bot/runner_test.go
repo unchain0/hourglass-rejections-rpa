@@ -58,6 +58,34 @@ func TestEnsurePreferenceStoreReturnsFactoryError(t *testing.T) {
 	assert.NotNil(t, closeStore)
 }
 
+func TestNoOpPreferenceStoreClose(t *testing.T) {
+	assert.NotPanics(t, noOpPreferenceStoreClose)
+}
+
+func TestSendRejectionsReturnsNilPreferenceStoreError(t *testing.T) {
+	original := newPreferenceStoreFromDatabaseURL
+	t.Cleanup(func() { newPreferenceStoreFromDatabaseURL = original })
+	newPreferenceStoreFromDatabaseURL = func(string) (preferences.PreferenceStore, error) {
+		return nil, nil
+	}
+
+	runner := &BotRunner{cfg: &config.Config{DatabaseURL: "configured"}}
+	err := runner.SendRejections([]domain.Rejection{{Section: "Field Ministry"}})
+	assert.EqualError(t, err, "preference store not configured")
+}
+
+func TestSendRejectionsReturnsPreferenceStoreFactoryError(t *testing.T) {
+	original := newPreferenceStoreFromDatabaseURL
+	t.Cleanup(func() { newPreferenceStoreFromDatabaseURL = original })
+	expected := errors.New("factory failed")
+	newPreferenceStoreFromDatabaseURL = func(string) (preferences.PreferenceStore, error) {
+		return nil, expected
+	}
+
+	runner := &BotRunner{cfg: &config.Config{DatabaseURL: "configured"}}
+	assert.ErrorIs(t, runner.SendRejections([]domain.Rejection{{Section: "Field Ministry"}}), expected)
+}
+
 type MockAnalyzer struct {
 	AnalyzeSectionFunc func(section string) (*domain.JobResult, error)
 }
@@ -814,6 +842,22 @@ func TestSortRejectionsByDate(t *testing.T) {
 				{When: "2026-08-07"},
 			},
 			expected: []string{"2026-08-07", "2026-08-09", "unknown-1", "unknown-2"},
+		},
+		{
+			name: "one invalid date sorts after valid date",
+			rejections: []domain.Rejection{
+				{When: "unknown"},
+				{When: "2026-08-09"},
+			},
+			expected: []string{"2026-08-09", "unknown"},
+		},
+		{
+			name: "valid date compares against invalid date",
+			rejections: []domain.Rejection{
+				{When: "2026-08-09"},
+				{When: "unknown"},
+			},
+			expected: []string{"2026-08-09", "unknown"},
 		},
 		{
 			name: "equal dates preserve source order",

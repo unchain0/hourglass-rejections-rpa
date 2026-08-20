@@ -124,13 +124,7 @@ jobs:
         path: coverage.html
         retention-days: 7
     - name: Check coverage threshold
-      run: |
-        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-        echo "Coverage: ${COVERAGE}%"
-        if (( $(echo "${COVERAGE} < 70" | bc -l) )); then
-          echo "Coverage is below 70%"
-          exit 1
-        fi
+      run: bash scripts/check-coverage.sh coverage.out
 
   security:
     name: Security Scan

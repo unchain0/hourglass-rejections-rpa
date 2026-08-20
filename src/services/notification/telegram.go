@@ -267,6 +267,7 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/whoami", bot.MatchTypeExact, t.handleWhoAmI)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/language", bot.MatchTypeExact, t.handleLanguage)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, t.handleHelp)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/help@", bot.MatchTypePrefix, t.handleHelp)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/checknow", bot.MatchTypeExact, t.handleCheckNow)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/allow", bot.MatchTypePrefix, t.handleAllow)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/deny", bot.MatchTypePrefix, t.handleDeny)
