@@ -41,6 +41,8 @@ type BotRunner struct {
 	prefStore preferences.PreferenceStore
 }
 
+const telegramBotTokenNotConfigured = "TELEGRAM_BOT_TOKEN not configured"
+
 // New creates a bot runner wired to the shared analyzer and telemetry pipeline.
 func New(cfg *config.Config, telemetryClient *telemetry.Client, analyzer *hourglass.APIAnalyzer) *BotRunner {
 	return &BotRunner{
@@ -259,8 +261,8 @@ func (b *BotRunner) sendNoRejectionsMessage(chatID int64, message string) error 
 
 	tgBot, err := b.newTransientNotifier(chatID)
 	if err != nil {
-		logger.Error("TELEGRAM_BOT_TOKEN not configured")
-		if b.telemetryClient != nil && err.Error() != "TELEGRAM_BOT_TOKEN not configured" {
+		logger.Error(telegramBotTokenNotConfigured)
+		if b.telemetryClient != nil && err.Error() != telegramBotTokenNotConfigured {
 			b.telemetryClient.CaptureError(err, map[string]any{
 				"phase": "create_temp_notifier",
 			})
@@ -316,7 +318,7 @@ func (b *BotRunner) ensureNotifier() (Notifier, error) {
 
 	token := b.getBotToken()
 	if token == "" {
-		return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN not configured")
+		return nil, errors.New(telegramBotTokenNotConfigured)
 	}
 
 	whitelist := b.getWhitelist()
@@ -343,7 +345,7 @@ func (b *BotRunner) currentNotifier() Notifier {
 func (b *BotRunner) newTransientNotifier(chatID int64) (Notifier, error) {
 	token := b.getBotToken()
 	if token == "" {
-		return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN not configured")
+		return nil, errors.New(telegramBotTokenNotConfigured)
 	}
 
 	whitelist := append(b.getWhitelist(), chatID)
