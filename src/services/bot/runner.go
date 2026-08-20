@@ -218,9 +218,9 @@ func (b *BotRunner) sendRejectionsToUsers(prefStore preferences.PreferenceStore,
 }
 
 func toAllowedRecipientsMap(whitelist []int64) map[int64]struct{} {
-	allowed := make(map[int64]struct{}, 1)
-	if len(whitelist) > 0 {
-		allowed[whitelist[0]] = struct{}{}
+	allowed := make(map[int64]struct{}, len(whitelist))
+	for _, chatID := range whitelist {
+		allowed[chatID] = struct{}{}
 	}
 	return allowed
 }

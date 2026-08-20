@@ -148,6 +148,9 @@ func (t *TelegramNotifier) IsAuthorized(chatID int64) bool {
 	if chatID == t.adminID {
 		return true
 	}
+	if slices.Contains(t.whitelist, chatID) {
+		return true
+	}
 	if t.prefManager != nil {
 		authorized, err := t.prefManager.IsAuthorized(chatID)
 		return err == nil && authorized
@@ -161,6 +164,16 @@ func (t *TelegramNotifier) IsAuthorized(chatID int64) bool {
 
 func (t *TelegramNotifier) isAdmin(chatID int64) bool {
 	return chatID == t.adminID
+}
+
+func (t *TelegramNotifier) isAdminUpdate(update *models.Update) bool {
+	if update == nil || update.Message == nil {
+		return false
+	}
+	if update.Message.From != nil && update.Message.From.ID != 0 {
+		return t.isAdmin(update.Message.From.ID)
+	}
+	return t.isAdmin(update.Message.Chat.ID)
 }
 
 func (t *TelegramNotifier) SendNoRejectionsMessage(chatID int64, message string) error {
@@ -197,30 +210,15 @@ func (t *TelegramNotifier) SendRejectionsNotification(chatID int64, rejections [
 
 	lang := t.getUserLanguage(chatID)
 
-	rejectionsList := make([]map[string]any, 0, len(rejections))
-	for i, r := range rejections {
-		rejectionsList = append(rejectionsList, map[string]any{
-			"Number":  i + 1,
-			"Who":     html.EscapeString(r.Who),
-			"Section": html.EscapeString(translateSectionName(lang, r.Section)),
-			"What":    html.EscapeString(translateAssignmentType(lang, r.What)),
-			"When":    html.EscapeString(i18n.FormatDate(r.When, lang)),
+	for _, msg := range buildRejectionMessages(lang, rejections) {
+		_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      msg,
+			ParseMode: models.ParseModeHTML,
 		})
-	}
-
-	msg := i18n.Localize(lang, "rejections_detected", map[string]any{
-		"Count":      len(rejections),
-		"Rejections": rejectionsList,
-	})
-
-	_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
-		ChatID:    chatID,
-		Text:      msg,
-		ParseMode: models.ParseModeHTML,
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to send telegram message: %w", err)
+		if err != nil {
+			return fmt.Errorf("failed to send telegram message: %w", err)
+		}
 	}
 
 	if t.stats != nil {
@@ -404,7 +402,7 @@ func (t *TelegramNotifier) handleAuthorizationChange(ctx context.Context, b *bot
 	}
 	chatID := update.Message.Chat.ID
 	lang := t.getUserLanguage(chatID)
-	if !t.isAdmin(chatID) {
+	if !t.isAdminUpdate(update) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "admin_only", nil), ParseMode: models.ParseModeHTML})
 		return
 	}
@@ -442,7 +440,7 @@ func (t *TelegramNotifier) handleUsers(ctx context.Context, b *bot.Bot, update *
 	}
 	chatID := update.Message.Chat.ID
 	lang := t.getUserLanguage(chatID)
-	if !t.isAdmin(chatID) {
+	if !t.isAdminUpdate(update) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "admin_only", nil), ParseMode: models.ParseModeHTML})
 		return
 	}
@@ -886,6 +884,9 @@ func (t *TelegramNotifier) handleSectionToggle(ctx context.Context, b *bot.Bot, 
 
 	// Extract section name from callback data ("section_Campo" -> "Campo")
 	section := strings.TrimPrefix(update.CallbackQuery.Data, "section_")
+	if !slices.Contains(domain.AllSections, section) {
+		return
+	}
 
 	pref, err := t.prefManager.GetOrCreate(chatID, username)
 	if err != nil {
@@ -1080,6 +1081,14 @@ func (t *TelegramNotifier) handleLanguageSelect(ctx context.Context, b *bot.Bot,
 	}
 
 	selectedLang := strings.TrimPrefix(update.CallbackQuery.Data, "lang_")
+	if !slices.Contains([]string{"en", "pt-BR", "es", "fr"}, selectedLang) {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			ShowAlert:       true,
+			Text:            i18n.Localize(lang, "invalid_language", nil),
+		})
+		return
+	}
 
 	if t.prefManager != nil {
 		_ = t.prefManager.UpdateLanguage(chatID, selectedLang)
@@ -1098,6 +1107,42 @@ func (t *TelegramNotifier) handleLanguageSelect(ctx context.Context, b *bot.Bot,
 			ParseMode: models.ParseModeHTML,
 		})
 	}
+}
+
+const telegramMessageLimit = 4096
+
+func buildRejectionMessages(lang string, rejections []domain.Rejection) []string {
+	messages := make([]string, 0, 1)
+	current := make([]map[string]any, 0, len(rejections))
+	for i, rejection := range rejections {
+		candidate := append(slices.Clone(current), map[string]any{
+			"Number":  i + 1,
+			"Who":     html.EscapeString(rejection.Who),
+			"Section": html.EscapeString(translateSectionName(lang, rejection.Section)),
+			"What":    html.EscapeString(translateAssignmentType(lang, rejection.What)),
+			"When":    html.EscapeString(i18n.FormatDate(rejection.When, lang)),
+		})
+		message := i18n.Localize(lang, "rejections_detected", map[string]any{
+			"Count":      len(rejections),
+			"Rejections": candidate,
+		})
+		if len(message) > telegramMessageLimit && len(current) > 0 {
+			messages = append(messages, i18n.Localize(lang, "rejections_detected", map[string]any{
+				"Count":      len(rejections),
+				"Rejections": current,
+			}))
+			current = current[:0]
+			candidate = []map[string]any{candidate[len(candidate)-1]}
+		}
+		current = append(current, candidate[len(candidate)-1])
+	}
+	if len(current) > 0 {
+		messages = append(messages, i18n.Localize(lang, "rejections_detected", map[string]any{
+			"Count":      len(rejections),
+			"Rejections": current,
+		}))
+	}
+	return messages
 }
 
 // buildConfigKeyboard builds an inline keyboard for section configuration.

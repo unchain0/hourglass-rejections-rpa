@@ -19,6 +19,7 @@ import (
 	"hourglass-rejections-rpa/src/services/notification"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
@@ -244,6 +245,23 @@ func TestBotRunnerSendRejectionsFansOutByEnabledPreferences(t *testing.T) {
 	assert.NotContains(t, deliveries, int64(303))
 }
 
+func TestBotRunnerSendRejectionsFansOutToEveryConfiguredWhitelistID(t *testing.T) {
+	pref := preferences.UserPreference{ChatID: 202, Enabled: true}
+	pref.SetSections([]string{"Field Ministry"})
+	deliveries := make(map[int64]bool)
+
+	runner := (&BotRunner{cfg: &config.Config{TelegramWhitelist: "101,202"}, telemetryClient: &telemetry.Client{}}).
+		WithPreferenceStore(&MockPreferenceStore{ListFunc: func() ([]preferences.UserPreference, error) {
+			return []preferences.UserPreference{pref}, nil
+		}}).
+		WithNotifier(&MockNotifier{SendRejectionsNotificationFunc: func(chatID int64, _ []domain.Rejection) error {
+			deliveries[chatID] = true
+			return nil
+		}})
+
+	require.NoError(t, runner.SendRejections([]domain.Rejection{{Section: "Field Ministry", Who: "A"}}))
+	assert.True(t, deliveries[202])
+}
 func TestBotRunnerSendRejectionsBoundaries(t *testing.T) {
 	rejection := domain.Rejection{Section: "Field Ministry", Who: "A"}
 

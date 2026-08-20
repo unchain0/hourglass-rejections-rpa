@@ -77,6 +77,22 @@ func TestRejectionCache_HasChanges_SameResults(t *testing.T) {
 	}
 }
 
+func TestRejectionCache_HasChanges_IgnoresCompletionOrder(t *testing.T) {
+	c := New()
+	first := []domain.Rejection{
+		{Section: "Field Ministry", Who: "John", What: "Test"},
+		{Section: "Public Witnessing", Who: "Jane", What: "Test"},
+	}
+	second := []domain.Rejection{first[1], first[0]}
+
+	requireFirst := c.HasChanges(first)
+	if !requireFirst {
+		t.Fatal("first snapshot should be a change")
+	}
+	if c.HasChanges(second) {
+		t.Fatal("reordered equivalent results should not be treated as changes")
+	}
+}
 func TestRejectionCache_HasChanges_DifferentCount(t *testing.T) {
 	c := New()
 	rejections1 := []domain.Rejection{
@@ -95,6 +111,22 @@ func TestRejectionCache_HasChanges_DifferentCount(t *testing.T) {
 
 	if len(c.lastResult) != 2 {
 		t.Errorf("expected 2 rejections in cache, got %d", len(c.lastResult))
+	}
+}
+
+func TestCanonicalize_SortsStableFields(t *testing.T) {
+	input := []domain.Rejection{
+		{Section: "Public Witnessing", Who: "Zed", What: "A"},
+		{Section: "Field Ministry", Who: "Zed", What: "B"},
+		{Section: "Field Ministry", Who: "Amy", What: "Z"},
+		{Section: "Field Ministry", Who: "Amy", What: "A"},
+	}
+
+	sorted := canonicalize(input)
+
+	if sorted[0].What != "A" || sorted[1].What != "Z" ||
+		sorted[2].Section != "Field Ministry" || sorted[3].Section != "Public Witnessing" {
+		t.Fatalf("unexpected canonical order: %#v", sorted)
 	}
 }
 
@@ -247,7 +279,7 @@ func TestRejectionCache_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestRejectionCache_MultipleRejectionsOrder(t *testing.T) {
+func TestRejectionCache_MultipleRejectionsOrderIsStable(t *testing.T) {
 	c := New()
 	rejections1 := []domain.Rejection{
 		{Section: "Field Ministry", Who: "John", What: "Test1", When: "01/03/2026"},
@@ -260,7 +292,7 @@ func TestRejectionCache_MultipleRejectionsOrder(t *testing.T) {
 
 	c.HasChanges(rejections1)
 
-	if !c.HasChanges(rejections2) {
-		t.Error("different order should be detected as changes (index-based comparison)")
+	if c.HasChanges(rejections2) {
+		t.Error("different order should not be detected as a change")
 	}
 }

@@ -30,6 +30,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestNoopDefaultUpdateHandler(t *testing.T) {
+	noopDefaultUpdateHandler(context.Background(), newTestBot(t), &models.Update{})
+}
+
 // newTestBot creates a bot that skips the getMe API call for testing.
 func newTestBot(t *testing.T) *bot.Bot {
 	t.Helper()
@@ -214,6 +218,13 @@ func TestAuthorization_AdminAndPersistedUserOnly(t *testing.T) {
 	assert.False(t, tn.IsAuthorized(9999))
 }
 
+func TestIsAuthorized_SecondWhitelistEntryRemainsAuthorizedWithManager(t *testing.T) {
+	tn := newTestNotifier(t, []int64{12345, 2468})
+	tn.prefManager = newTestPrefManager(t)
+
+	assert.True(t, tn.IsAuthorized(2468))
+}
+
 func TestHandleAllow_NonAdminAndInvalidArgumentsDoNotAuthorize(t *testing.T) {
 	tn := newTestNotifier(t, []int64{12345})
 	tn.prefManager = newTestPrefManager(t)
@@ -374,6 +385,46 @@ func TestHandleSectionToggle_AuthorizationAndStorageBoundaries(t *testing.T) {
 	tn.handleSectionToggle(context.Background(), b, update)
 }
 
+func TestHandleSectionToggle_InvalidSectionDoesNotPersist(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{12345})
+	tn.prefManager = newTestPrefManager(t)
+	b := newTestBotWithServer(t, srv)
+
+	tn.handleSectionToggle(context.Background(), b, &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:      "invalid-section",
+			From:    models.User{ID: 12345},
+			Message: models.MaybeInaccessibleMessage{Message: &models.Message{}},
+			Data:    "section_not-a-real-section",
+		},
+	})
+
+	assert.Empty(t, getSectionsFromPrefManager(tn.prefManager, 12345))
+}
+
+func TestHandleLanguageSelect_InvalidLanguageDoesNotPersist(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{12345})
+	tn.prefManager = newTestPrefManager(t)
+	b := newTestBotWithServer(t, srv)
+
+	tn.handleLanguageSelect(context.Background(), b, &models.Update{
+		CallbackQuery: &models.CallbackQuery{
+			ID:      "invalid-language",
+			From:    models.User{ID: 12345},
+			Message: models.MaybeInaccessibleMessage{Message: &models.Message{}},
+			Data:    "lang_xx",
+		},
+	})
+
+	assert.Equal(t, "en", tn.prefManager.GetLanguage(12345))
+}
+
 func TestTelegramCommandSurface_AdminAllowDenyAndNonAdminRejection(t *testing.T) {
 	var sentMu sync.Mutex
 	var sent []string
@@ -470,6 +521,36 @@ func TestTelegramCommandSurface_AdminAllowDenyAndNonAdminRejection(t *testing.T)
 	sentMu.Lock()
 	t.Logf("telegram command responses: %v", sent)
 	sentMu.Unlock()
+}
+
+func TestAdminCommand_UsesSenderIdentityInGroupChat(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{12345})
+	tn.prefManager = newTestPrefManager(t)
+	b := newTestBotWithServer(t, srv)
+
+	tn.handleAllow(context.Background(), b, &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 9999},
+			Text: "/allow 2468",
+		},
+	})
+
+	authorized, err := tn.prefManager.IsAuthorized(2468)
+	require.NoError(t, err)
+	assert.False(t, authorized)
+}
+
+func TestIsAdminUpdate_FallsBackToPrivateChatIdentity(t *testing.T) {
+	tn := newTestNotifier(t, []int64{12345})
+
+	assert.True(t, tn.isAdminUpdate(&models.Update{
+		Message: &models.Message{Chat: models.Chat{ID: 12345}},
+	}))
+	assert.False(t, tn.isAdminUpdate(nil))
 }
 
 // --- IsConfigured ---
@@ -1247,6 +1328,29 @@ func TestSendRejectionsNotification_Authorized(t *testing.T) {
 	err := tn.SendRejectionsNotification(12345, rejections)
 	// Will fail because bot is not connected, but tests the authorization path
 	assert.Error(t, err)
+}
+
+func TestBuildRejectionMessages_SplitsLargeSnapshot(t *testing.T) {
+	rejections := make([]domain.Rejection, 220)
+	for i := range rejections {
+		rejections[i] = domain.Rejection{
+			Section: "Field Ministry",
+			Who:     fmt.Sprintf("Person %03d", i),
+			What:    "Assignment",
+			When:    "2026-08-20",
+		}
+	}
+
+	messages := buildRejectionMessages("en", rejections)
+
+	require.Greater(t, len(messages), 1)
+	for _, message := range messages {
+		assert.LessOrEqual(t, len(message), telegramMessageLimit)
+	}
+	joined := strings.Join(messages, "\n")
+	for _, rejection := range rejections {
+		assert.Contains(t, joined, rejection.Who)
+	}
 }
 
 // --- StopBot ---

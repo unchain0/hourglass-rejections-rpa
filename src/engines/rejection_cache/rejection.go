@@ -3,6 +3,8 @@ package cache
 
 import (
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,8 +28,10 @@ func (c *RejectionCache) HasChanges(newRejections []domain.Rejection) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	newRejections = canonicalize(newRejections)
+
 	if len(c.lastResult) == 0 && len(newRejections) > 0 {
-		c.lastResult = newRejections
+		c.lastResult = slices.Clone(newRejections)
 		c.lastCheck = time.Now()
 		return true
 	}
@@ -38,7 +42,7 @@ func (c *RejectionCache) HasChanges(newRejections []domain.Rejection) bool {
 	}
 
 	if len(newRejections) != len(c.lastResult) {
-		c.lastResult = newRejections
+		c.lastResult = slices.Clone(newRejections)
 		c.lastCheck = time.Now()
 		return true
 	}
@@ -46,7 +50,7 @@ func (c *RejectionCache) HasChanges(newRejections []domain.Rejection) bool {
 	for i, new := range newRejections {
 		old := c.lastResult[i]
 		if new.Section != old.Section || new.Who != old.Who || new.What != old.What {
-			c.lastResult = newRejections
+			c.lastResult = slices.Clone(newRejections)
 			c.lastCheck = time.Now()
 			return true
 		}
@@ -70,4 +74,18 @@ func (c *RejectionCache) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastResult = nil
+}
+
+func canonicalize(rejections []domain.Rejection) []domain.Rejection {
+	canonical := slices.Clone(rejections)
+	slices.SortFunc(canonical, func(left, right domain.Rejection) int {
+		if left.Section != right.Section {
+			return strings.Compare(left.Section, right.Section)
+		}
+		if left.Who != right.Who {
+			return strings.Compare(left.Who, right.Who)
+		}
+		return strings.Compare(left.What, right.What)
+	})
+	return canonical
 }

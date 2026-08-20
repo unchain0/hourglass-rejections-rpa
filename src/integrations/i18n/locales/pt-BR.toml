@@ -163,6 +163,10 @@ other = "Español"
 description = "French language option"
 other = "Français"
 
+[invalid_language]
+description = "Invalid language callback"
+other = "Essa seleção de idioma não é mais válida."
+
 [welcome_unauthorized]
 description = "Welcome message for unauthorized users"
 other = "🤖 <b>Bem-vindo ao Bot RPA Hourglass!</b>\n\nVocê pode interagir com o bot, mas <b>você não está autorizado a receber notificações</b>.\n\n📧 Para receber notificações de rejeições, entre em contato com o administrador e solicite que seu Chat ID seja adicionado à lista branca.\n\nSeu Chat ID: <code>{{.ChatID}}</code>"
