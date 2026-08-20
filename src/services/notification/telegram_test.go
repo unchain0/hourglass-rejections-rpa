@@ -44,8 +44,16 @@ func newTestNotifier(t *testing.T, whitelist []int64) *TelegramNotifier {
 	return &TelegramNotifier{
 		bot:       newTestBot(t),
 		chatID:    12345,
+		adminID:   firstID(whitelist),
 		whitelist: whitelist,
 	}
+}
+
+func firstID(ids []int64) int64 {
+	if len(ids) == 0 {
+		return 0
+	}
+	return ids[0]
 }
 
 // newTestPrefManager creates a PreferenceManager backed by SQLite.
@@ -114,6 +122,7 @@ func newTestNotifierWithServer(t *testing.T, srv *testServer, whitelist []int64)
 	return &TelegramNotifier{
 		bot:       newTestBotWithServer(t, srv),
 		chatID:    12345,
+		adminID:   firstID(whitelist),
 		whitelist: whitelist,
 	}
 }
@@ -171,6 +180,138 @@ func TestIsAuthorized_NotInWhitelist(t *testing.T) {
 	tn := newTestNotifier(t, []int64{111, 222})
 	assert.False(t, tn.IsAuthorized(999))
 	assert.False(t, tn.IsAuthorized(0))
+}
+
+func TestHandleAllow_AdminAuthorizesUser(t *testing.T) {
+	srv := newMockTelegramServer(t)
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{12345})
+	pm := newTestPrefManager(t)
+	tn.prefManager = pm
+	b := newTestBotWithServer(t, srv)
+
+	tn.handleAllow(context.Background(), b, &models.Update{
+		Message: &models.Message{
+			Chat: models.Chat{ID: 12345},
+			From: &models.User{ID: 12345, Username: "admin"},
+			Text: "/allow 2468",
+		},
+	})
+
+	authorized, err := pm.IsAuthorized(2468)
+	require.NoError(t, err)
+	assert.True(t, authorized)
+}
+
+func TestAuthorization_AdminAndPersistedUserOnly(t *testing.T) {
+	tn := newTestNotifier(t, []int64{12345})
+	tn.prefManager = newTestPrefManager(t)
+
+	require.NoError(t, tn.prefManager.SetAuthorized(2468, "user", true))
+	assert.True(t, tn.IsAuthorized(12345))
+	assert.True(t, tn.IsAuthorized(2468))
+	assert.False(t, tn.IsAuthorized(9999))
+}
+
+func TestHandleAllow_NonAdminAndInvalidArgumentsDoNotAuthorize(t *testing.T) {
+	tn := newTestNotifier(t, []int64{12345})
+	tn.prefManager = newTestPrefManager(t)
+	b := newTestBot(t)
+
+	tn.handleAllow(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 9999},
+		From: &models.User{ID: 9999},
+		Text: "/allow 2468",
+	}})
+	authorized, err := tn.prefManager.IsAuthorized(2468)
+	require.NoError(t, err)
+	assert.False(t, authorized)
+
+	tn.handleAllow(context.Background(), b, &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		From: &models.User{ID: 12345},
+		Text: "/allow not-an-id",
+	}})
+	authorized, err = tn.prefManager.IsAuthorized(2468)
+	require.NoError(t, err)
+	assert.False(t, authorized)
+}
+
+func TestTelegramCommandSurface_AdminAllowDenyAndNonAdminRejection(t *testing.T) {
+	var sentMu sync.Mutex
+	var sent []string
+	sentCh := make(chan struct{}, 8)
+	srv := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			sentMu.Lock()
+			sent = append(sent, r.FormValue("text"))
+			sentMu.Unlock()
+			sentCh <- struct{}{}
+		}
+		if strings.HasSuffix(r.URL.Path, "/getMe") {
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer srv.Close()
+
+	tn := newTestNotifierWithServer(t, srv, []int64{12345})
+	pm := newTestPrefManager(t)
+	require.NoError(t, tn.StartBot(t.Context(), pm))
+	t.Cleanup(func() { _ = tn.StopBot() })
+
+	tn.bot.ProcessUpdate(t.Context(), &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		From: &models.User{ID: 12345},
+		Text: "/allow 2468",
+	}})
+	select {
+	case <-sentCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("admin allow response was not sent")
+	}
+	authorized, err := pm.IsAuthorized(2468)
+	require.NoError(t, err)
+	require.True(t, authorized)
+
+	tn.bot.ProcessUpdate(t.Context(), &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 9999},
+		From: &models.User{ID: 9999},
+		Text: "/allow 8642",
+	}})
+	select {
+	case <-sentCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("non-admin rejection response was not sent")
+	}
+	unauthorized, err := pm.IsAuthorized(8642)
+	require.NoError(t, err)
+	require.False(t, unauthorized)
+
+	tn.bot.ProcessUpdate(t.Context(), &models.Update{Message: &models.Message{
+		Chat: models.Chat{ID: 12345},
+		From: &models.User{ID: 12345},
+		Text: "/deny 2468",
+	}})
+	select {
+	case <-sentCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("admin deny response was not sent")
+	}
+	authorized, err = pm.IsAuthorized(2468)
+	require.NoError(t, err)
+	require.False(t, authorized)
+
+	sentMu.Lock()
+	t.Logf("telegram command responses: %v", sent)
+	sentMu.Unlock()
 }
 
 // --- IsConfigured ---

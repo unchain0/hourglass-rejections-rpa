@@ -45,7 +45,35 @@ other = "✅ Idioma cambiado con éxito!"
 
 [help_commands]
 description = "Lista de comandos disponibles"
-other = "Comandos disponibles:\n/start - Mensaje de bienvenida\n/configure - Configurar secciones de notificación\n/status - Ver preferencias actuales\n/stats - Ver estadísticas del bot\n/whoami - Ver detalles de tu cuenta\n/language - Cambiar idioma\n/help - Mostrar este mensaje\n/checknow - Verificación inmediata"
+other = "Comandos disponibles:\n/start - Mensaje de bienvenida\n/configure - Configurar secciones de notificación\n/status - Ver preferencias actuales\n/stats - Ver estadísticas del bot\n/whoami - Ver detalles de tu cuenta\n/language - Cambiar idioma\n/help - Mostrar este mensaje\n/checknow - Verificación inmediata\n/allow <chat_id> - Autorizar usuario (solo admin)\n/deny <chat_id> - Revocar acceso (solo admin)\n/users - Listar usuarios autorizados (solo admin)"
+
+[admin_only]
+description = "Aviso de comando exclusivo del admin"
+other = "Solo el administrador configurado puede gestionar usuarios."
+
+[invalid_user_id]
+description = "Argumento de ID inválido"
+other = "Uso: /allow <chat_id> o /deny <chat_id>. El Chat ID debe ser un entero positivo."
+
+[admin_always_authorized]
+description = "Aviso sobre autorización del administrador"
+other = "El administrador configurado siempre está autorizado."
+
+[user_allowed]
+description = "Confirmación de autorización"
+other = "El usuario {{.ChatID}} ahora está autorizado."
+
+[user_denied]
+description = "Confirmación de revocación"
+other = "El usuario {{.ChatID}} ya no está autorizado."
+
+[authorized_users]
+description = "Lista de usuarios autorizados"
+other = "Usuarios autorizados: {{.Users}}"
+
+[user_management_error]
+description = "Error de gestión de usuarios"
+other = "No se pudo actualizar la autorización. Inténtalo de nuevo."
 
 [rate_limit_exceeded]
 description = "Advertencia de límite de solicitudes"

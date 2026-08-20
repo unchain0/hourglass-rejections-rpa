@@ -141,7 +141,7 @@ The full variable list lives in `.env.example`. In practice, these are the keys 
 
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_WHITELIST=123456789,987654321
+TELEGRAM_WHITELIST=123456789
 HOURGLASS_XSRF_TOKEN=your_xsrf_token
 HOURGLASS_HGLOGIN_COOKIE=your_hglogin_cookie
 
@@ -161,6 +161,12 @@ OTEL_SERVICE_VERSION=1.0.0
 LOG_LEVEL=info
 TZ=America/Sao_Paulo
 ```
+
+`TELEGRAM_WHITELIST` contains only the administrator's Telegram Chat ID. The
+administrator is the only user configured through the environment and is always
+authorized. From Telegram, use `/allow <chat_id>` to authorize a non-admin user,
+`/deny <chat_id>` to revoke access, and `/users` to list authorized users. These
+permissions are persisted in the configured database and survive restarts.
 
 Important notes:
 

@@ -52,6 +52,27 @@ func TestNewPreferenceManager(t *testing.T) {
 	}
 }
 
+func TestPreferenceManager_AuthorizeUserPersistsAcrossReads(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "authorization.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	pm := NewPreferenceManager(store)
+	if err := pm.SetAuthorized(2468, "new-user", true); err != nil {
+		t.Fatal(err)
+	}
+
+	authorized, err := pm.IsAuthorized(2468)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !authorized {
+		t.Fatal("expected authorized user to remain authorized")
+	}
+}
+
 func TestPreferenceManager_Get(t *testing.T) {
 	expected := &UserPreference{ChatID: 123}
 	store := &mockStore{

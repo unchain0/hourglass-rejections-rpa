@@ -45,7 +45,35 @@ other = "✅ Langue modifiée avec succès !"
 
 [help_commands]
 description = "Liste des commandes disponibles"
-other = "Commandes disponibles :\n/start - Message de bienvenue\n/configure - Configurer les sections de notification\n/status - Voir les préférences actuelles\n/stats - Voir les statistiques du bot\n/whoami - Voir les détails de votre compte\n/language - Changer la langue\n/help - Afficher ce message\n/checknow - Vérification immédiate"
+other = "Commandes disponibles :\n/start - Message de bienvenue\n/configure - Configurer les sections de notification\n/status - Voir les préférences actuelles\n/stats - Voir les statistiques du bot\n/whoami - Voir les détails de votre compte\n/language - Changer la langue\n/help - Afficher ce message\n/checknow - Vérification immédiate\n/allow <chat_id> - Autoriser un utilisateur (admin uniquement)\n/deny <chat_id> - Révoquer l'accès (admin uniquement)\n/users - Lister les utilisateurs autorisés (admin uniquement)"
+
+[admin_only]
+description = "Avertissement commande administrateur"
+other = "Seul l'administrateur configuré peut gérer les utilisateurs."
+
+[invalid_user_id]
+description = "Argument ID utilisateur invalide"
+other = "Usage : /allow <chat_id> ou /deny <chat_id>. Le Chat ID doit être un entier positif."
+
+[admin_always_authorized]
+description = "Avertissement autorisation administrateur"
+other = "L'administrateur configuré est toujours autorisé."
+
+[user_allowed]
+description = "Confirmation autorisation utilisateur"
+other = "L'utilisateur {{.ChatID}} est maintenant autorisé."
+
+[user_denied]
+description = "Confirmation révocation utilisateur"
+other = "L'utilisateur {{.ChatID}} n'est plus autorisé."
+
+[authorized_users]
+description = "Liste utilisateurs autorisés"
+other = "Utilisateurs autorisés : {{.Users}}"
+
+[user_management_error]
+description = "Erreur gestion utilisateurs"
+other = "Impossible de mettre à jour l'autorisation. Veuillez réessayer."
 
 [rate_limit_exceeded]
 description = "Avertissement de limite de requêtes"

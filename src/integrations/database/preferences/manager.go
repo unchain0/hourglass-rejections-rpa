@@ -73,6 +73,26 @@ func (pm *PreferenceManager) List() ([]UserPreference, error) {
 	return pm.store.List()
 }
 
+// SetAuthorized grants or revokes bot access for a chat.
+func (pm *PreferenceManager) SetAuthorized(chatID int64, username string, authorized bool) error {
+	pref, err := pm.GetOrCreate(chatID, username)
+	if err != nil {
+		return err
+	}
+	pref.Authorized = authorized
+	pref.UpdatedAt = time.Now().UTC()
+	return pm.store.Save(pref)
+}
+
+// IsAuthorized reports whether a persisted user may access the bot.
+func (pm *PreferenceManager) IsAuthorized(chatID int64) (bool, error) {
+	pref, err := pm.store.Get(chatID)
+	if err != nil {
+		return false, err
+	}
+	return pref != nil && pref.Authorized, nil
+}
+
 // RecordDiscoveredChat saves a discovered chat (user who messaged the bot)
 // This is separate from whitelist authorization - it just tracks who contacted the bot
 func (pm *PreferenceManager) RecordDiscoveredChat(chatID int64, username string) error {

@@ -188,9 +188,9 @@ func TestWithMethods(t *testing.T) {
 }
 
 func TestBotRunnerSendRejectionsFansOutByEnabledPreferences(t *testing.T) {
-	fieldMinistry := preferences.UserPreference{ChatID: 101, Enabled: true}
+	fieldMinistry := preferences.UserPreference{ChatID: 101, Enabled: true, Authorized: true}
 	fieldMinistry.SetSections([]string{"Field Ministry"})
-	publicWitnessing := preferences.UserPreference{ChatID: 202, Enabled: true}
+	publicWitnessing := preferences.UserPreference{ChatID: 202, Enabled: true, Authorized: true}
 	publicWitnessing.SetSections([]string{"Public Witnessing"})
 	disabled := preferences.UserPreference{ChatID: 303, Enabled: false}
 	disabled.SetSections([]string{"Field Ministry", "Public Witnessing"})

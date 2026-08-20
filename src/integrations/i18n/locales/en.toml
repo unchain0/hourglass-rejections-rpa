@@ -45,7 +45,35 @@ other = "✅ Language changed successfully!"
 
 [help_commands]
 description = "Available commands list"
-other = "Available commands:\n/start - Welcome message\n/configure - Configure notification sections\n/status - View current preferences\n/stats - View bot statistics\n/whoami - View your account details\n/language - Change language\n/help - Show this message\n/checknow - Immediate check"
+other = "Available commands:\n/start - Welcome message\n/configure - Configure notification sections\n/status - View current preferences\n/stats - View bot statistics\n/whoami - View your account details\n/language - Change language\n/help - Show this message\n/checknow - Immediate check\n/allow <chat_id> - Authorize a user (admin only)\n/deny <chat_id> - Revoke a user's access (admin only)\n/users - List authorized users (admin only)"
+
+[admin_only]
+description = "Admin-only command warning"
+other = "Only the configured administrator can manage users."
+
+[invalid_user_id]
+description = "Invalid user ID argument"
+other = "Usage: /allow <chat_id> or /deny <chat_id>. The Chat ID must be a positive integer."
+
+[admin_always_authorized]
+description = "Administrator authorization warning"
+other = "The configured administrator is always authorized."
+
+[user_allowed]
+description = "User authorization confirmation"
+other = "User {{.ChatID}} is now authorized."
+
+[user_denied]
+description = "User authorization removal confirmation"
+other = "User {{.ChatID}} is no longer authorized."
+
+[authorized_users]
+description = "Authorized users list"
+other = "Authorized users: {{.Users}}"
+
+[user_management_error]
+description = "User management error"
+other = "Unable to update the user authorization. Please try again."
 
 [rate_limit_exceeded]
 description = "Rate limit warning"

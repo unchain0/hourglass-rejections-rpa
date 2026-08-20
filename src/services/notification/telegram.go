@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +67,7 @@ func (rl *rateLimiter) Allow(chatID int64) bool {
 type TelegramNotifier struct {
 	bot              *bot.Bot
 	chatID           int64
+	adminID          int64
 	whitelist        []int64
 	prefManager      *preferences.PreferenceManager
 	cancelFunc       context.CancelFunc
@@ -131,18 +133,34 @@ func NewTelegramNotifier(token string, chatID int64, whitelist []int64) (*Telegr
 	return &TelegramNotifier{
 		bot:         b,
 		chatID:      chatID,
+		adminID:     chatID,
 		whitelist:   whitelist,
 		rateLimiter: newRateLimiter(),
 		stats:       newBotStats(),
 	}, nil
 }
 
-// IsAuthorized checks if the chatID is in the whitelist.
+// IsAuthorized checks the configured admin or persisted user authorization.
 func (t *TelegramNotifier) IsAuthorized(chatID int64) bool {
+	if t.adminID == 0 && len(t.whitelist) == 0 {
+		return true
+	}
+	if chatID == t.adminID {
+		return true
+	}
+	if t.prefManager != nil {
+		authorized, err := t.prefManager.IsAuthorized(chatID)
+		return err == nil && authorized
+	}
+	// Preserve the constructor's legacy behavior before StartBot installs a manager.
 	if len(t.whitelist) == 0 {
 		return true
 	}
 	return slices.Contains(t.whitelist, chatID)
+}
+
+func (t *TelegramNotifier) isAdmin(chatID int64) bool {
+	return chatID == t.adminID
 }
 
 func (t *TelegramNotifier) SendNoRejectionsMessage(chatID int64, message string) error {
@@ -250,6 +268,9 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/language", bot.MatchTypeExact, t.handleLanguage)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, t.handleHelp)
 	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/checknow", bot.MatchTypeExact, t.handleCheckNow)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/allow", bot.MatchTypePrefix, t.handleAllow)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/deny", bot.MatchTypePrefix, t.handleDeny)
+	t.bot.RegisterHandler(bot.HandlerTypeMessageText, "/users", bot.MatchTypeExact, t.handleUsers)
 
 	// Register callback handlers for inline keyboard
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "section_", bot.MatchTypePrefix, t.handleSectionToggle)
@@ -266,6 +287,9 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 		{Command: "language", Description: "Change language"},
 		{Command: "help", Description: "Show available commands"},
 		{Command: "checknow", Description: "Immediate check"},
+		{Command: "allow", Description: "Authorize a user (admin only)"},
+		{Command: "deny", Description: "Revoke a user's access (admin only)"},
+		{Command: "users", Description: "List authorized users (admin only)"},
 	}
 
 	_, err := t.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{
@@ -362,6 +386,80 @@ func (t *TelegramNotifier) handleStart(ctx context.Context, b *bot.Bot, update *
 		Text:      text,
 		ParseMode: models.ParseModeHTML,
 	})
+}
+
+func parseChatIDArgument(text string) (int64, bool) {
+	parts := strings.Fields(text)
+	if len(parts) != 2 {
+		return 0, false
+	}
+	chatID, err := strconv.ParseInt(parts[1], 10, 64)
+	return chatID, err == nil && chatID > 0
+}
+
+func (t *TelegramNotifier) handleAuthorizationChange(ctx context.Context, b *bot.Bot, update *models.Update, authorized bool) {
+	if update.Message == nil {
+		return
+	}
+	chatID := update.Message.Chat.ID
+	lang := t.getUserLanguage(chatID)
+	if !t.isAdmin(chatID) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "admin_only", nil), ParseMode: models.ParseModeHTML})
+		return
+	}
+	targetID, ok := parseChatIDArgument(update.Message.Text)
+	if !ok || t.prefManager == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "invalid_user_id", nil), ParseMode: models.ParseModeHTML})
+		return
+	}
+	if targetID == t.adminID {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "admin_always_authorized", nil), ParseMode: models.ParseModeHTML})
+		return
+	}
+	if err := t.prefManager.SetAuthorized(targetID, "", authorized); err != nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "user_management_error", nil), ParseMode: models.ParseModeHTML})
+		return
+	}
+	messageKey := "user_denied"
+	if authorized {
+		messageKey = "user_allowed"
+	}
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, messageKey, map[string]any{"ChatID": targetID}), ParseMode: models.ParseModeHTML})
+}
+
+func (t *TelegramNotifier) handleAllow(ctx context.Context, b *bot.Bot, update *models.Update) {
+	t.handleAuthorizationChange(ctx, b, update, true)
+}
+
+func (t *TelegramNotifier) handleDeny(ctx context.Context, b *bot.Bot, update *models.Update) {
+	t.handleAuthorizationChange(ctx, b, update, false)
+}
+
+func (t *TelegramNotifier) handleUsers(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+	chatID := update.Message.Chat.ID
+	lang := t.getUserLanguage(chatID)
+	if !t.isAdmin(chatID) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "admin_only", nil), ParseMode: models.ParseModeHTML})
+		return
+	}
+	if t.prefManager == nil {
+		return
+	}
+	prefs, err := t.prefManager.List()
+	if err != nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "user_management_error", nil), ParseMode: models.ParseModeHTML})
+		return
+	}
+	ids := make([]string, 0, len(prefs))
+	for _, pref := range prefs {
+		if pref.Authorized {
+			ids = append(ids, fmt.Sprintf("%d", pref.ChatID))
+		}
+	}
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: i18n.Localize(lang, "authorized_users", map[string]any{"Users": strings.Join(ids, ", ")}), ParseMode: models.ParseModeHTML})
 }
 
 func (t *TelegramNotifier) handleConfig(ctx context.Context, b *bot.Bot, update *models.Update) {

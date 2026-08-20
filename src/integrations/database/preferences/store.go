@@ -31,6 +31,7 @@ type UserPreference struct {
 	Username     string `gorm:"size:255"`
 	SectionsJSON string `gorm:"column:sections"`
 	Enabled      bool   `gorm:"default:true"`
+	Authorized   bool   `gorm:"default:false;index"`
 	Language     string `gorm:"default:'en'"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
