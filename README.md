@@ -1,6 +1,6 @@
 # Hourglass Rejections RPA
 
-Lightweight Go automation that checks Hourglass for rejected assignments, stores operational history in PostgreSQL, and delivers notifications through a Telegram bot with per-user preferences.
+Lightweight Go automation that checks Hourglass for rejected assignments, stores operational history in SQLite or PostgreSQL, and delivers notifications through a Telegram bot with per-user preferences.
 
 ## What it does
 
@@ -189,6 +189,9 @@ The bot currently registers these commands:
 | `/language` | Change the bot language |
 | `/help` | List available commands |
 | `/checknow` | Trigger an immediate check |
+| `/allow <chat_id>` | Authorize a user (administrator only) |
+| `/deny <chat_id>` | Revoke a user's access (administrator only) |
+| `/users` | List authorized users (administrator only) |
 
 ## Development
 
@@ -196,11 +199,19 @@ Common local commands:
 
 ```bash
 make fmt
+make fmt-check
+make tidy
+make vet
 make lint
 make test
-make ci
+make vulncheck
 make build
 ```
+
+`make test` runs the race-enabled suite and enforces 100% statement coverage.
+`make ci` runs the complete CI command sequence. Before every push, Lefthook
+also runs the full test, build, lint, and vulnerability gates locally; a
+failing gate prevents the push from proceeding.
 
 After the daemon is running, use `/checknow` in Telegram for an immediate manual check.
 
@@ -215,20 +226,24 @@ This repository builds four binaries from `cmd/`:
 
 ```text
 cmd/                    entrypoints for the daemon and auth utilities
-internal/api/           Hourglass API client and analysis logic
-internal/auth/webauthn/ browser-assisted auth and token renewal
-internal/bot/           Telegram bot runner
-internal/notifier/      Telegram notification handlers
-internal/preferences/   per-user preference storage and operational history
-internal/scheduler/     periodic execution and notification dispatch
+src/domain_models/      shared contracts and result types
+src/engines/rejection_cache/ in-memory duplicate suppression
+src/integrations/auth/webauthn/ browser-assisted auth and token renewal
+src/integrations/database/ preference and operational-history storage
+src/integrations/i18n/ localized bot messages
+src/services/hourglass/ Hourglass API client and analysis logic
+src/services/bot/       Telegram bot lifecycle and manual checks
+src/services/notification/ Telegram/email delivery handlers
+src/services/scheduler/ periodic analysis and notification dispatch
 ```
 
 ## Additional project docs
 
 - `AGENTS.md` for a high-level maintainer map
-- `internal/api/AGENTS.md` for API client details
-- `internal/auth/webauthn/AGENTS.md` for auth and token renewal internals
-- `internal/notifier/AGENTS.md` for Telegram notifier details
+- `src/AGENTS.md` for shared source-tree conventions
+- `src/services/hourglass/AGENTS.md` for API client details
+- `src/integrations/auth/webauthn/AGENTS.md` for auth and token renewal internals
+- `src/services/notification/AGENTS.md` for Telegram notifier details
 
 ## License
 
