@@ -50,7 +50,7 @@ build-setup-auth:
 ## test: Run all tests
 test:
 	@echo "Running tests..."
-	$(GO) test $(GOFLAGS) -race -coverprofile=coverage.out ./...
+	$(GO) test $(GOFLAGS) -race -timeout 8m -coverprofile=coverage.out ./...
 	$(MAKE) coverage-check
 
 ## coverage-check: Require 100% statement coverage in every package

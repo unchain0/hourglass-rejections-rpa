@@ -62,8 +62,7 @@ pre-push:
     test:
       run: |
         env GOTOOLCHAIN=auto bash -c '
-          go test -short -race -timeout 5m -coverprofile=coverage.out ./...
-          bash scripts/check-coverage.sh coverage.out
+          make test
         '
     build:
       run: |
