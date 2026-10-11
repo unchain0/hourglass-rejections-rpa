@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	logglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -130,7 +129,7 @@ func New(cfg Config) (*Client, error) {
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
-	logglobal.SetLoggerProvider(logProvider)
+	otel.SetLoggerProvider(logProvider)
 
 	meter := meterProvider.Meter("hourglass-rejections-rpa/observability")
 	errorCounter, err := newErrorCounter(meter)
