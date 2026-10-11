@@ -11,7 +11,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
-	github.com/go-telegram/bot v1.19.0
+	github.com/go-telegram/bot v1.27.0
 	github.com/joho/godotenv v1.5.1
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/stretchr/testify v1.12.1
