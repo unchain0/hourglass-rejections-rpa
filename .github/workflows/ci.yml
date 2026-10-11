@@ -8,7 +8,7 @@ on:
 
 env:
   GOTOOLCHAIN: auto
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.26.9'
   GOLANGCI_VERSION: 'v2.1.6'
 
 jobs:

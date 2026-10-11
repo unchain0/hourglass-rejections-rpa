@@ -16,7 +16,7 @@ import (
 	"hourglass-rejections-rpa/src/integrations/database/preferences"
 	"hourglass-rejections-rpa/src/integrations/i18n"
 	"hourglass-rejections-rpa/src/integrations/monitoring/telemetry"
-	"hourglass-rejections-rpa/src/services/notification"
+	notifier "hourglass-rejections-rpa/src/services/notification"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
