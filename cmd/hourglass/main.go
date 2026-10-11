@@ -422,6 +422,10 @@ func (t *blocklistTransport) RoundTrip(req *http.Request) (*http.Response, error
 }
 func main() {
 	if err := Run(os.Args[1:]); err != nil {
+		if exitErr, ok := err.(*exitCode2Error); ok {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", exitErr.msg)
+			os.Exit(2)
+		}
 		if strings.Contains(err.Error(), "exit code 2") {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 			os.Exit(2)
