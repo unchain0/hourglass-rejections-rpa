@@ -34,7 +34,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -trimpath \
         -ldflags="-w -s" \
         -o /out/setup-auth \
-        ./cmd/setup-auth
+        ./cmd/setup-auth && \
+    go build -p=1 \
+        -trimpath \
+        -ldflags="-w -s" \
+        -o /out/hourglass \
+        ./cmd/hourglass
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 

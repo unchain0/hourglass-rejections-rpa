@@ -1,5 +1,6 @@
 # Binaries
 /rpa
+/hourglass
 /generate-key
 /save-tokens
 /setup-auth
@@ -79,3 +80,4 @@ hourglass-login-requests.txt
 HOOKS.md
 SECURITY.md
 docs/
+/evidence/

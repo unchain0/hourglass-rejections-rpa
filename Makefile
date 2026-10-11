@@ -1,11 +1,12 @@
 # Hourglass Rejections RPA Makefile
-.PHONY: all build build-rpa build-save-tokens build-token-refresh build-setup-auth test clean lint fmt vet coverage coverage-check docker-build docker-run docker-compose-up docker-compose-down docker-auth-bootstrap help run run-once save-tokens token-refresh setup-auth copy-to-vps copy-to-vps-password
+.PHONY: all build build-rpa build-save-tokens build-token-refresh build-setup-auth build-hourglass test clean lint fmt vet coverage coverage-check docker-build docker-run docker-compose-up docker-compose-down docker-auth-bootstrap help run run-once save-tokens token-refresh setup-auth copy-to-vps copy-to-vps-password
 
 # Variables
 BINARY_NAME=rpa
 SAVE_TOKENS_NAME=save-tokens
 TOKEN_REFRESH_NAME=token-refresh
 SETUP_AUTH_NAME=setup-auth
+HOURGLASS_NAME=hourglass
 BUILD_DIR=.
 DOCKER_IMAGE=hourglass-rejections-rpa
 APP_VERSION?=dev
@@ -25,7 +26,7 @@ help:
 	@grep -E '^##' $(MAKEFILE_LIST) | sed 's/## //'
 
 ## build: Build all binaries
-build: build-rpa build-save-tokens build-token-refresh build-setup-auth
+build: build-rpa build-save-tokens build-token-refresh build-setup-auth build-hourglass
 
 ## build-rpa: Build the main rpa binary
 build-rpa:
@@ -46,6 +47,11 @@ build-token-refresh:
 build-setup-auth:
 	@echo "Building $(SETUP_AUTH_NAME)..."
 	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(SETUP_AUTH_NAME) ./cmd/setup-auth
+
+## build-hourglass: Build the read-only hourglass CLI
+build-hourglass:
+	@echo "Building $(HOURGLASS_NAME)..."
+	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(HOURGLASS_NAME) ./cmd/hourglass
 
 ## test: Run all tests
 test:
@@ -113,7 +119,7 @@ tidy:
 ## clean: Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME) $(TOKEN_REFRESH_NAME) $(SETUP_AUTH_NAME) register-webauthn
+	@rm -f $(BINARY_NAME) $(SAVE_TOKENS_NAME) $(TOKEN_REFRESH_NAME) $(SETUP_AUTH_NAME) $(HOURGLASS_NAME) register-webauthn
 	@rm -f coverage.out coverage.html
 
 ## run: Run the application (requires .env)

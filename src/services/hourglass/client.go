@@ -59,6 +59,19 @@ func NewClient() *Client {
 	}
 }
 
+// SetTransport replaces the underlying HTTP transport.
+// This is exported so that callers (e.g. the CLI) can wrap the client's
+// transport with middleware such as the blocklist.
+func (c *Client) SetTransport(transport http.RoundTripper) {
+	c.httpClient.Transport = transport
+}
+
+// GetTransport returns the current underlying HTTP transport.
+// This is exported so that callers (e.g. the CLI) can inspect/wrap the transport.
+func (c *Client) GetTransport() http.RoundTripper {
+	return c.httpClient.Transport
+}
+
 func normalizeAPIBaseURL(baseURL string) string {
 	trimmed := strings.TrimRight(baseURL, "/")
 	if trimmed == "" {
@@ -187,7 +200,40 @@ func (c *Client) StopTokenManager() {
 	}
 }
 
-// ensureAuth ensures valid authentication tokens are available.
+// EnsureValidTokens ensures valid authentication tokens are available.
+func (c *Client) EnsureValidTokens() (*webauthn.AuthTokens, error) {
+	if !c.useWebAuthn || c.tokenManager == nil {
+		return nil, errors.New("webauthn authentication not enabled")
+	}
+	return c.tokenManager.EnsureValidTokens()
+}
+
+// LoadPersistedAuthTokens loads tokens from the manager's storage path into
+// memory and the client cookie fields without starting the renewal loop.
+func (c *Client) LoadPersistedAuthTokens() error {
+	if c.tokenManager == nil {
+		return nil
+	}
+	type tokenLoader interface {
+		LoadTokens() (*webauthn.AuthTokens, error)
+	}
+	loader, ok := c.tokenManager.(tokenLoader)
+	if !ok {
+		return nil
+	}
+	tokens, err := loader.LoadTokens()
+	if err != nil {
+		return err
+	}
+	if tokens == nil {
+		return nil
+	}
+	c.tokenManager.PrimeTokens(tokens)
+	c.updateTokens(tokens)
+	return nil
+}
+
+// ensureAuth ensures valid authentication tokens are available (internal use).
 func (c *Client) ensureAuth() error {
 	if !c.useWebAuthn || c.tokenManager == nil {
 		return nil
