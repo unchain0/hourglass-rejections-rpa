@@ -35,10 +35,10 @@ services:
       - .env
     environment:
       TZ: America/Sao_Paulo
-      CHROME_BIN: /usr/bin/chromium-browser
       TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
       WEBAUTHN_TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
       WEBAUTHN_CREDENTIALS_PATH: /home/rpa/.hourglass-rpa/webauthn-credentials.json
+      CHROME_BIN: ${CHROME_BIN:-}
       CHROME_PROFILE_DIR: ${CHROME_PROFILE_DIR:-}
       AUTO_REFRESH_TOKENS: ${AUTO_REFRESH_TOKENS:-true}
       POSTGRES_OLD_PASSWORD: ""
@@ -115,10 +115,10 @@ services:
         done
     environment:
       TZ: America/Sao_Paulo
-      CHROME_BIN: /usr/bin/chromium-browser
       TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
       WEBAUTHN_TOKENS_PATH: /home/rpa/.hourglass-rpa/auth-tokens.json
       WEBAUTHN_CREDENTIALS_PATH: /home/rpa/.hourglass-rpa/webauthn-credentials.json
+      CHROME_BIN: ${CHROME_BIN:-}
       CHROME_PROFILE_DIR: ${CHROME_PROFILE_DIR:-}
       REFRESH_INTERVAL: 6h
     volumes:

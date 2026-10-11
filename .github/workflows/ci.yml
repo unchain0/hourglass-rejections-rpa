@@ -195,10 +195,8 @@ jobs:
     - name: Smoke-test runtime image
       run: |
         docker run --rm --entrypoint /bin/sh hourglass-rejections-rpa:latest -ec '
-          chromium-browser --version
           test -x /app/rpa
-          test -x /app/save-tokens
           test -x /app/token-refresh
-          test -x /app/setup-auth
-          test -x /app/hourglass
+          command -v curl >/dev/null
+          command -v chromium-browser >/dev/null && exit 1 || true
         '
