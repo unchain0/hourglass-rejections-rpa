@@ -74,7 +74,7 @@ make run-once       # build and invoke rpa -once
 
 ## Known gaps
 
-- `Dockerfile` builds only `rpa`; Compose’s optional `token-refresh` service invokes `/app/token-refresh`, which is absent from that image.
+- `Dockerfile` ships `rpa` and `token-refresh` only (no Chromium). Interactive auth CLIs stay host-side via `make build` / `make setup-auth`.
 - Full mode constructs a scheduler but does not call `Scheduler.SetNotifier`; verify intended scheduled-delivery wiring before changing this path.
 - Working tests use `httptest`, hand-written interface mocks, `t.TempDir`, `t.Setenv`, and injected filesystem/browser functions. WebAuthn coverage is mostly mocked, but named Chrome cases remain excluded by hooks/CI.
 - Read the nearest child `AGENTS.md` before editing a documented boundary; child guidance overrides this root file for its package.
