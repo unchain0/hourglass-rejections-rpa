@@ -208,6 +208,31 @@ func (c *Client) EnsureValidTokens() (*webauthn.AuthTokens, error) {
 	return c.tokenManager.EnsureValidTokens()
 }
 
+// LoadPersistedAuthTokens loads tokens from the manager's storage path into
+// memory and the client cookie fields without starting the renewal loop.
+func (c *Client) LoadPersistedAuthTokens() error {
+	if c.tokenManager == nil {
+		return nil
+	}
+	type tokenLoader interface {
+		LoadTokens() (*webauthn.AuthTokens, error)
+	}
+	loader, ok := c.tokenManager.(tokenLoader)
+	if !ok {
+		return nil
+	}
+	tokens, err := loader.LoadTokens()
+	if err != nil {
+		return err
+	}
+	if tokens == nil {
+		return nil
+	}
+	c.tokenManager.PrimeTokens(tokens)
+	c.updateTokens(tokens)
+	return nil
+}
+
 // ensureAuth ensures valid authentication tokens are available (internal use).
 func (c *Client) ensureAuth() error {
 	if !c.useWebAuthn || c.tokenManager == nil {

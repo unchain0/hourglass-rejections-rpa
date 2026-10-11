@@ -51,6 +51,39 @@ func newCLI(stdout, stderr io.Writer, getenv func(string) string) *CLI {
 	}
 }
 
+// bootstrapWebAuthn wires credentials/tokens/profile env into the Hourglass client.
+// Enables the token manager and loads persisted tokens. Does not start the
+// background renewal loop; one-shot CLI calls use EnsureValidTokens on demand.
+func (c *CLI) bootstrapWebAuthn() func() {
+	credentialsPath := c.getenv("WEBAUTHN_CREDENTIALS_PATH")
+	tokensPath := c.getenv("WEBAUTHN_TOKENS_PATH")
+	if tokensPath == "" {
+		tokensPath = c.getenv("TOKENS_PATH")
+	}
+	profileDir := c.getenv("CHROME_PROFILE_DIR")
+	baseURL := c.getenv("HOURGLASS_URL")
+
+	if baseURL != "" {
+		c.client.SetBaseURL(baseURL)
+	}
+	if tokensPath != "" {
+		c.client.SetWebAuthnTokensPath(tokensPath)
+	}
+	if profileDir != "" {
+		c.client.SetBrowserProfileDir(profileDir)
+	}
+
+	if credentialsPath == "" && profileDir == "" && tokensPath == "" {
+		return nil
+	}
+
+	if err := c.client.EnableWebAuthn(credentialsPath, nil); err != nil {
+		return nil
+	}
+	_ = c.client.LoadPersistedAuthTokens()
+	return func() { c.client.StopTokenManager() }
+}
+
 // EnsureValidTokens reports current WebAuthn session tokens when configured.
 func (c *CLI) EnsureValidTokens() (*webauthn.AuthTokens, error) {
 	if c.ensureTokens != nil {
@@ -107,7 +140,8 @@ func (c *CLI) AuthStatus() error {
 	return nil
 }
 
-// AuthLogin checks that a passkey is registered; it never registers one.
+// AuthLogin runs headless passkey authentication when credentials exist.
+// It never registers a passkey; missing credentials exit 2 with setup-auth guidance.
 func (c *CLI) AuthLogin() error {
 	credentialsPath := c.getenv("WEBAUTHN_CREDENTIALS_PATH")
 	if credentialsPath == "" {
@@ -116,7 +150,14 @@ func (c *CLI) AuthLogin() error {
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
 		return exitCode2("passkey not registered: run setup-auth")
 	}
-	fmt.Fprintln(c.stdout, "passkey login: credentials present, ready for headless passkey authentication")
+	tokens, err := c.EnsureValidTokens()
+	if err != nil {
+		return fmt.Errorf("passkey login failed: %w", err)
+	}
+	if tokens == nil {
+		return errors.New("passkey login failed: no tokens returned")
+	}
+	fmt.Fprintf(c.stdout, "passkey login: ok, tokens valid until %s\n", tokens.ExpiresAt.Format(time.RFC3339))
 	return nil
 }
 
@@ -424,6 +465,9 @@ func isSendLikePath(rawPath string) bool {
 // run executes the CLI and returns a process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
 	cli := newCLI(stdout, stderr, os.Getenv)
+	if stop := cli.bootstrapWebAuthn(); stop != nil {
+		defer stop()
+	}
 	if err := cli.dispatch(args); err != nil {
 		var code2 *exitCode2Error
 		if errors.As(err, &code2) {

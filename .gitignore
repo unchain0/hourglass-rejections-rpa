@@ -1,5 +1,6 @@
 # Binaries
 /rpa
+/hourglass
 /generate-key
 /save-tokens
 /setup-auth

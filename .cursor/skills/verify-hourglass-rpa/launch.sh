@@ -20,6 +20,7 @@ go build -o "$SCRATCH/rpa" ./cmd/rpa
 go build -o "$SCRATCH/token-refresh" ./cmd/token-refresh
 go build -o "$SCRATCH/save-tokens" ./cmd/save-tokens
 go build -o "$SCRATCH/setup-auth" ./cmd/setup-auth
+go build -o "$SCRATCH/hourglass" ./cmd/hourglass
 
 echo "building verify harness (tags=verify)" >&2
 go build -tags verify -o "$SCRATCH/verify-harness" \

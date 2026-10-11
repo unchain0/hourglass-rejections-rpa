@@ -87,11 +87,138 @@ func TestRun_AuthLoginCredentialsPresent(t *testing.T) {
 	path := t.TempDir() + "/creds.json"
 	require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o600))
 	t.Setenv("WEBAUTHN_CREDENTIALS_PATH", path)
+	t.Setenv("WEBAUTHN_TOKENS_PATH", "")
+	t.Setenv("TOKENS_PATH", "")
+	t.Setenv("CHROME_PROFILE_DIR", "")
 
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"auth", "login"}, &stdout, &stderr)
-	assert.Equal(t, 0, code)
-	assert.Contains(t, stdout.String(), "credentials present")
+	var stdout bytes.Buffer
+	cli := newCLI(&stdout, io.Discard, os.Getenv)
+	expiry := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	cli.ensureTokens = func() (*webauthn.AuthTokens, error) {
+		return &webauthn.AuthTokens{
+			HGLogin:   "present",
+			XSRFToken: "present",
+			ExpiresAt: expiry,
+		}, nil
+	}
+	require.NoError(t, cli.AuthLogin())
+	assert.Contains(t, stdout.String(), "passkey login: ok")
+	assert.Contains(t, stdout.String(), expiry.Format(time.RFC3339))
+}
+
+func TestAuthLogin_EnsureTokensError(t *testing.T) {
+	path := t.TempDir() + "/creds.json"
+	require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o600))
+	t.Setenv("WEBAUTHN_CREDENTIALS_PATH", path)
+
+	cli := newCLI(io.Discard, io.Discard, os.Getenv)
+	cli.ensureTokens = func() (*webauthn.AuthTokens, error) {
+		return nil, errors.New("renew failed")
+	}
+	err := cli.AuthLogin()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "passkey login failed")
+}
+
+func TestAuthLogin_NilTokens(t *testing.T) {
+	path := t.TempDir() + "/creds.json"
+	require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o600))
+	t.Setenv("WEBAUTHN_CREDENTIALS_PATH", path)
+
+	cli := newCLI(io.Discard, io.Discard, os.Getenv)
+	cli.ensureTokens = func() (*webauthn.AuthTokens, error) {
+		return nil, nil
+	}
+	err := cli.AuthLogin()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no tokens returned")
+}
+
+func TestBootstrapWebAuthn_LoadsPersistedTokens(t *testing.T) {
+	dir := t.TempDir()
+	creds := dir + "/creds.json"
+	tokensPath := dir + "/tokens.json"
+	require.NoError(t, os.WriteFile(creds, []byte(`{}`), 0o600))
+
+	expiry := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+	payload, err := json.Marshal(webauthn.AuthTokens{
+		HGLogin:   "loaded-login",
+		XSRFToken: "loaded-xsrf",
+		ExpiresAt: expiry,
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(tokensPath, payload, 0o600))
+
+	getenv := func(key string) string {
+		switch key {
+		case "WEBAUTHN_CREDENTIALS_PATH":
+			return creds
+		case "WEBAUTHN_TOKENS_PATH":
+			return tokensPath
+		case "HOURGLASS_URL":
+			return "https://example.test"
+		default:
+			return ""
+		}
+	}
+	cli := newCLI(io.Discard, io.Discard, getenv)
+	stop := cli.bootstrapWebAuthn()
+	require.NotNil(t, stop)
+	t.Cleanup(stop)
+
+	tokens, err := cli.EnsureValidTokens()
+	require.NoError(t, err)
+	require.NotNil(t, tokens)
+	assert.Equal(t, "loaded-login", tokens.HGLogin)
+	assert.Equal(t, "loaded-xsrf", tokens.XSRFToken)
+}
+
+func TestBootstrapWebAuthn_NoConfig(t *testing.T) {
+	cli := newCLI(io.Discard, io.Discard, func(string) string { return "" })
+	assert.Nil(t, cli.bootstrapWebAuthn())
+}
+
+func TestBootstrapWebAuthn_ProfileAndTokensFallback(t *testing.T) {
+	dir := t.TempDir()
+	profile := dir + "/chrome-profile"
+	require.NoError(t, os.MkdirAll(profile, 0o700))
+	tokensPath := dir + "/from-tokens-path.json"
+
+	getenv := func(key string) string {
+		switch key {
+		case "CHROME_PROFILE_DIR":
+			return profile
+		case "TOKENS_PATH":
+			return tokensPath
+		case "WEBAUTHN_CREDENTIALS_PATH", "WEBAUTHN_TOKENS_PATH":
+			return ""
+		default:
+			return ""
+		}
+	}
+	cli := newCLI(io.Discard, io.Discard, getenv)
+	stop := cli.bootstrapWebAuthn()
+	require.NotNil(t, stop)
+	stop()
+}
+
+func TestBootstrapWebAuthn_EnableFailure(t *testing.T) {
+	// Force EnableWebAuthn to fail by making credentials path a file that cannot
+	// be used as a parent directory for NewStorage (path is an existing file).
+	dir := t.TempDir()
+	blocked := dir + "/not-a-dir"
+	require.NoError(t, os.WriteFile(blocked, []byte("x"), 0o600))
+	// storage path = blocked/creds.json -> MkdirAll(blocked) fails because blocked is a file
+	creds := blocked + "/creds.json"
+
+	getenv := func(key string) string {
+		if key == "WEBAUTHN_CREDENTIALS_PATH" {
+			return creds
+		}
+		return ""
+	}
+	cli := newCLI(io.Discard, io.Discard, getenv)
+	assert.Nil(t, cli.bootstrapWebAuthn())
 }
 
 func TestRun_AuthStatusNoSecrets(t *testing.T) {

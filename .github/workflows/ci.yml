@@ -157,6 +157,7 @@ jobs:
         go build -v -o save-tokens ./cmd/save-tokens
         go build -v -o token-refresh ./cmd/token-refresh
         go build -v -o setup-auth ./cmd/setup-auth
+        go build -v -o hourglass ./cmd/hourglass
     - name: Upload binaries
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
@@ -166,6 +167,7 @@ jobs:
           save-tokens
           token-refresh
           setup-auth
+          hourglass
         retention-days: 7
 
   docker:
@@ -198,4 +200,5 @@ jobs:
           test -x /app/save-tokens
           test -x /app/token-refresh
           test -x /app/setup-auth
+          test -x /app/hourglass
         '

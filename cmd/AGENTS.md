@@ -2,8 +2,9 @@
 
 ## OVERVIEW
 
-- Keep the four `package main` entrypoints thin and orchestration-focused.
+- Keep the `package main` entrypoints thin and orchestration-focused.
 - `rpa`: configures telemetry, persistence, Hourglass, bot, and scheduler. `-once` still delegates to the unimplemented `runOnceFn` stub; do not describe it as functional.
+- `hourglass`: read-only CLI over the Hourglass client with a send blocklist; bootstraps WebAuthn from env and never registers passkeys.
 - `setup-auth`: interactive visible-Chrome bootstrap, WebAuthn registration, token persistence, and optional confirmed SCP upload.
 - `save-tokens`: interactive visible-Chrome cookie extraction and masked token summary.
 - `token-refresh`: unattended token validation or renewal, controlled by refresh and auth-path environment settings.
