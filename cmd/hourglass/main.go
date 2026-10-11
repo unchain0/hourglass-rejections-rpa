@@ -4,36 +4,61 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"hourglass-rejections-rpa/src/services/hourglass"
 	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
+	"hourglass-rejections-rpa/src/services/hourglass"
 )
 
-// CLI represents the read-only hourglass CLI.
+var (
+	osExit      = os.Exit
+	marshalJSON = json.Marshal
+)
+
+// CLI is the read-only Hourglass command-line surface.
 type CLI struct {
-	client *hourglass.Client
+	client       *hourglass.Client
+	stdout       io.Writer
+	stderr       io.Writer
+	getenv       func(string) string
+	ensureTokens func() (*webauthn.AuthTokens, error)
 }
 
-// NewCLI creates a new CLI instance configured for the Hourglass API.
+// NewCLI creates a CLI whose every HTTP request passes through the send blocklist.
 func NewCLI() *CLI {
-	client := hourglass.NewClient()
-	// We cannot directly wrap the client's unexported httpClient transport.
-	// The blocklist transport will be applied at the test/server level via
-	// newHTTPTestServer's in-memory round tripper, and at the HTTP client
-	// level when HOURGLASS_ALLOW_SEND is set.
-	return &CLI{client: client}
+	return newCLI(os.Stdout, os.Stderr, os.Getenv)
 }
 
-// EnsureValidTokens wraps the client's EnsureValidTokens for CLI use.
+func newCLI(stdout, stderr io.Writer, getenv func(string) string) *CLI {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	client := hourglass.NewClient()
+	allowSend := getenv("HOURGLASS_ALLOW_SEND") == "1"
+	client.SetTransport(&blocklistTransport{
+		base:      client.GetTransport(),
+		allowSend: allowSend,
+	})
+	return &CLI{
+		client: client,
+		stdout: stdout,
+		stderr: stderr,
+		getenv: getenv,
+	}
+}
+
+// EnsureValidTokens reports current WebAuthn session tokens when configured.
 func (c *CLI) EnsureValidTokens() (*webauthn.AuthTokens, error) {
+	if c.ensureTokens != nil {
+		return c.ensureTokens()
+	}
 	return c.client.EnsureValidTokens()
 }
 
-// exitCode2 wraps an error to cause exit code 2
 type exitCode2Error struct {
 	msg string
 }
@@ -42,26 +67,26 @@ func (e *exitCode2Error) Error() string {
 	return e.msg
 }
 
-func exitCode2(msg string) *exitCode2Error {
+func exitCode2(msg string) error {
 	return &exitCode2Error{msg: msg}
 }
 
-// AuthStatus reports the presence/validity/expiry of credentials and tokens.
+// AuthStatus reports credential/token presence without printing secret values.
 func (c *CLI) AuthStatus() error {
-	credentialsPath := os.Getenv("WEBAUTHN_CREDENTIALS_PATH")
-	tokensPath := os.Getenv("WEBAUTHN_TOKENS_PATH")
+	credentialsPath := c.getenv("WEBAUTHN_CREDENTIALS_PATH")
+	tokensPath := c.getenv("WEBAUTHN_TOKENS_PATH")
 
-	hasCredentials := credentialsPath != ""
-	hasTokens := tokensPath != ""
-
-	status := map[string]interface{}{
+	status := map[string]any{
 		"webauthn_credentials_path": credentialsPath,
 		"tokens_path":               tokensPath,
-		"has_credentials":         hasCredentials,
-		"has_tokens":                hasTokens,
+		"has_credentials":           credentialsPath != "",
+		"has_tokens":                tokensPath != "",
 	}
 
-	if hasTokens {
+	if tokensPath == "" {
+		status["tokens_valid"] = false
+		status["tokens_error"] = "no tokens path configured"
+	} else {
 		tokens, err := c.EnsureValidTokens()
 		if err != nil {
 			status["tokens_valid"] = false
@@ -72,365 +97,345 @@ func (c *CLI) AuthStatus() error {
 			status["hglogin_present"] = tokens.HGLogin != ""
 			status["xsrf_present"] = tokens.XSRFToken != ""
 		}
-	} else {
-		status["tokens_valid"] = false
-		status["tokens_error"] = "no tokens path configured"
 	}
 
-	out, _ := json.Marshal(status)
-	fmt.Println(string(out))
+	out, err := marshalJSON(status)
+	if err != nil {
+		return fmt.Errorf("failed to marshal auth status: %w", err)
+	}
+	fmt.Fprintln(c.stdout, string(out))
 	return nil
 }
 
-// AuthLogin performs headless passkey login via WebAuthn.
+// AuthLogin checks that a passkey is registered; it never registers one.
 func (c *CLI) AuthLogin() error {
-	credentialsPath := os.Getenv("WEBAUTHN_CREDENTIALS_PATH")
-
+	credentialsPath := c.getenv("WEBAUTHN_CREDENTIALS_PATH")
 	if credentialsPath == "" {
 		return exitCode2("passkey not registered: run setup-auth")
 	}
-
-	// Check if passkey is registered by checking the credentials file
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
 		return exitCode2("passkey not registered: run setup-auth")
 	}
-
-	// Credentials exist but we do NOT register any passkey here.
-	// Just report that login is ready.
-	fmt.Println("passkey login: credentials present, ready for headless passkey authentication")
+	fmt.Fprintln(c.stdout, "passkey login: credentials present, ready for headless passkey authentication")
 	return nil
 }
 
-// Users retrieves all users from the Hourglass system (GET /fsreport/users).
+// Users prints GET /fsreport/users as JSON.
 func (c *CLI) Users() error {
 	users, err := c.client.GetUsers()
 	if err != nil {
 		return fmt.Errorf("failed to get users: %w", err)
 	}
-
-	out, err := json.Marshal(users)
-	if err != nil {
-		return fmt.Errorf("failed to marshal users: %w", err)
-	}
-	fmt.Println(string(out))
-	return nil
+	return c.printJSON(users)
 }
 
-// ScheduleMeetings retrieves meeting schedules for a date range
-// (GET /scheduling/mm/meeting/{start}_{end}).
+// ScheduleMeetings prints GET /scheduling/mm/meeting/{start}_{end} as JSON.
 func (c *CLI) ScheduleMeetings(start, end string, lgroup int) error {
 	meetings, err := c.client.GetMeetings(start, end, lgroup)
 	if err != nil {
 		return fmt.Errorf("failed to get meetings: %w", err)
 	}
-
-	out, err := json.Marshal(meetings)
-	if err != nil {
-		return fmt.Errorf("failed to marshal meetings: %w", err)
-	}
-	fmt.Println(string(out))
-	return nil
+	return c.printJSON(meetings)
 }
 
-// ScheduleAVAttendants retrieves mechanical assignments for a date range
-// (GET /scheduling/av_attendant/{start}_{end}).
+// ScheduleAVAttendants prints GET /scheduling/av_attendant/{start}_{end} as JSON.
 func (c *CLI) ScheduleAVAttendants(start, end string) error {
 	attendants, err := c.client.GetAVAttendants(start, end)
 	if err != nil {
 		return fmt.Errorf("failed to get AV attendants: %w", err)
 	}
-
-	out, err := json.Marshal(attendants)
-	if err != nil {
-		return fmt.Errorf("failed to marshal AV attendants: %w", err)
-	}
-	fmt.Println(string(out))
-	return nil
+	return c.printJSON(attendants)
 }
 
-// ScheduleNotifications retrieves notifications for a date range and type
-// (GET /scheduling/notifications/{start}_{end}/{type}).
+// ScheduleNotifications prints GET /scheduling/notifications/{start}_{end}/{type} as JSON.
 func (c *CLI) ScheduleNotifications(start, end, notifType string) error {
 	notifications, err := c.client.GetNotifications(start, end, notifType)
 	if err != nil {
 		return fmt.Errorf("failed to get notifications: %w", err)
 	}
+	return c.printJSON(notifications)
+}
 
-	out, err := json.Marshal(notifications)
+func (c *CLI) printJSON(v any) error {
+	out, err := marshalJSON(v)
 	if err != nil {
-		return fmt.Errorf("failed to marshal notifications: %w", err)
+		return fmt.Errorf("failed to marshal response: %w", err)
 	}
-	fmt.Println(string(out))
+	fmt.Fprintln(c.stdout, string(out))
 	return nil
 }
 
-// ScheduleWM stub - exits 2 with "not implemented yet: endpoint not discovered"
+// ScheduleWM is not implemented yet.
 func (c *CLI) ScheduleWM() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
-// Privileges stub - exits 2 with "not implemented yet: endpoint not discovered"
+// Privileges is not implemented yet.
 func (c *CLI) Privileges() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
-// Assign stub - dry-run by default, exits 2 with "not implemented yet: endpoint not discovered"
-// Requires --apply flag even in the stub (handled at CLI level)
+// Assign is not implemented yet; dry-run unless --apply is supplied by the caller.
 func (c *CLI) Assign() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
-// Unassign stub - dry-run by default, exits 2 with "not implemented yet: endpoint not discovered"
-// Requires --apply flag even in the stub (handled at CLI level)
+// Unassign is not implemented yet; dry-run unless --apply is supplied by the caller.
 func (c *CLI) Unassign() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
-// CheckRules stub - exits 2 with "not implemented yet: endpoint not discovered"
+// CheckRules is not implemented yet.
 func (c *CLI) CheckRules() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
-// Run executes the CLI with the given arguments.
-func Run(args []string) error {
-	cli := NewCLI()
-
+func (c *CLI) dispatch(args []string) error {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: hourglass <command> [args...]\n")
+		fmt.Fprintf(c.stderr, "Usage: hourglass <command> [args...]\n")
 		return errors.New("no command provided")
 	}
 
-	command := args[0]
-	remainingArgs := args[1:]
-
-	switch command {
+	switch args[0] {
 	case "auth":
-		return cli.runAuth(remainingArgs)
+		return c.runAuth(args[1:])
 	case "users":
-		return cli.runUsers(remainingArgs)
+		return c.runUsers(args[1:])
 	case "schedule":
-		return cli.runSchedule(remainingArgs)
+		return c.runSchedule(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
+		fmt.Fprintf(c.stderr, "Unknown command: %s\n", args[0])
 		return errors.New("unknown command")
 	}
 }
 
-// exit2 wraps Run to convert exitCode2 errors to exit code 2
-func exit2(err error) error {
-	if exitErr, ok := err.(*exitCode2Error); ok {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", exitErr.Error())
-		return fmt.Errorf("exit code 2: %s", exitErr.Error())
-	}
-	return err
-}
-
 func (c *CLI) runAuth(args []string) error {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: hourglass auth <status|login>\n")
+		fmt.Fprintf(c.stderr, "Usage: hourglass auth <status|login>\n")
 		return errors.New("no auth subcommand provided")
 	}
-
-	subcommand := args[0]
-
-	switch subcommand {
+	switch args[0] {
 	case "status":
 		return c.AuthStatus()
 	case "login":
 		return c.AuthLogin()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown auth subcommand: %s\n", subcommand)
-		fmt.Fprintf(os.Stderr, "Usage: hourglass auth <status|login>\n")
+		fmt.Fprintf(c.stderr, "Unknown auth subcommand: %s\n", args[0])
+		fmt.Fprintf(c.stderr, "Usage: hourglass auth <status|login>\n")
 		return errors.New("unknown auth subcommand")
 	}
 }
 
 func (c *CLI) runUsers(args []string) error {
 	jsonFlag := false
-
 	for _, arg := range args {
 		if arg == "--json" {
 			jsonFlag = true
 		}
 	}
-
-	if jsonFlag {
-		return c.Users()
+	if !jsonFlag {
+		fmt.Fprintf(c.stderr, "Usage: hourglass users --json\n")
+		return errors.New("missing --json flag")
 	}
-
-	fmt.Fprintf(os.Stderr, "Usage: hourglass users --json\n[--from YYYY-MM-DD] [--to YYYY-MM-DD] [--lgroup N]\n")
-	return errors.New("missing --json flag")
+	return c.Users()
 }
 
-func (c *CLI) runSchedule(args []string) error {
-	var subcommand string
-	var fromDate, toDate string
-	var lgroup int
-	var notifType string
-	var apply bool
+type scheduleArgs struct {
+	subcommand string
+	fromDate   string
+	toDate     string
+	lgroup     int
+	notifType  string
+	apply      bool
+}
 
-	i := 0
-	for i < len(args) {
+func parseScheduleArgs(args []string) (scheduleArgs, error) {
+	var parsed scheduleArgs
+	for i := 0; i < len(args); {
 		switch args[i] {
-		case "wm":
-			subcommand = "wm"
-			i++
-		case "privileges":
-			subcommand = "privileges"
-			i++
-		case "assign":
-			subcommand = "assign"
-			apply = true
-			i++
-		case "unassign":
-			subcommand = "unassign"
-			apply = true
-			i++
-		case "check-rules":
-			subcommand = "check-rules"
-			i++
-		case "mm":
-			subcommand = "mm"
-			i++
-		case "av":
-			subcommand = "av"
-			i++
-		case "notifications":
-			subcommand = "notifications"
+		case "wm", "privileges", "assign", "unassign", "check-rules", "mm", "av", "notifications":
+			parsed.subcommand = args[i]
 			i++
 		case "--from":
-			if i+1 < len(args) {
-				fromDate = args[i+1]
-				i += 2
+			val, next, err := takeFlagValue(args, i, "--from")
+			if err != nil {
+				return parsed, err
 			}
+			parsed.fromDate = val
+			i = next
 		case "--to":
-			if i+1 < len(args) {
-				toDate = args[i+1]
-				i += 2
+			val, next, err := takeFlagValue(args, i, "--to")
+			if err != nil {
+				return parsed, err
 			}
+			parsed.toDate = val
+			i = next
 		case "--lgroup":
-			if i+1 < len(args) {
-				_, err := fmt.Sscanf(args[i+1], "%d", &lgroup)
-				if err != nil {
-					lgroup = 0
-				}
-				i += 2
+			val, next, err := takeFlagValue(args, i, "--lgroup")
+			if err != nil {
+				return parsed, err
 			}
+			if _, err := fmt.Sscanf(val, "%d", &parsed.lgroup); err != nil {
+				parsed.lgroup = 0
+			}
+			i = next
 		case "--type":
-			if i+1 < len(args) {
-				notifType = args[i+1]
-				i += 2
+			val, next, err := takeFlagValue(args, i, "--type")
+			if err != nil {
+				return parsed, err
 			}
+			parsed.notifType = val
+			i = next
 		case "--apply":
-			apply = true
+			parsed.apply = true
+			i++
+		case "--json":
 			i++
 		default:
 			i++
 		}
 	}
+	return parsed, nil
+}
 
-	switch subcommand {
+func takeFlagValue(args []string, i int, name string) (string, int, error) {
+	if i+1 >= len(args) {
+		return "", i, fmt.Errorf("missing value for %s", name)
+	}
+	return args[i+1], i + 2, nil
+}
+
+func (c *CLI) runSchedule(args []string) error {
+	parsed, err := parseScheduleArgs(args)
+	if err != nil {
+		return err
+	}
+	return c.dispatchSchedule(parsed)
+}
+
+func (c *CLI) dispatchSchedule(parsed scheduleArgs) error {
+	switch parsed.subcommand {
 	case "wm":
-		return exit2(c.ScheduleWM())
+		return c.ScheduleWM()
 	case "privileges":
-		return exit2(c.Privileges())
+		return c.Privileges()
 	case "assign":
-		if !apply {
-			fmt.Fprintf(os.Stderr, "Info: assign running in dry-run mode (use --apply to attempt actual operation)\n")
-		}
-		return exit2(c.Assign())
+		return c.runAssignLike("assign", parsed.apply, c.Assign)
 	case "unassign":
-		if !apply {
-			fmt.Fprintf(os.Stderr, "Info: unassign running in dry-run mode (use --apply to attempt actual operation)\n")
-		}
-		return exit2(c.Unassign())
+		return c.runAssignLike("unassign", parsed.apply, c.Unassign)
 	case "check-rules":
-		return exit2(c.CheckRules())
+		return c.CheckRules()
 	case "mm":
-		if fromDate == "" || toDate == "" {
-			fmt.Fprintf(os.Stderr, "Usage: hourglass schedule mm --from YYYY-MM-DD --to YYYY-MM-DD [--lgroup N] --json\n")
-			return errors.New("missing required flags")
-		}
-		return exit2(c.ScheduleMeetings(fromDate, toDate, lgroup))
+		return c.runScheduleMM(parsed)
 	case "av":
-		if fromDate == "" || toDate == "" {
-			fmt.Fprintf(os.Stderr, "Usage: hourglass schedule av --from YYYY-MM-DD --to YYYY-MM-DD --json\n")
-			return errors.New("missing required flags")
-		}
-		return exit2(c.ScheduleAVAttendants(fromDate, toDate))
+		return c.runScheduleAV(parsed)
 	case "notifications":
-		if fromDate == "" || toDate == "" || notifType == "" {
-			fmt.Fprintf(os.Stderr, "Usage: hourglass notifications --from --to --type accepted|declined --json\n")
-			return errors.New("missing required flags")
-		}
-		if notifType != "accepted" && notifType != "declined" {
-			fmt.Fprintf(os.Stderr, "Invalid type: %s. Use 'accepted' or 'declined'\n", notifType)
-			return errors.New("invalid notification type")
-		}
-		return exit2(c.ScheduleNotifications(fromDate, toDate, notifType))
+		return c.runScheduleNotifications(parsed)
 	default:
-		if subcommand == "" {
-			fmt.Fprintf(os.Stderr, "Usage: hourglass schedule <wm|privileges|assign|unassign|check-rules|mm|av|notifications> [flags]\n")
-		} else {
-			fmt.Fprintf(os.Stderr, "Unknown schedule subcommand: %s\n", subcommand)
-		}
+		fmt.Fprintf(c.stderr, "Usage: hourglass schedule <wm|privileges|assign|unassign|check-rules|mm|av|notifications> [flags]\n")
 		return errors.New("unknown schedule subcommand")
 	}
 }
 
-// blocklistTransport middleware that refuses non-GET requests and send-like paths.
+func (c *CLI) runAssignLike(name string, apply bool, fn func() error) error {
+	if !apply {
+		fmt.Fprintf(c.stderr, "Info: %s running in dry-run mode (use --apply to attempt actual operation)\n", name)
+	}
+	return fn()
+}
+
+func (c *CLI) runScheduleMM(parsed scheduleArgs) error {
+	if parsed.fromDate == "" || parsed.toDate == "" {
+		fmt.Fprintf(c.stderr, "Usage: hourglass schedule mm --from YYYY-MM-DD --to YYYY-MM-DD [--lgroup N] --json\n")
+		return errors.New("missing required flags")
+	}
+	return c.ScheduleMeetings(parsed.fromDate, parsed.toDate, parsed.lgroup)
+}
+
+func (c *CLI) runScheduleAV(parsed scheduleArgs) error {
+	if parsed.fromDate == "" || parsed.toDate == "" {
+		fmt.Fprintf(c.stderr, "Usage: hourglass schedule av --from YYYY-MM-DD --to YYYY-MM-DD --json\n")
+		return errors.New("missing required flags")
+	}
+	return c.ScheduleAVAttendants(parsed.fromDate, parsed.toDate)
+}
+
+func (c *CLI) runScheduleNotifications(parsed scheduleArgs) error {
+	if parsed.fromDate == "" || parsed.toDate == "" || parsed.notifType == "" {
+		fmt.Fprintf(c.stderr, "Usage: hourglass schedule notifications --from YYYY-MM-DD --to YYYY-MM-DD --type accepted|declined --json\n")
+		return errors.New("missing required flags")
+	}
+	if parsed.notifType != "accepted" && parsed.notifType != "declined" {
+		fmt.Fprintf(c.stderr, "Invalid type: %s. Use 'accepted' or 'declined'\n", parsed.notifType)
+		return errors.New("invalid notification type")
+	}
+	return c.ScheduleNotifications(parsed.fromDate, parsed.toDate, parsed.notifType)
+}
+
+// blocklistTransport refuses mutating HTTP methods and send-like paths unless allowSend is set.
 type blocklistTransport struct {
-	Transport http.RoundTripper
+	base      http.RoundTripper
 	allowSend bool
 }
 
 func (t *blocklistTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Check if HOURGLASS_ALLOW_SEND is set
-	if os.Getenv("HOURGLASS_ALLOW_SEND") == "" {
-		t.allowSend = false
-	} else {
-		t.allowSend = true
-	}
-
-	// Refuse non-GET requests unless allow_send is 1
-	if req.Method != http.MethodGet && !t.allowSend {
-		return nil, fmt.Errorf("send operations blocked: %s %s", req.Method, req.URL.Path)
-	}
-
-	// Refuse paths matching notify|notification/send|send|publish|email
-	// except the existing GET notifications read path
-	blockedPaths := []string{
-		"notify",
-		"notification/send",
-		"send",
-		"publish",
-		"email",
-	}
-
-	path := strings.ToLower(req.URL.Path)
-	for _, blocked := range blockedPaths {
-		if strings.Contains(path, blocked) {
-			// Allow the GET /scheduling/notifications read endpoint
-			if req.Method == http.MethodGet && strings.HasPrefix(path, "scheduling/notifications") {
-				continue
-			}
+	if !t.allowSend {
+		switch req.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			return nil, fmt.Errorf("send operations blocked: %s %s", req.Method, req.URL.Path)
+		}
+		if isSendLikePath(req.URL.Path) {
 			return nil, fmt.Errorf("send operation blocked: %s %s", req.Method, req.URL.Path)
 		}
 	}
 
-	return t.Transport.RoundTrip(req)
-}
-func main() {
-	if err := Run(os.Args[1:]); err != nil {
-		if exitErr, ok := err.(*exitCode2Error); ok {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", exitErr.msg)
-			os.Exit(2)
-		}
-		if strings.Contains(err.Error(), "exit code 2") {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-			os.Exit(2)
-		}
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
 	}
+	return base.RoundTrip(req)
+}
+
+func isSendLikePath(rawPath string) bool {
+	path := strings.ToLower(strings.Trim(rawPath, "/"))
+	if path == "" {
+		return false
+	}
+
+	// Legitimate read endpoint: GET /scheduling/notifications/...
+	if path == "scheduling/notifications" || strings.HasPrefix(path, "scheduling/notifications/") {
+		return false
+	}
+
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		switch segment {
+		case "notify", "send", "publish", "email":
+			return true
+		case "notification":
+			if i+1 < len(segments) && segments[i+1] == "send" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// run executes the CLI and returns a process exit code.
+func run(args []string, stdout, stderr io.Writer) int {
+	cli := newCLI(stdout, stderr, os.Getenv)
+	if err := cli.dispatch(args); err != nil {
+		var code2 *exitCode2Error
+		if errors.As(err, &code2) {
+			fmt.Fprintf(stderr, "Error: %s\n", code2.msg)
+			return 2
+		}
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func main() {
+	osExit(run(os.Args[1:], os.Stdout, os.Stderr))
 }

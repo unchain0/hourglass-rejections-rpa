@@ -59,6 +59,19 @@ func NewClient() *Client {
 	}
 }
 
+// SetTransport replaces the underlying HTTP transport.
+// This is exported so that callers (e.g. the CLI) can wrap the client's
+// transport with middleware such as the blocklist.
+func (c *Client) SetTransport(transport http.RoundTripper) {
+	c.httpClient.Transport = transport
+}
+
+// GetTransport returns the current underlying HTTP transport.
+// This is exported so that callers (e.g. the CLI) can inspect/wrap the transport.
+func (c *Client) GetTransport() http.RoundTripper {
+	return c.httpClient.Transport
+}
+
 func normalizeAPIBaseURL(baseURL string) string {
 	trimmed := strings.TrimRight(baseURL, "/")
 	if trimmed == "" {
