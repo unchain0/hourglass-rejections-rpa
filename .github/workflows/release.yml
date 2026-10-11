@@ -10,7 +10,7 @@ permissions:
 
 env:
   GOTOOLCHAIN: auto
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.26.9'
 
 jobs:
   release:
