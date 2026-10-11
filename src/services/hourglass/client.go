@@ -187,7 +187,15 @@ func (c *Client) StopTokenManager() {
 	}
 }
 
-// ensureAuth ensures valid authentication tokens are available.
+// EnsureValidTokens ensures valid authentication tokens are available.
+func (c *Client) EnsureValidTokens() (*webauthn.AuthTokens, error) {
+	if !c.useWebAuthn || c.tokenManager == nil {
+		return nil, errors.New("webauthn authentication not enabled")
+	}
+	return c.tokenManager.EnsureValidTokens()
+}
+
+// ensureAuth ensures valid authentication tokens are available (internal use).
 func (c *Client) ensureAuth() error {
 	if !c.useWebAuthn || c.tokenManager == nil {
 		return nil
