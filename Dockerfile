@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS builder
+FROM golang:1.26.9-alpine3.23@sha256:6750308561953d451210ed1a8086d36c8c8bdcbf672d38d9d0d424b8a7a0216c AS builder
 
 ARG APP_VERSION=dev
 ARG VCS_REF=unknown
@@ -34,7 +34,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -trimpath \
         -ldflags="-w -s" \
         -o /out/setup-auth \
-        ./cmd/setup-auth
+        ./cmd/setup-auth && \
+    go build -p=1 \
+        -trimpath \
+        -ldflags="-w -s" \
+        -o /out/hourglass \
+        ./cmd/hourglass
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
