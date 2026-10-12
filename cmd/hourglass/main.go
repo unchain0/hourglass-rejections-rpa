@@ -403,11 +403,12 @@ func (c *CLI) runScheduleAV(parsed scheduleArgs) error {
 
 func (c *CLI) runScheduleNotifications(parsed scheduleArgs) error {
 	if parsed.fromDate == "" || parsed.toDate == "" || parsed.notifType == "" {
-		fmt.Fprintf(c.stderr, "Usage: hourglass schedule notifications --from YYYY-MM-DD --to YYYY-MM-DD --type accepted|declined --json\n")
+		fmt.Fprintf(c.stderr, "Usage: hourglass schedule notifications --from YYYY-MM-DD --to YYYY-MM-DD --type mm|ava|fm|pubwit [--json]\n")
 		return errors.New("missing required flags")
 	}
-	if parsed.notifType != "accepted" && parsed.notifType != "declined" {
-		fmt.Fprintf(c.stderr, "Invalid type: %s. Use 'accepted' or 'declined'\n", parsed.notifType)
+	valid := map[string]bool{"mm": true, "ava": true, "fm": true, "pubwit": true}
+	if !valid[parsed.notifType] {
+		fmt.Fprintf(c.stderr, "Invalid type: %s. Use mm, ava, fm, pubwit\n", parsed.notifType)
 		return errors.New("invalid notification type")
 	}
 	return c.ScheduleNotifications(parsed.fromDate, parsed.toDate, parsed.notifType)

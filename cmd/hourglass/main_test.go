@@ -324,7 +324,7 @@ func TestReadCommands_HTTPTestServer(t *testing.T) {
 		{"users", []string{"users", "--json"}, "Ada"},
 		{"schedule mm", []string{"schedule", "mm", "--from", "2026-01-01", "--to", "2026-01-31", "--lgroup", "1", "--json"}, "2026-01-01"},
 		{"schedule av", []string{"schedule", "av", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, "video"},
-		{"schedule notifications", []string{"schedule", "notifications", "--from", "2026-01-01", "--to", "2026-01-31", "--type", "declined", "--json"}, "declined"},
+		{"schedule notifications", []string{"schedule", "notifications", "--from", "2026-01-01", "--to", "2026-01-31", "--type", "pubwit", "--json"}, "pubwit"},
 	}
 
 	for _, tc := range cases {
@@ -351,7 +351,7 @@ func TestReadCommands_Errors(t *testing.T) {
 	assert.Error(t, cli.Users())
 	assert.Error(t, cli.ScheduleMeetings("2026-01-01", "2026-01-31", 0))
 	assert.Error(t, cli.ScheduleAVAttendants("2026-01-01", "2026-01-31"))
-	assert.Error(t, cli.ScheduleNotifications("2026-01-01", "2026-01-31", "declined"))
+	assert.Error(t, cli.ScheduleNotifications("2026-01-01", "2026-01-31", "mm"))
 }
 
 func TestPrintJSON_MarshalError(t *testing.T) {
@@ -374,7 +374,7 @@ func TestRun_ScheduleValidation(t *testing.T) {
 		{"mm missing flags", []string{"schedule", "mm", "--json"}, "missing required flags"},
 		{"av missing flags", []string{"schedule", "av"}, "missing required flags"},
 		{"notifications missing flags", []string{"schedule", "notifications", "--from", "2026-01-01"}, "missing required flags"},
-		{"notifications bad type", []string{"schedule", "notifications", "--from", "a", "--to", "b", "--type", "other"}, "invalid notification type"},
+		{"notifications bad type", []string{"schedule", "notifications", "--from", "a", "--to", "b", "--type", "accepted"}, "invalid notification type"},
 		{"no subcommand", []string{"schedule"}, "unknown schedule subcommand"},
 		{"missing from value", []string{"schedule", "mm", "--from"}, "missing value for --from"},
 		{"missing to value", []string{"schedule", "mm", "--to"}, "missing value for --to"},
