@@ -338,6 +338,74 @@ func (c *Client) GetNotifications(start, end, notificationType string) ([]Notifi
 	return notifications, nil
 }
 
+// WMAssignment represents a Watchtower Meeting assignment.
+type WMAssignment struct {
+	ID        int       `json:"id"`
+	Role      string    `json:"role"`     // chairman, reader, speaker, prayers
+	Assignee  *int      `json:"assignee"` // Nullable - user ID or null if vacant
+	Status    string    `json:"status"`   // Aceito, Esperando, NaoEnviado, Recusado
+	Date      string    `json:"date"`     // Format: "2026-01-01"
+	Extra     bool      `json:"extra"`
+	Confirmed bool      `json:"confirmed"`
+	Published bool      `json:"published"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GetWM retrieves Watchtower Meeting assignments for a date range.
+// Endpoint: GET /api/v0.2/scheduling/wm/{start}_{end}
+func (c *Client) GetWM(start, end string) ([]WMAssignment, error) {
+	url := fmt.Sprintf("%s/scheduling/wm/%s_%s", c.baseURL, start, end)
+	var wm []WMAssignment
+	if err := c.getJSON(url, &wm); err != nil {
+		return nil, err
+	}
+	return wm, nil
+}
+
+// PrivilegeAssignment represents a privilege/assignment status.
+type PrivilegeAssignment struct {
+	ID        int    `json:"id"`
+	Type      string `json:"type"`     // e.g., "chairman", "reader", "speaker", "prayers"
+	Assignee  *int   `json:"assignee"` // Nullable - user ID or null if vacant
+	Status    string `json:"status"`   // Aceito, Esperando, NaoEnviado, Recusado
+	Date      string `json:"date"`     // Format: "2026-01-01"
+	Confirmed bool   `json:"confirmed"`
+	Published bool   `json:"published"`
+}
+
+// GetPrivileges retrieves privileges/assignments status information.
+// Endpoint: GET /api/v0.2/privileges
+func (c *Client) GetPrivileges() ([]PrivilegeAssignment, error) {
+	url := fmt.Sprintf("%s/privileges", c.baseURL)
+	var privileges []PrivilegeAssignment
+	if err := c.getJSON(url, &privileges); err != nil {
+		return nil, err
+	}
+	return privileges, nil
+}
+
+// CheckRule represents a check rule status.
+type CheckRule struct {
+	ID         int    `json:"id"`
+	Rule       string `json:"rule"`       // rule name/description
+	Status     string `json:"status"`     // pending, complete, declined
+	Part       int    `json:"part"`       // meeting part ID
+	Assignment string `json:"assignment"` // assignment description
+}
+
+// GetCheckRules retrieves check rules status information.
+// Endpoint: GET /api/v0.2/check-rules
+func (c *Client) GetCheckRules() ([]CheckRule, error) {
+	url := fmt.Sprintf("%s/check-rules", c.baseURL)
+	var rules []CheckRule
+	if err := c.getJSON(url, &rules); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+// getJSON performs a GET request and decodes the JSON response into the target.
 // getJSON performs a GET request and decodes the JSON response into the target.
 func (c *Client) getJSON(url string, target any) error {
 	resp, err := c.doAuthenticatedGet(url)

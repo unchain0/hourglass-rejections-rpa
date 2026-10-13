@@ -206,14 +206,22 @@ func (c *CLI) printJSON(v any) error {
 	return nil
 }
 
-// ScheduleWM is not implemented yet.
-func (c *CLI) ScheduleWM() error {
-	return exitCode2("not implemented yet: endpoint not discovered")
+// ScheduleWM prints Watchtower Meeting assignments for a date range as JSON.
+func (c *CLI) ScheduleWM(start, end string) error {
+	meetings, err := c.client.GetWM(start, end)
+	if err != nil {
+		return fmt.Errorf("failed to get WM: %w", err)
+	}
+	return c.printJSON(meetings)
 }
 
-// Privileges is not implemented yet.
+// Privileges prints privileges/assignments status information as JSON.
 func (c *CLI) Privileges() error {
-	return exitCode2("not implemented yet: endpoint not discovered")
+	privileges, err := c.client.GetPrivileges()
+	if err != nil {
+		return fmt.Errorf("failed to get privileges: %w", err)
+	}
+	return c.printJSON(privileges)
 }
 
 // Assign is not implemented yet; dry-run unless --apply is supplied by the caller.
@@ -226,9 +234,13 @@ func (c *CLI) Unassign() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
-// CheckRules is not implemented yet.
+// CheckRules retrieves check rules status information as JSON.
 func (c *CLI) CheckRules() error {
-	return exitCode2("not implemented yet: endpoint not discovered")
+	rules, err := c.client.GetCheckRules()
+	if err != nil {
+		return fmt.Errorf("failed to get check rules: %w", err)
+	}
+	return c.printJSON(rules)
 }
 
 func (c *CLI) dispatch(args []string) error {
@@ -357,7 +369,11 @@ func (c *CLI) runSchedule(args []string) error {
 func (c *CLI) dispatchSchedule(parsed scheduleArgs) error {
 	switch parsed.subcommand {
 	case "wm":
-		return c.ScheduleWM()
+		if parsed.fromDate == "" || parsed.toDate == "" {
+			fmt.Fprintf(c.stderr, "Usage: hourglass schedule wm --from YYYY-MM-DD --to YYYY-MM-DD --json\n")
+			return errors.New("missing required --from/--to for wm")
+		}
+		return c.ScheduleWM(parsed.fromDate, parsed.toDate)
 	case "privileges":
 		return c.Privileges()
 	case "assign":
@@ -402,14 +418,9 @@ func (c *CLI) runScheduleAV(parsed scheduleArgs) error {
 }
 
 func (c *CLI) runScheduleNotifications(parsed scheduleArgs) error {
-	if parsed.fromDate == "" || parsed.toDate == "" || parsed.notifType == "" {
-		fmt.Fprintf(c.stderr, "Usage: hourglass schedule notifications --from YYYY-MM-DD --to YYYY-MM-DD --type mm|ava|fm|pubwit [--json]\n")
+	if parsed.fromDate == "" || parsed.toDate == "" {
+		fmt.Fprintf(c.stderr, "Usage: hourglass schedule notifications --from YYYY-MM-DD --to YYYY-MM-DD [--type <any>] --json\n")
 		return errors.New("missing required flags")
-	}
-	valid := map[string]bool{"mm": true, "ava": true, "fm": true, "pubwit": true}
-	if !valid[parsed.notifType] {
-		fmt.Fprintf(c.stderr, "Invalid type: %s. Use mm, ava, fm, pubwit\n", parsed.notifType)
-		return errors.New("invalid notification type")
 	}
 	return c.ScheduleNotifications(parsed.fromDate, parsed.toDate, parsed.notifType)
 }

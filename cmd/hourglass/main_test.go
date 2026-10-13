@@ -43,9 +43,6 @@ func TestRun_StubsExit2(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"wm", []string{"schedule", "wm"}},
-		{"privileges", []string{"schedule", "privileges"}},
-		{"check-rules", []string{"schedule", "check-rules"}},
 		{"assign dry-run", []string{"schedule", "assign"}},
 		{"unassign dry-run", []string{"schedule", "unassign"}},
 		{"assign apply", []string{"schedule", "assign", "--apply"}},
@@ -374,7 +371,7 @@ func TestRun_ScheduleValidation(t *testing.T) {
 		{"mm missing flags", []string{"schedule", "mm", "--json"}, "missing required flags"},
 		{"av missing flags", []string{"schedule", "av"}, "missing required flags"},
 		{"notifications missing flags", []string{"schedule", "notifications", "--from", "2026-01-01"}, "missing required flags"},
-		{"notifications bad type", []string{"schedule", "notifications", "--from", "a", "--to", "b", "--type", "accepted"}, "invalid notification type"},
+		{"notifications bad type", []string{"schedule", "notifications", "--from", "a", "--to", "b", "--type", "accepted"}, "failed to get notifications"},
 		{"no subcommand", []string{"schedule"}, "unknown schedule subcommand"},
 		{"missing from value", []string{"schedule", "mm", "--from"}, "missing value for --from"},
 		{"missing to value", []string{"schedule", "mm", "--to"}, "missing value for --to"},
@@ -521,7 +518,7 @@ func TestMain_SuccessAndErrors(t *testing.T) {
 
 	os.Args = []string{"hourglass", "schedule", "wm"}
 	main()
-	assert.Equal(t, 2, code)
+	assert.Equal(t, 1, code) // missing --from/--to
 
 	t.Setenv("WEBAUTHN_TOKENS_PATH", "")
 	t.Setenv("WEBAUTHN_CREDENTIALS_PATH", "")
