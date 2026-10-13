@@ -163,6 +163,50 @@ other = "Español"
 description = "French language option"
 other = "Français"
 
+[cmd_start]
+description = "Welcome message"
+other = "Welcome message"
+
+[cmd_configure]
+description = "Configure notification sections"
+other = "Configure notification sections"
+
+[cmd_status]
+description = "View current preferences"
+other = "View current preferences"
+
+[cmd_stats]
+description = "View bot statistics"
+other = "View bot statistics"
+
+[cmd_whoami]
+description = "View your account details"
+other = "View your account details"
+
+[cmd_language]
+description = "Change language"
+other = "Change language"
+
+[cmd_help]
+description = "Show available commands"
+other = "Show available commands"
+
+[cmd_checknow]
+description = "Immediate check"
+other = "Immediate check"
+
+[cmd_allow]
+description = "Authorize a user (admin only)"
+other = "Authorize a user (admin only)"
+
+[cmd_deny]
+description = "Revoke a user's access (admin only)"
+other = "Revoke a user's access (admin only)"
+
+[cmd_users]
+description = "List authorized users (admin only)"
+other = "List authorized users (admin only)"
+
 [invalid_language]
 description = "Invalid language callback"
 other = "That language selection is no longer valid."
