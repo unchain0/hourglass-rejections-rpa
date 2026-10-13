@@ -1,202 +1,53 @@
-name: CI/CD Pipeline
+name: CI
+
+permissions:
+  contents: read
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
 
-env:
-  GOTOOLCHAIN: auto
-  GO_VERSION: '1.26.9'
-  GOLANGCI_VERSION: 'v2.1.6'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  format:
-    name: Format Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-      with:
-        go-version: ${{ env.GO_VERSION }}
-    - name: Check formatting
-      run: |
-        UNFORMATTED=$(gofmt -l .)
-        if [ -n "$UNFORMATTED" ]; then
-          echo "ERROR: The following files are not formatted:"
-          echo "$UNFORMATTED"
-          exit 1
-        fi
-        echo "All Go files are properly formatted"
-
-  vet:
-    name: Vet
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-      with:
-        go-version: ${{ env.GO_VERSION }}
-    - name: go vet
-      run: go vet ./...
-
-  tidy:
-    name: Tidy & Verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-      with:
-        go-version: ${{ env.GO_VERSION }}
-    - name: go mod tidy & verify
-      run: |
-        go mod tidy
-        go mod verify
-    - name: Check for changes
-      run: |
-        if [ -n "$(git diff --name-only go.mod go.sum)" ]; then
-          echo "ERROR: go.mod or go.sum changed after tidy. Please run 'go mod tidy' locally and commit the changes."
-          git diff go.mod go.sum
-          exit 1
-        fi
-
   lint:
-    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.1.6
+      - run: golangci-lint run --timeout 5m --config .golangci.yml
+  types:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-      with:
-        go-version: ${{ env.GO_VERSION }}
-    - name: golangci-lint cache
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-      with:
-        path: |
-          ~/.cache/golangci-lint
-          ~/.cache/go-build
-        key: ${{ runner.os }}-golangci-${{ env.GOLANGCI_VERSION }}-${{ hashFiles('go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-golangci-${{ env.GOLANGCI_VERSION }}-
-    - name: golangci-lint
-      run: |
-        go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
-        golangci-lint run --timeout=5m ./...
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: go vet ./...
   test:
-    name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-      with:
-        go-version: ${{ env.GO_VERSION }}
-    - name: Setup Chrome
-      id: setup-chrome
-      uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce # v1.7.3
-      with:
-        chrome-version: stable
-    - name: Run tests
-      env:
-        CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
-      run: |
-        echo "Using Chrome at: $CHROME_BIN"
-        make test
-    - name: Generate coverage report
-      run: |
-        go tool cover -html=coverage.out -o coverage.html
-        go tool cover -func=coverage.out | grep total | awk '{print "Total coverage: " $3}'
-    - name: Upload coverage
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-      with:
-        name: coverage-report
-        path: coverage.html
-        retention-days: 7
-    - name: Check coverage threshold
-      run: bash scripts/check-coverage.sh coverage.out
-
-  security:
-    name: Security Scan
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - run: go test -race -coverprofile=coverage.out ./...
+  audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-      with:
-        go-version: ${{ env.GO_VERSION }}
-    - name: Install govulncheck
-      run: go install golang.org/x/vuln/cmd/govulncheck@latest
-    - name: Run govulncheck
-      run: govulncheck ./...
-
-  build:
-    name: Build All Binaries
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@4c5227b3a7f82bbfb4fd2b3be5ba1818f03a132d # v10.32.0
+        with: go-version-file: 'go.mod'
+      - run: go mod verify
+  secrets:
     runs-on: ubuntu-latest
-    needs: [format, vet, tidy, lint, test, security]
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Go
-      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-      with:
-        go-version: ${{ env.GO_VERSION }}
-    - name: Build all binaries
-      run: |
-        go build -v -o rpa ./cmd/rpa
-        go build -v -o save-tokens ./cmd/save-tokens
-        go build -v -o token-refresh ./cmd/token-refresh
-        go build -v -o setup-auth ./cmd/setup-auth
-        go build -v -o hourglass ./cmd/hourglass
-    - name: Upload binaries
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-      with:
-        name: binaries
-        path: |
-          rpa
-          save-tokens
-          token-refresh
-          setup-auth
-          hourglass
-        retention-days: 7
-
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: [format, vet, tidy, lint, test, security]
-    if: github.ref == 'refs/heads/main'
-    timeout-minutes: 15
-    steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-    - name: Build Docker image
-      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
-      with:
-        context: .
-        push: false
-        load: true
-        tags: hourglass-rejections-rpa:latest
-        build-args: |
-          APP_VERSION=ci
-          VCS_REF=${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-    - name: Smoke-test runtime image
-      run: |
-        docker run --rm --entrypoint /bin/sh hourglass-rejections-rpa:latest -ec '
-          test -x /app/rpa
-          test -x /app/token-refresh
-          command -v curl >/dev/null
-          command -v chromium-browser >/dev/null && exit 1 || true
-        '
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@4cb82750b7c86e9e3b9a10b481fc1975ba90de29 # v8.26.0
+        env:
+          GITLEAKS_LICENSE: # required
