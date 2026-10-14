@@ -2,6 +2,7 @@
 package hourglass
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -392,6 +393,66 @@ func (c *Client) GetCheckRules() ([]CheckRule, error) {
 	return rules, nil
 }
 
+// FindAVAttendantByID loads AV rows for [start, end] and returns the row with id.
+func (c *Client) FindAVAttendantByID(id int, start, end string, lgroup int) (*AVAttendant, error) {
+	url := fmt.Sprintf("%s/scheduling/av_attendant/%s_%s?lgroup=%d", c.baseURL, start, end, lgroup)
+	var rows []AVAttendant
+	if err := c.getJSON(url, &rows); err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if rows[i].ID == id {
+			row := rows[i]
+			return &row, nil
+		}
+	}
+	return nil, fmt.Errorf("unknown slot id %d in range %s..%s", id, start, end)
+}
+
+// SaveAVAttendantAssignee updates only the assignee of an existing AV assignment.
+// Endpoint: PUT /api/v0.2/scheduling/av_attendant/{id}?lgroup={lgroup}
+// Body matches the web client: {id, date, type, assignee, slot} — never publish/notify.
+func (c *Client) SaveAVAttendantAssignee(row AVAttendant, lgroup int) (*AVAttendant, error) {
+	if row.ID == 0 {
+		return nil, fmt.Errorf("assignment id is required")
+	}
+	payload := avAssigneeWrite{
+		ID:       row.ID,
+		Date:     row.Date,
+		Type:     row.Type,
+		Assignee: row.Assignee,
+		Slot:     row.Slot,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode assignee write: %w", err)
+	}
+	url := fmt.Sprintf("%s/scheduling/av_attendant/%d?lgroup=%d", c.baseURL, row.ID, lgroup)
+	resp, err := c.doAuthenticated(http.MethodPut, url, body)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(respBody))
+	}
+	var updated AVAttendant
+	if err := json.NewDecoder(resp.Body).Decode(&updated); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &updated, nil
+}
+
+// avAssigneeWrite is the web-client payload for an AV assignee change.
+type avAssigneeWrite struct {
+	ID       int    `json:"id"`
+	Date     string `json:"date"`
+	Type     string `json:"type"`
+	Assignee *int   `json:"assignee"`
+	Slot     int    `json:"slot"`
+}
+
 // getJSON performs a GET request and decodes the JSON response into the target.
 func (c *Client) getJSON(url string, target any) error {
 	resp, err := c.doAuthenticatedGet(url)
@@ -413,48 +474,54 @@ func (c *Client) getJSON(url string, target any) error {
 }
 
 func (c *Client) doAuthenticatedGet(url string) (*http.Response, error) {
+	return c.doAuthenticated(http.MethodGet, url, nil)
+}
+
+func (c *Client) doAuthenticated(method, rawURL string, body []byte) (*http.Response, error) {
 	if err := c.ensureAuth(); err != nil {
 		return nil, err
 	}
-
-	req, err := newHTTPRequest(http.MethodGet, url, nil)
+	resp, err := c.doOnce(method, rawURL, body, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
-
-	c.setHeaders(req)
-	c.setCookies(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-
 	if resp.StatusCode != http.StatusUnauthorized || !c.useWebAuthn || c.tokenManager == nil {
 		return resp, nil
 	}
-
-	body, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-
 	if renewErr := c.forceRenewAuth(); renewErr != nil {
-		return nil, fmt.Errorf("authentication rejected by Hourglass and forced renewal failed: %w (body: %s)", renewErr, string(body))
+		return nil, fmt.Errorf("authentication rejected by Hourglass and forced renewal failed: %w (body: %s)", renewErr, string(respBody))
 	}
-
-	retryReq, err := newHTTPRequest(http.MethodGet, url, nil)
+	retryResp, err := c.doOnce(method, rawURL, body, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create retry request: %w", err)
+		return nil, err
 	}
-
-	c.setHeaders(retryReq)
-	c.setCookies(retryReq)
-
-	retryResp, err := c.httpClient.Do(retryReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request after forced token renewal: %w", err)
-	}
-
 	return retryResp, nil
+}
+
+func (c *Client) doOnce(method, rawURL string, body []byte, afterRenewal bool) (*http.Response, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+	req, err := newHTTPRequest(method, rawURL, bodyReader)
+	if err != nil {
+		if afterRenewal {
+			return nil, fmt.Errorf("failed to create retry request: %w", err)
+		}
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	c.setHeaders(req)
+	c.setCookies(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		if afterRenewal {
+			return nil, fmt.Errorf("failed to execute request after forced token renewal: %w", err)
+		}
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	return resp, nil
 }
 
 // setHeaders sets the required headers for API requests.

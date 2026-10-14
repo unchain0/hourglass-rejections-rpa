@@ -536,6 +536,7 @@ func TestBlocklistTransport(t *testing.T) {
 		{"GET send allowed when flag set", true, http.MethodGet, "/api/v0.2/messages/send", false},
 		{"empty path allowed", false, http.MethodGet, "/", false},
 		{"notification without send allowed", false, http.MethodGet, "/api/v0.2/notification/list", false},
+		{"PUT av assignee refused without allowAssign", false, http.MethodPut, "/api/v0.2/scheduling/av_attendant/42", true},
 	}
 
 	for _, tc := range cases {
@@ -556,6 +557,34 @@ func TestBlocklistTransport(t *testing.T) {
 			_ = resp.Body.Close()
 		})
 	}
+}
+
+func TestBlocklistTransport_AllowAssignAssigneeOnly(t *testing.T) {
+	recording := &recordingTransport{}
+	rt := &blocklistTransport{base: recording, allowAssign: true}
+
+	allowed := httptest.NewRequest(http.MethodPut, "http://example.test/api/v0.2/scheduling/av_attendant/42?lgroup=0", nil)
+	resp, err := rt.RoundTrip(allowed)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	_ = resp.Body.Close()
+
+	recording.called = false
+	blockedPublish := httptest.NewRequest(http.MethodPut, "http://example.test/api/v0.2/scheduling/av_attendant/42?publish=1", nil)
+	_, err = rt.RoundTrip(blockedPublish)
+	require.Error(t, err)
+	assert.False(t, recording.called)
+
+	recording.called = false
+	blockedNotify := httptest.NewRequest(http.MethodGet, "http://example.test/api/v0.2/scheduling/notify", nil)
+	_, err = rt.RoundTrip(blockedNotify)
+	require.Error(t, err)
+
+	recording.called = false
+	blockedPost := httptest.NewRequest(http.MethodPost, "http://example.test/api/v0.2/scheduling/av_attendant", nil)
+	_, err = rt.RoundTrip(blockedPost)
+	require.Error(t, err)
+	assert.False(t, recording.called)
 }
 
 func TestBlocklistTransport_NilBaseUsesDefault(t *testing.T) {
@@ -664,4 +693,276 @@ func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		Header:     make(http.Header),
 		Request:    req,
 	}, nil
+}
+
+func TestParseAssignSwapArgs(t *testing.T) {
+	opts, err := parseAssignSwapArgs([]string{
+		"--slot", "42", "--to", "20", "--from", "2026-01-01", "--until", "2026-01-31",
+		"--lgroup", "2", "--dry-run", "--json",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 42, opts.slotID)
+	assert.Equal(t, "20", opts.toUser)
+	assert.Equal(t, "2026-01-01", opts.fromDate)
+	assert.Equal(t, "2026-01-31", opts.untilDate)
+	assert.Equal(t, 2, opts.lgroup)
+	assert.True(t, opts.dryRun)
+
+	// Neither dry-run nor confirm defaults to dry-run.
+	opts, err = parseAssignSwapArgs([]string{"--slot", "1", "--to", "2"})
+	require.NoError(t, err)
+	assert.True(t, opts.dryRun)
+
+	_, err = parseAssignSwapArgs([]string{"--slot", "1", "--to", "2", "--dry-run", "--confirm", "abc"})
+	assert.ErrorContains(t, err, "either --dry-run or --confirm")
+
+	_, err = parseAssignSwapArgs([]string{"--slot", "nope"})
+	assert.ErrorContains(t, err, "invalid --slot")
+
+	_, err = parseAssignSwapArgs([]string{"--slot"})
+	assert.ErrorContains(t, err, "missing value")
+
+	_, err = parseAssignSwapArgs([]string{"--unknown"})
+	assert.ErrorContains(t, err, "unknown flag")
+
+	_, err = parseAssignSwapArgs([]string{"--lgroup", "x"})
+	assert.ErrorContains(t, err, "invalid --lgroup")
+}
+
+func TestRunAssign_Usage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"assign"}, &stdout, &stderr)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "Usage:")
+
+	code = run([]string{"assign", "nope"}, &stdout, &stderr)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "Unknown assign")
+}
+
+func TestAssignSwap_GuardRailsAndSuccess(t *testing.T) {
+	cur := 10
+	next := 20
+	updatedAt := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	var putCount int
+	var methods []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/fsreport/users"):
+			_ = json.NewEncoder(w).Encode(hourglass.UsersResponse{Users: []hourglass.User{
+				{ID: 10, Descriptor: "Ada Lovelace"},
+				{ID: 20, Descriptor: "Bob Builder"},
+			}})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/scheduling/av_attendant/"):
+			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{
+				ID: 42, Type: "mics", Slot: 1, Date: "2026-03-01",
+				Assignee: &cur, UpdatedAt: updatedAt,
+			}})
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/scheduling/av_attendant/42"):
+			putCount++
+			body, _ := io.ReadAll(r.Body)
+			assert.Contains(t, string(body), `"assignee":20`)
+			assert.NotContains(t, string(body), "published")
+			assert.NotContains(t, string(body), "notify")
+			_ = json.NewEncoder(w).Encode(hourglass.AVAttendant{
+				ID: 42, Type: "mics", Slot: 1, Date: "2026-03-01",
+				Assignee: &next, UpdatedAt: updatedAt.Add(time.Minute),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	baseURL := server.URL + "/api/v0.2"
+	mkCLI := func(allowAssign string) (*CLI, *bytes.Buffer, *bytes.Buffer) {
+		var stdout, stderr bytes.Buffer
+		cli := newCLI(&stdout, &stderr, func(k string) string {
+			switch k {
+			case "HOURGLASS_ALLOW_ASSIGN":
+				return allowAssign
+			case "HOURGLASS_ALLOW_SEND":
+				return ""
+			default:
+				return ""
+			}
+		})
+		cli.client.SetBaseURL(baseURL)
+		// Re-wrap transport after SetBaseURL so blocklist still sees env flags.
+		bl, _ := cli.client.GetTransport().(*blocklistTransport)
+		if bl != nil {
+			bl.allowAssign = allowAssign == "1"
+			bl.allowSend = false
+		}
+		return cli, &stdout, &stderr
+	}
+
+	argsBase := []string{
+		"--slot", "42", "--to", "20",
+		"--from", "2026-03-01", "--until", "2026-03-07",
+	}
+
+	// Flag missing on apply path (confirm without allow).
+	cli, stdout, _ := mkCLI("")
+	err := cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", confirm: "deadbeef", fromDate: "2026-03-01", untilDate: "2026-03-07"})
+	var code2 *exitCode2Error
+	require.ErrorAs(t, err, &code2)
+	assert.Contains(t, err.Error(), "HOURGLASS_ALLOW_ASSIGN")
+	assert.Equal(t, 0, putCount)
+
+	// Confirm missing when allow set and not dry-run.
+	cli, _, _ = mkCLI("1")
+	err = cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", fromDate: "2026-03-01", untilDate: "2026-03-07"})
+	// parse defaults dry-run; call apply path directly without confirm.
+	err = cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", dryRun: false, confirm: "", fromDate: "2026-03-01", untilDate: "2026-03-07"})
+	require.ErrorAs(t, err, &code2)
+	assert.Contains(t, err.Error(), "missing --confirm")
+
+	// Dry-run: no write, shows names + confirm.
+	cli, stdout, _ = mkCLI("")
+	err = cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", dryRun: true, fromDate: "2026-03-01", untilDate: "2026-03-07"})
+	require.NoError(t, err)
+	assert.Equal(t, 0, putCount)
+	assert.Contains(t, stdout.String(), "Ada Lovelace")
+	assert.Contains(t, stdout.String(), "Bob Builder")
+	assert.Contains(t, stdout.String(), `"dry_run":true`)
+	var preview hourglass.AssignSwapResult
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &preview))
+	require.NotEmpty(t, preview.Confirm)
+
+	// Confirm mismatch.
+	cli, _, _ = mkCLI("1")
+	err = cli.AssignSwap(assignSwapOpts{
+		slotID: 42, toUser: "20", dryRun: false, confirm: "wrong-token",
+		fromDate: "2026-03-01", untilDate: "2026-03-07",
+	})
+	require.ErrorAs(t, err, &code2)
+	assert.Contains(t, err.Error(), "confirm token mismatch")
+	assert.Equal(t, 0, putCount)
+
+	// Stale preview (version change).
+	stale := hourglass.AssignSwapConfirmToken(42, 10, 20, "other-version")
+	err = cli.AssignSwap(assignSwapOpts{
+		slotID: 42, toUser: "20", dryRun: false, confirm: stale,
+		fromDate: "2026-03-01", untilDate: "2026-03-07",
+	})
+	require.ErrorAs(t, err, &code2)
+	assert.Equal(t, 0, putCount)
+
+	// Unknown slot.
+	err = cli.AssignSwap(assignSwapOpts{
+		slotID: 999, toUser: "20", dryRun: true,
+		fromDate: "2026-03-01", untilDate: "2026-03-07",
+	})
+	assert.ErrorContains(t, err, "unknown slot")
+
+	// Unknown user.
+	err = cli.AssignSwap(assignSwapOpts{
+		slotID: 42, toUser: "999", dryRun: true,
+		fromDate: "2026-03-01", untilDate: "2026-03-07",
+	})
+	assert.ErrorContains(t, err, "unknown user")
+
+	// Success: exactly one assignee-only write; no publish/notify.
+	methods = nil
+	cli, stdout, _ = mkCLI("1")
+	err = cli.AssignSwap(assignSwapOpts{
+		slotID: 42, toUser: "20", dryRun: false, confirm: preview.Confirm,
+		fromDate: "2026-03-01", untilDate: "2026-03-07",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, putCount)
+	assert.Contains(t, stdout.String(), `"applied":true`)
+	assert.Contains(t, stdout.String(), "Bob Builder")
+	assert.NotContains(t, stdout.String(), `"confirm"`)
+	for _, m := range methods {
+		lower := strings.ToLower(m)
+		assert.NotContains(t, lower, "publish")
+		assert.NotContains(t, lower, "notify")
+		assert.NotContains(t, lower, "/send")
+	}
+
+	// Dispatch path dry-run default.
+	cli, stdout, _ = mkCLI("")
+	err = cli.dispatch(append([]string{"assign", "swap"}, argsBase...))
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), `"dry_run":true`)
+
+	// Missing required flags.
+	err = cli.AssignSwap(assignSwapOpts{dryRun: true})
+	assert.ErrorContains(t, err, "missing required --slot")
+	err = cli.AssignSwap(assignSwapOpts{slotID: 1, dryRun: true})
+	assert.ErrorContains(t, err, "missing required --to")
+}
+
+func TestIsAssigneeOnlyWrite(t *testing.T) {
+	ok := httptest.NewRequest(http.MethodPut, "http://x/api/v0.2/scheduling/av_attendant/9", nil)
+	assert.True(t, isAssigneeOnlyWrite(ok))
+	badMethod := httptest.NewRequest(http.MethodPost, "http://x/api/v0.2/scheduling/av_attendant/9", nil)
+	assert.False(t, isAssigneeOnlyWrite(badMethod))
+	badPath := httptest.NewRequest(http.MethodPut, "http://x/api/v0.2/scheduling/wm/9", nil)
+	assert.False(t, isAssigneeOnlyWrite(badPath))
+	badQuery := httptest.NewRequest(http.MethodPut, "http://x/api/v0.2/scheduling/av_attendant/9?notify=1", nil)
+	assert.False(t, isAssigneeOnlyWrite(badQuery))
+	sendQuery := httptest.NewRequest(http.MethodPut, "http://x/api/v0.2/scheduling/av_attendant/9?send=1", nil)
+	assert.False(t, isAssigneeOnlyWrite(sendQuery))
+}
+
+func TestAssignSwap_DefaultRangeAndSaveFailure(t *testing.T) {
+	cur := 1
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/fsreport/users"):
+			_ = json.NewEncoder(w).Encode(hourglass.UsersResponse{Users: []hourglass.User{{ID: 2, Descriptor: "Bob"}}})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/scheduling/av_attendant/"):
+			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{
+				ID: 5, Type: "stage", Slot: 0, Date: "2026-03-01", Assignee: &cur,
+			}})
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`fail`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout bytes.Buffer
+	cli := newCLI(&stdout, io.Discard, func(k string) string {
+		if k == "HOURGLASS_ALLOW_ASSIGN" {
+			return "1"
+		}
+		return ""
+	})
+	cli.client.SetBaseURL(server.URL + "/api/v0.2")
+	bl, _ := cli.client.GetTransport().(*blocklistTransport)
+	bl.allowAssign = true
+
+	// Default range path (empty from/until).
+	err := cli.AssignSwap(assignSwapOpts{slotID: 5, toUser: "2", dryRun: true})
+	require.NoError(t, err)
+	var preview hourglass.AssignSwapResult
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &preview))
+	require.NotEmpty(t, preview.Confirm)
+
+	stdout.Reset()
+	err = cli.AssignSwap(assignSwapOpts{
+		slotID: 5, toUser: "2", dryRun: false, confirm: preview.Confirm,
+	})
+	assert.ErrorContains(t, err, "failed to swap assignee")
+}
+
+func TestNewCLI_AllowAssignEnv(t *testing.T) {
+	cli := newCLI(io.Discard, io.Discard, func(k string) string {
+		if k == "HOURGLASS_ALLOW_ASSIGN" {
+			return "1"
+		}
+		return ""
+	})
+	bl, ok := cli.client.GetTransport().(*blocklistTransport)
+	require.True(t, ok)
+	assert.True(t, bl.allowAssign)
+	assert.False(t, bl.allowSend)
 }

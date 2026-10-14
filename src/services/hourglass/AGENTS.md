@@ -14,8 +14,13 @@
 
 - The default API base is the Hourglass site plus `/api/v0.2`. `SetBaseURL` appends
   that path to a site root and preserves an explicitly supplied API path.
-- Endpoint methods must use `doAuthenticatedGet`. It calls `ensureAuth` before
-  creating the request, then applies the shared `setHeaders` and `setCookies` policy.
+- Read endpoint methods use `doAuthenticatedGet`. Mutating calls use
+  `doAuthenticated` with an explicit method and body. Both call `ensureAuth`
+  before creating the request, then apply the shared `setHeaders` and
+  `setCookies` policy.
+- AV assignee writes use `PUT scheduling/av_attendant/{id}?lgroup=` with body
+  `{id,date,type,assignee,slot}` only (web client parity). Never set publish,
+  notify, or send fields.
 - A `401` with WebAuthn enabled forces one token renewal, updates the client tokens,
   and retries once. Preserve the original body context when renewal fails; never add
   an unbounded authentication retry.
