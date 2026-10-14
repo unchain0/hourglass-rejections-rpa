@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +20,18 @@ import (
 var (
 	osExit      = os.Exit
 	marshalJSON = json.Marshal
+)
+
+const (
+	cmdAssign   = "assign"
+	flagJSON    = "--json"
+	flagDryRun  = "--dry-run"
+	flagConfirm = "--confirm"
+	flagSlot    = "--slot"
+	flagTo      = "--to"
+	flagFrom    = "--from"
+	flagUntil   = "--until"
+	flagLGroup  = "--lgroup"
 )
 
 // CLI is the read-only Hourglass command-line surface.
@@ -39,9 +54,11 @@ func newCLI(stdout, stderr io.Writer, getenv func(string) string) *CLI {
 	}
 	client := hourglass.NewClient()
 	allowSend := getenv("HOURGLASS_ALLOW_SEND") == "1"
+	allowAssign := getenv("HOURGLASS_ALLOW_ASSIGN") == "1"
 	client.SetTransport(&blocklistTransport{
-		base:      client.GetTransport(),
-		allowSend: allowSend,
+		base:        client.GetTransport(),
+		allowSend:   allowSend,
+		allowAssign: allowAssign,
 	})
 	return &CLI{
 		client: client,
@@ -296,6 +313,101 @@ func (c *CLI) Unassign() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
+// AssignSwap changes only the assignee of one AV slot.
+// Dry-run prints before/after and a confirm token. Apply requires HOURGLASS_ALLOW_ASSIGN=1
+// and --confirm matching that token. Never publishes, notifies, or sends.
+func (c *CLI) AssignSwap(opts assignSwapOpts) error {
+	if err := validateAssignSwapOpts(opts, c.getenv); err != nil {
+		return err
+	}
+	from, until := resolveAssignSwapRange(opts)
+	row, err := c.client.FindAVAttendantByID(opts.slotID, from, until, opts.lgroup)
+	if err != nil {
+		return err
+	}
+	usersList, err := c.client.GetUsers()
+	if err != nil {
+		return fmt.Errorf("failed to get users: %w", err)
+	}
+	target, err := hourglass.ResolveUserRef(opts.toUser, usersList)
+	if err != nil {
+		return err
+	}
+	users := hourglass.IndexUsersByID(usersList)
+	preview := hourglass.BuildAssignSwapPreview(*row, target, opts.lgroup, users)
+	if opts.dryRun {
+		return c.printJSON(preview)
+	}
+	return c.applyAssignSwap(opts, from, until, target, users, preview)
+}
+
+func validateAssignSwapOpts(opts assignSwapOpts, getenv func(string) string) error {
+	if opts.slotID == 0 {
+		return errors.New("missing required --slot")
+	}
+	if strings.TrimSpace(opts.toUser) == "" {
+		return errors.New("missing required --to")
+	}
+	if opts.dryRun {
+		return nil
+	}
+	if getenv("HOURGLASS_ALLOW_ASSIGN") != "1" {
+		return exitCode2("assign swap disabled: set HOURGLASS_ALLOW_ASSIGN=1 and pass --confirm from a matching dry-run")
+	}
+	if strings.TrimSpace(opts.confirm) == "" {
+		return exitCode2("missing --confirm token; run with --dry-run first")
+	}
+	return nil
+}
+
+func resolveAssignSwapRange(opts assignSwapOpts) (from, until string) {
+	from, until = opts.fromDate, opts.untilDate
+	defFrom, defUntil := hourglass.DefaultAssignSwapRange(time.Now())
+	if from == "" {
+		from = defFrom
+	}
+	if until == "" {
+		until = defUntil
+	}
+	return from, until
+}
+
+func (c *CLI) applyAssignSwap(
+	opts assignSwapOpts,
+	from, until string,
+	target hourglass.User,
+	users map[int]hourglass.User,
+	preview hourglass.AssignSwapResult,
+) error {
+	// Re-load immediately before write so a concurrent edit invalidates confirm.
+	fresh, err := c.client.FindAVAttendantByID(opts.slotID, from, until, opts.lgroup)
+	if err != nil {
+		return err
+	}
+	live := hourglass.BuildAssignSwapPreview(*fresh, target, opts.lgroup, users)
+	if subtle.ConstantTimeCompare([]byte(opts.confirm), []byte(live.Confirm)) != 1 {
+		return exitCode2("confirm token mismatch or stale preview; re-run --dry-run")
+	}
+	next := *fresh
+	tid := target.ID
+	next.Assignee = &tid
+	updated, err := c.client.SaveAVAttendantAssignee(next, opts.lgroup)
+	if err != nil {
+		return fmt.Errorf("failed to swap assignee: %w", err)
+	}
+	result := preview
+	result.DryRun = false
+	result.Applied = true
+	result.Confirm = ""
+	result.Before = live.Before
+	result.After.AssigneeID = updated.Assignee
+	result.After.AssigneeName = hourglass.LookupOptionalUserName(users, updated.Assignee)
+	if !updated.UpdatedAt.IsZero() {
+		result.After.UpdatedAt = hourglass.AssignSwapVersion(*updated)
+	}
+	return c.printJSON(result)
+}
+
 // CheckRules retrieves check rules status information as JSON.
 func (c *CLI) CheckRules() error {
 	rules, err := c.client.GetCheckRules()
@@ -318,10 +430,117 @@ func (c *CLI) dispatch(args []string) error {
 		return c.runUsers(args[1:])
 	case "schedule":
 		return c.runSchedule(args[1:])
+	case cmdAssign:
+		return c.runAssign(args[1:])
 	default:
 		fmt.Fprintf(c.stderr, "Unknown command: %s\n", args[0])
 		return errors.New("unknown command")
 	}
+}
+
+type assignSwapOpts struct {
+	slotID    int
+	toUser    string
+	confirm   string
+	fromDate  string
+	untilDate string
+	lgroup    int
+	dryRun    bool
+}
+
+func (c *CLI) runAssign(args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintf(c.stderr, "Usage: hourglass assign swap --slot <id> --to <user> [--from YYYY-MM-DD] [--until YYYY-MM-DD] [--lgroup N] (--dry-run | --confirm <token>)\n")
+		return errors.New("no assign subcommand provided")
+	}
+	switch args[0] {
+	case "swap":
+		opts, err := parseAssignSwapArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		return c.AssignSwap(opts)
+	default:
+		fmt.Fprintf(c.stderr, "Unknown assign subcommand: %s\n", args[0])
+		fmt.Fprintf(c.stderr, "Usage: hourglass assign swap --slot <id> --to <user> [--dry-run|--confirm <token>]\n")
+		return errors.New("unknown assign subcommand")
+	}
+}
+
+func parseAssignSwapArgs(args []string) (assignSwapOpts, error) {
+	var opts assignSwapOpts
+	for i := 0; i < len(args); {
+		next, err := applyAssignSwapFlag(&opts, args, i)
+		if err != nil {
+			return opts, err
+		}
+		i = next
+	}
+	if opts.dryRun && opts.confirm != "" {
+		return opts, errors.New("use either --dry-run or --confirm, not both")
+	}
+	if !opts.dryRun && opts.confirm == "" {
+		// Default to dry-run when neither flag is set so apply stays opt-in.
+		opts.dryRun = true
+	}
+	return opts, nil
+}
+
+func applyAssignSwapFlag(opts *assignSwapOpts, args []string, i int) (int, error) {
+	switch args[i] {
+	case flagSlot:
+		return setAssignSwapInt(args, i, flagSlot, func(n int) error {
+			if n <= 0 {
+				return fmt.Errorf("invalid %s value %q", flagSlot, args[i+1])
+			}
+			opts.slotID = n
+			return nil
+		})
+	case flagTo:
+		return setAssignSwapString(args, i, flagTo, &opts.toUser)
+	case flagConfirm:
+		return setAssignSwapString(args, i, flagConfirm, &opts.confirm)
+	case flagFrom:
+		return setAssignSwapString(args, i, flagFrom, &opts.fromDate)
+	case flagUntil:
+		return setAssignSwapString(args, i, flagUntil, &opts.untilDate)
+	case flagLGroup:
+		return setAssignSwapInt(args, i, flagLGroup, func(n int) error {
+			opts.lgroup = n
+			return nil
+		})
+	case flagDryRun:
+		opts.dryRun = true
+		return i + 1, nil
+	case flagJSON:
+		return i + 1, nil
+	default:
+		return i, fmt.Errorf("unknown flag %s", args[i])
+	}
+}
+
+func setAssignSwapString(args []string, i int, name string, dst *string) (int, error) {
+	val, next, err := takeFlagValue(args, i, name)
+	if err != nil {
+		return i, err
+	}
+	*dst = val
+	return next, nil
+}
+
+func setAssignSwapInt(args []string, i int, name string, apply func(int) error) (int, error) {
+	val, next, err := takeFlagValue(args, i, name)
+	if err != nil {
+		return i, err
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return i, fmt.Errorf("invalid %s value %q", name, val)
+	}
+	if err := apply(n); err != nil {
+		return i, err
+	}
+	return next, nil
 }
 
 func (c *CLI) runAuth(args []string) error {
@@ -344,7 +563,7 @@ func (c *CLI) runAuth(args []string) error {
 func (c *CLI) runUsers(args []string) error {
 	jsonFlag := false
 	for _, arg := range args {
-		if arg == "--json" {
+		if arg == flagJSON {
 			jsonFlag = true
 		}
 	}
@@ -404,7 +623,7 @@ func parseScheduleArgs(args []string) (scheduleArgs, error) {
 		case "--apply":
 			parsed.apply = true
 			i++
-		case "--json":
+		case flagJSON:
 			i++
 		default:
 			i++
@@ -438,8 +657,8 @@ func (c *CLI) dispatchSchedule(parsed scheduleArgs) error {
 		return c.ScheduleWM(parsed.fromDate, parsed.toDate)
 	case "privileges":
 		return c.Privileges()
-	case "assign":
-		return c.runAssignLike("assign", parsed.apply, c.Assign)
+	case cmdAssign:
+		return c.runAssignLike(cmdAssign, parsed.apply, c.Assign)
 	case "unassign":
 		return c.runAssignLike("unassign", parsed.apply, c.Unassign)
 	case "check-rules":
@@ -488,20 +707,29 @@ func (c *CLI) runScheduleNotifications(parsed scheduleArgs) error {
 }
 
 // blocklistTransport refuses mutating HTTP methods and send-like paths unless allowSend is set.
+// allowAssign permits a single assignee-only PUT to scheduling/av_attendant/{id} and never send/publish.
 type blocklistTransport struct {
-	base      http.RoundTripper
-	allowSend bool
+	base        http.RoundTripper
+	allowSend   bool
+	allowAssign bool
 }
 
+var avAssigneeWritePath = regexp.MustCompile(`(?i)(?:^|/)scheduling/av_attendant/\d+/?$`)
+
 func (t *blocklistTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if !t.allowSend {
-		switch req.Method {
-		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-			return nil, fmt.Errorf("send operations blocked: %s %s", req.Method, req.URL.Path)
+	if isSendLikePath(req.URL.Path) && !t.allowSend {
+		return nil, fmt.Errorf("send operation blocked: %s %s", req.Method, req.URL.Path)
+	}
+
+	switch req.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		if t.allowSend {
+			break
 		}
-		if isSendLikePath(req.URL.Path) {
-			return nil, fmt.Errorf("send operation blocked: %s %s", req.Method, req.URL.Path)
+		if t.allowAssign && isAssigneeOnlyWrite(req) {
+			break
 		}
+		return nil, fmt.Errorf("send operations blocked: %s %s", req.Method, req.URL.Path)
 	}
 
 	base := t.base
@@ -509,6 +737,21 @@ func (t *blocklistTransport) RoundTrip(req *http.Request) (*http.Response, error
 		base = http.DefaultTransport
 	}
 	return base.RoundTrip(req)
+}
+
+func isAssigneeOnlyWrite(req *http.Request) bool {
+	if req.Method != http.MethodPut {
+		return false
+	}
+	if !avAssigneeWritePath.MatchString(req.URL.Path) {
+		return false
+	}
+	// Reject publish/notify query knobs even on the assignee path.
+	q := strings.ToLower(req.URL.RawQuery)
+	if strings.Contains(q, "publish") || strings.Contains(q, "notify") || strings.Contains(q, "send") {
+		return false
+	}
+	return true
 }
 
 func isSendLikePath(rawPath string) bool {

@@ -4,7 +4,7 @@
 
 - Keep the `package main` entrypoints thin and orchestration-focused.
 - `rpa`: configures telemetry, persistence, Hourglass, bot, and scheduler. `-once` still delegates to the unimplemented `runOnceFn` stub; do not describe it as functional.
-- `hourglass`: read-only CLI over the Hourglass client with a send blocklist; bootstraps WebAuthn from env and never registers passkeys.
+- `hourglass`: read-focused CLI over the Hourglass client with a send blocklist; optional assignee-only AV swap behind `HOURGLASS_ALLOW_ASSIGN` plus `--confirm`; bootstraps WebAuthn from env and never registers passkeys.
 - `setup-auth`: interactive visible-Chrome bootstrap, WebAuthn registration, token persistence, and optional confirmed SCP upload.
 - `save-tokens`: interactive visible-Chrome cookie extraction and masked token summary.
 - `token-refresh`: unattended token validation or renewal, controlled by refresh and auth-path environment settings.
@@ -22,6 +22,7 @@
 - Restore replaced package globals with `t.Cleanup`; tests mutating them must not run in parallel.
 - Preserve path precedence: `rpa` config fields before environment fallbacks; token fallback is `TOKENS_PATH`, then `WEBAUTHN_TOKENS_PATH`; refresh prefers `WEBAUTHN_TOKENS_PATH`.
 - Keep config/profile directories `0700` and token/credential files `0600`. Output may show paths, expiry, and masked fragments, never full secrets or auth files.
+- Assignee swap must never call publish/notify/send endpoints. `HOURGLASS_ALLOW_SEND` stays independent of `HOURGLASS_ALLOW_ASSIGN`. Dry-run confirm tokens may appear in JSON; auth cookies and Telegram tokens must not.
 - Interactive auth uses visible Chrome with a dedicated persistent profile. In QA, set `CHROME_BIN`/`CHROME_PATH`, isolate the profile, and close competing Chrome processes.
 - SCP remains opt-in through `SCPClient`; require confirmation and pass arguments directly to `exec.Command`, never through a shell.
 

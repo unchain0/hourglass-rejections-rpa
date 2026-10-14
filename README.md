@@ -215,12 +215,50 @@ failing gate prevents the push from proceeding.
 
 After the daemon is running, use `/checknow` in Telegram for an immediate manual check.
 
-This repository builds four binaries from `cmd/`:
+This repository builds five binaries from `cmd/`:
 
 - `rpa`
+- `hourglass` (read-focused CLI; protected assignee swap)
 - `save-tokens`
 - `token-refresh`
 - `setup-auth`
+
+### Hourglass CLI
+
+Build with `make build` (binary `hourglass`). Read commands emit JSON with
+resolved names alongside IDs. Mutating HTTP methods and send/publish/notify
+paths stay blocked unless `HOURGLASS_ALLOW_SEND=1`. Keep that flag unset for
+normal use.
+
+Read examples:
+
+```bash
+hourglass auth status
+hourglass users --json
+hourglass schedule mm --from 2026-03-01 --to 2026-03-31 --json
+hourglass schedule av --from 2026-03-01 --to 2026-03-31 --json
+hourglass schedule wm --from 2026-03-01 --to 2026-03-31 --json
+hourglass schedule notifications --from 2026-03-01 --to 2026-03-31 --json
+hourglass schedule privileges --json
+hourglass schedule check-rules --json
+```
+
+Protected assignee swap (AV slot only; never publish/notify/send):
+
+```bash
+# 1) Preview before/after and capture the confirm token from JSON.
+hourglass assign swap --slot 12345 --to 67890 --from 2026-03-01 --until 2026-03-31 --dry-run
+
+# 2) Apply only with a separate enable flag and the matching confirm token.
+# HOURGLASS_ALLOW_SEND must stay unset. Token is bound to slot, current
+# assignee, target assignee, and slot updated_at/date (stale previews fail).
+HOURGLASS_ALLOW_ASSIGN=1 hourglass assign swap --slot 12345 --to 67890 \
+  --from 2026-03-01 --until 2026-03-31 --confirm '<token-from-dry-run>'
+```
+
+`--to` accepts a user id or an exact display name. Omit `--from`/`--until` to
+search a default window (30 days back through one year ahead). Without
+`HOURGLASS_ALLOW_ASSIGN=1` and `--confirm`, the command stays dry-run only.
 
 ## Project layout
 
