@@ -274,3 +274,47 @@ other = "Affectation Spéciale"
 [assignment_other_assignment]
 description = "Autre Affectation"
 other = "Autre Affectation"
+
+[cmd_start]
+description = "Message de bienvenue"
+other = "Message de bienvenue"
+
+[cmd_configure]
+description = "Configurer les sections de notification"
+other = "Configurer les sections de notification"
+
+[cmd_status]
+description = "Voir les préférences actuelles"
+other = "Voir les préférences actuelles"
+
+[cmd_stats]
+description = "Voir les statistiques du bot"
+other = "Voir les statistiques du bot"
+
+[cmd_whoami]
+description = "Voir les détails de votre compte"
+other = "Voir les détails de votre compte"
+
+[cmd_language]
+description = "Changer de langue"
+other = "Changer de langue"
+
+[cmd_help]
+description = "Afficher les commandes disponibles"
+other = "Afficher les commandes disponibles"
+
+[cmd_checknow]
+description = "Vérification immédiate"
+other = "Vérification immédiate"
+
+[cmd_allow]
+description = "Autoriser un utilisateur (admin uniquement)"
+other = "Autoriser un utilisateur (admin uniquement)"
+
+[cmd_deny]
+description = "Révoquer l'accès (admin uniquement)"
+other = "Révoquer l'accès (admin uniquement)"
+
+[cmd_users]
+description = "Lister les utilisateurs autorisés (admin uniquement)"
+other = "Lister les utilisateurs autorisés (admin uniquement)"
