@@ -22,6 +22,18 @@ var (
 	marshalJSON = json.Marshal
 )
 
+const (
+	cmdAssign   = "assign"
+	flagJSON    = "--json"
+	flagDryRun  = "--dry-run"
+	flagConfirm = "--confirm"
+	flagSlot    = "--slot"
+	flagTo      = "--to"
+	flagFrom    = "--from"
+	flagUntil   = "--until"
+	flagLGroup  = "--lgroup"
+)
+
 // CLI is the read-only Hourglass command-line surface.
 type CLI struct {
 	client       *hourglass.Client
@@ -411,7 +423,7 @@ func (c *CLI) dispatch(args []string) error {
 		return c.runUsers(args[1:])
 	case "schedule":
 		return c.runSchedule(args[1:])
-	case "assign":
+	case cmdAssign:
 		return c.runAssign(args[1:])
 	default:
 		fmt.Fprintf(c.stderr, "Unknown command: %s\n", args[0])
@@ -469,31 +481,31 @@ func parseAssignSwapArgs(args []string) (assignSwapOpts, error) {
 
 func applyAssignSwapFlag(opts *assignSwapOpts, args []string, i int) (int, error) {
 	switch args[i] {
-	case "--slot":
-		return setAssignSwapInt(args, i, "--slot", func(n int) error {
+	case flagSlot:
+		return setAssignSwapInt(args, i, flagSlot, func(n int) error {
 			if n <= 0 {
-				return fmt.Errorf("invalid --slot value %q", args[i+1])
+				return fmt.Errorf("invalid %s value %q", flagSlot, args[i+1])
 			}
 			opts.slotID = n
 			return nil
 		})
-	case "--to":
-		return setAssignSwapString(args, i, "--to", &opts.toUser)
-	case "--confirm":
-		return setAssignSwapString(args, i, "--confirm", &opts.confirm)
-	case "--from":
-		return setAssignSwapString(args, i, "--from", &opts.fromDate)
-	case "--until":
-		return setAssignSwapString(args, i, "--until", &opts.untilDate)
-	case "--lgroup":
-		return setAssignSwapInt(args, i, "--lgroup", func(n int) error {
+	case flagTo:
+		return setAssignSwapString(args, i, flagTo, &opts.toUser)
+	case flagConfirm:
+		return setAssignSwapString(args, i, flagConfirm, &opts.confirm)
+	case flagFrom:
+		return setAssignSwapString(args, i, flagFrom, &opts.fromDate)
+	case flagUntil:
+		return setAssignSwapString(args, i, flagUntil, &opts.untilDate)
+	case flagLGroup:
+		return setAssignSwapInt(args, i, flagLGroup, func(n int) error {
 			opts.lgroup = n
 			return nil
 		})
-	case "--dry-run":
+	case flagDryRun:
 		opts.dryRun = true
 		return i + 1, nil
-	case "--json":
+	case flagJSON:
 		return i + 1, nil
 	default:
 		return i, fmt.Errorf("unknown flag %s", args[i])
@@ -544,7 +556,7 @@ func (c *CLI) runAuth(args []string) error {
 func (c *CLI) runUsers(args []string) error {
 	jsonFlag := false
 	for _, arg := range args {
-		if arg == "--json" {
+		if arg == flagJSON {
 			jsonFlag = true
 		}
 	}
@@ -604,7 +616,7 @@ func parseScheduleArgs(args []string) (scheduleArgs, error) {
 		case "--apply":
 			parsed.apply = true
 			i++
-		case "--json":
+		case flagJSON:
 			i++
 		default:
 			i++
@@ -638,8 +650,8 @@ func (c *CLI) dispatchSchedule(parsed scheduleArgs) error {
 		return c.ScheduleWM(parsed.fromDate, parsed.toDate)
 	case "privileges":
 		return c.Privileges()
-	case "assign":
-		return c.runAssignLike("assign", parsed.apply, c.Assign)
+	case cmdAssign:
+		return c.runAssignLike(cmdAssign, parsed.apply, c.Assign)
 	case "unassign":
 		return c.runAssignLike("unassign", parsed.apply, c.Unassign)
 	case "check-rules":

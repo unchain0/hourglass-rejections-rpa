@@ -805,7 +805,7 @@ func TestAssignSwap_GuardRailsAndSuccess(t *testing.T) {
 	}
 
 	// Flag missing on apply path (confirm without allow).
-	cli, stdout, _ := mkCLI("")
+	cli, _, _ := mkCLI("")
 	err := cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", confirm: "deadbeef", fromDate: "2026-03-01", untilDate: "2026-03-07"})
 	var code2 *exitCode2Error
 	require.ErrorAs(t, err, &code2)
@@ -814,14 +814,12 @@ func TestAssignSwap_GuardRailsAndSuccess(t *testing.T) {
 
 	// Confirm missing when allow set and not dry-run.
 	cli, _, _ = mkCLI("1")
-	err = cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", fromDate: "2026-03-01", untilDate: "2026-03-07"})
-	// parse defaults dry-run; call apply path directly without confirm.
 	err = cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", dryRun: false, confirm: "", fromDate: "2026-03-01", untilDate: "2026-03-07"})
 	require.ErrorAs(t, err, &code2)
 	assert.Contains(t, err.Error(), "missing --confirm")
 
 	// Dry-run: no write, shows names + confirm.
-	cli, stdout, _ = mkCLI("")
+	cli, stdout, _ := mkCLI("")
 	err = cli.AssignSwap(assignSwapOpts{slotID: 42, toUser: "20", dryRun: true, fromDate: "2026-03-01", untilDate: "2026-03-07"})
 	require.NoError(t, err)
 	assert.Equal(t, 0, putCount)

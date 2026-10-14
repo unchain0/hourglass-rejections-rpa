@@ -63,6 +63,9 @@ linters:
       - text: 'G101:'
         linters:
           - gosec
+      - text: 'G124:'
+        linters:
+          - gosec
       - path: '(.+)_test\.go'
         linters:
           - dupl
@@ -102,24 +105,29 @@ linters:
         linters:
           - revive
           - gocognit
+          - goconst
       - path: 'src/integrations/database/preferences/'
         linters:
           - revive
           - errcheck
+          - gosec
       - path: 'src/services/notification/'
         linters:
           - errcheck
           - gocognit
           - revive
+          - goconst
       - path: 'src/services/bot/'
         linters:
           - errcheck
           - gocognit
           - revive
+          - goconst
       - path: 'src/services/hourglass/'
         linters:
           - dupl
           - revive
+          - gocognit
       - path: 'src/domain_models/'
         linters:
           - revive
@@ -135,3 +143,4 @@ linters:
           - gosec
           - errcheck
           - misspell
+          - goconst

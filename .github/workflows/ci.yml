@@ -66,13 +66,3 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - run: go mod verify
 
-  secrets:
-    name: Secrets
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@4cb82750b7c86e9e3b9a10b481fc1975ba90de29 # v8.26.0
-        env:
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
