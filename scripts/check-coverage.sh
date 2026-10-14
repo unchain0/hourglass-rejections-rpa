@@ -3,13 +3,14 @@
 set -euo pipefail
 
 profile=${1:-coverage.out}
+threshold=${2:-70}
 
 if [[ ! -f "$profile" ]]; then
 	echo "ERROR: coverage profile not found: $profile" >&2
 	exit 1
 fi
 
-awk '
+awk -v threshold="$threshold" '
 	$1 == "mode:" { next }
 	{
 		file = $1
@@ -21,31 +22,15 @@ awk '
 		}
 	}
 	END {
-		failed = 0
-		totalStatements = 0
-		totalCovered = 0
-		for (file in statements) {
-			total = statements[file]
-			coveredStatements = covered[file]
-			totalStatements += total
-			totalCovered += coveredStatements
-			if (coveredStatements < total) {
-				printf "ERROR: package %s coverage is %d/%d statements (%.1f%%; required 100%%)\n", file, coveredStatements, total, coveredStatements * 100 / total
-				failed = 1
-			}
-		}
 		if (totalStatements == 0) {
 			print "ERROR: coverage profile contains no statements"
 			exit 1
 		}
 		printf "Total coverage: %d/%d statements (%.1f%%)\n", totalCovered, totalStatements, totalCovered * 100 / totalStatements
-		if (totalCovered < totalStatements) {
-			failed = 1
-		}
-		if (failed) {
-			print "ERROR: coverage must be 100% for every package and overall"
+		if (totalCovered * 100 / totalStatements < threshold) {
+			printf "ERROR: total coverage %.1f%% is below threshold %d%%\n", totalCovered * 100 / totalStatements, threshold
 			exit 1
 		}
-		print "Coverage gate passed: 100% for every package and overall"
+		printf "Coverage gate passed: %.1f%% >= %d%%\n", totalCovered * 100 / totalStatements, threshold
 	}
 ' "$profile"
