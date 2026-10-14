@@ -329,13 +329,34 @@ func (c *Client) GetMeetings(start, end string, lgroup int) ([]Meeting, error) {
 
 // GetNotifications retrieves notifications for a date range and type.
 // Endpoint: GET /api/v0.2/scheduling/notifications/{start}_{end}/{type}
+// notificationType is required; callers that want every section should fan out
+// across DefaultNotificationTypes instead of passing an empty type.
 func (c *Client) GetNotifications(start, end, notificationType string) ([]Notification, error) {
+	if notificationType == "" {
+		return nil, fmt.Errorf("notification type is required")
+	}
 	url := fmt.Sprintf("%s/scheduling/notifications/%s_%s/%s", c.baseURL, start, end, notificationType)
 	var notifications []Notification
 	if err := c.getJSON(url, &notifications); err != nil {
 		return nil, err
 	}
 	return notifications, nil
+}
+
+// GetNotificationsByTypes fetches and concatenates notifications for each type.
+func (c *Client) GetNotificationsByTypes(start, end string, types []string) ([]Notification, error) {
+	if len(types) == 0 {
+		types = DefaultNotificationTypes
+	}
+	var all []Notification
+	for _, notificationType := range types {
+		rows, err := c.GetNotifications(start, end, notificationType)
+		if err != nil {
+			return nil, fmt.Errorf("notifications type %s: %w", notificationType, err)
+		}
+		all = append(all, rows...)
+	}
+	return all, nil
 }
 
 // WMAssignment represents a Watchtower Meeting assignment.
@@ -405,7 +426,6 @@ func (c *Client) GetCheckRules() ([]CheckRule, error) {
 	return rules, nil
 }
 
-// getJSON performs a GET request and decodes the JSON response into the target.
 // getJSON performs a GET request and decodes the JSON response into the target.
 func (c *Client) getJSON(url string, target any) error {
 	resp, err := c.doAuthenticatedGet(url)

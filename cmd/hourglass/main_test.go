@@ -293,6 +293,7 @@ func TestRun_UsersRequiresJSON(t *testing.T) {
 }
 
 func TestReadCommands_HTTPTestServer(t *testing.T) {
+	assignee := 1
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		w.Header().Set("Content-Type", "application/json")
@@ -302,11 +303,43 @@ func TestReadCommands_HTTPTestServer(t *testing.T) {
 				ID: 1, Firstname: "Ada", Lastname: "Lovelace", Descriptor: "Ada Lovelace",
 			}}})
 		case strings.Contains(r.URL.Path, "/scheduling/mm/meeting/"):
-			_ = json.NewEncoder(w).Encode([]hourglass.Meeting{{Date: "2026-01-01", LGroup: 1}})
+			_ = json.NewEncoder(w).Encode([]hourglass.Meeting{{
+				Date: "2026-01-01", LGroup: 1,
+				TGW: []hourglass.MeetingPart{{ID: 100, Title: "Bible Reading"}},
+			}})
 		case strings.Contains(r.URL.Path, "/scheduling/av_attendant/"):
-			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{ID: 9, Type: "video", Date: "2026-01-01"}})
+			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{
+				ID: 9, Type: "video", Date: "2026-01-01", Status: "Aceito", Assignee: &assignee,
+			}})
+		case strings.Contains(r.URL.Path, "/scheduling/wm/"):
+			_ = json.NewEncoder(w).Encode([]hourglass.WMAssignment{{
+				ID: 7, Role: "chairman", Date: "2026-01-04", Status: "Recusado", Assignee: &assignee,
+			}})
+		case strings.HasSuffix(r.URL.Path, "/privileges"):
+			_ = json.NewEncoder(w).Encode([]hourglass.PrivilegeAssignment{{
+				ID: 4, Type: "reader", Date: "2026-01-04", Status: "Esperando", Assignee: &assignee,
+			}})
+		case strings.HasSuffix(r.URL.Path, "/check-rules"):
+			_ = json.NewEncoder(w).Encode([]hourglass.CheckRule{{
+				ID: 2, Rule: "no-double-book", Status: "pending", Part: 100, Assignment: "Bible Reading",
+			}})
 		case strings.Contains(r.URL.Path, "/scheduling/notifications/"):
-			_ = json.NewEncoder(w).Encode([]hourglass.Notification{{ID: 3, Status: "declined", Type: "pubwit"}})
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/mm"):
+				_ = json.NewEncoder(w).Encode([]hourglass.Notification{{
+					ID: 11, Status: "declined", Type: "mm", Date: "2026-01-01", Part: 100, Assignee: 1,
+				}, {
+					ID: 12, Status: "pending", Type: "mm", Date: "2026-01-01", Part: 100, Assignee: 2,
+				}})
+			case strings.HasSuffix(r.URL.Path, "/pubwit"):
+				_ = json.NewEncoder(w).Encode([]hourglass.Notification{{
+					ID: 3, Status: "declined", Type: "pubwit", Date: "2026-01-02", Assignee: 1, Part: 50,
+				}, {
+					ID: 4, Status: "complete", Type: "pubwit", Date: "2026-01-02", Assignee: 99, Part: 50,
+				}})
+			default:
+				_ = json.NewEncoder(w).Encode([]hourglass.Notification{})
+			}
 		default:
 			http.NotFound(w, r)
 		}
@@ -316,12 +349,16 @@ func TestReadCommands_HTTPTestServer(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
-		want string
+		want []string
 	}{
-		{"users", []string{"users", "--json"}, "Ada"},
-		{"schedule mm", []string{"schedule", "mm", "--from", "2026-01-01", "--to", "2026-01-31", "--lgroup", "1", "--json"}, "2026-01-01"},
-		{"schedule av", []string{"schedule", "av", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, "video"},
-		{"schedule notifications", []string{"schedule", "notifications", "--from", "2026-01-01", "--to", "2026-01-31", "--type", "pubwit", "--json"}, "pubwit"},
+		{"users", []string{"users", "--json"}, []string{"Ada"}},
+		{"schedule mm", []string{"schedule", "mm", "--from", "2026-01-01", "--to", "2026-01-31", "--lgroup", "1", "--json"}, []string{"2026-01-01", "Bible Reading", "declined", "Ada Lovelace"}},
+		{"schedule av", []string{"schedule", "av", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, []string{"video", "Aceito", "Ada Lovelace"}},
+		{"schedule notifications", []string{"schedule", "notifications", "--from", "2026-01-01", "--to", "2026-01-31", "--type", "pubwit", "--json"}, []string{"pubwit", "Ada Lovelace", "\"substitute_assigned\":true"}},
+		{"schedule notifications all types", []string{"schedule", "notifications", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, []string{"declined", "assignee_name"}},
+		{"schedule wm", []string{"schedule", "wm", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, []string{"chairman", "Recusado", "Ada Lovelace"}},
+		{"schedule privileges", []string{"schedule", "privileges", "--json"}, []string{"reader", "Esperando", "Ada Lovelace"}},
+		{"schedule check-rules", []string{"schedule", "check-rules", "--json"}, []string{"no-double-book", "pending"}},
 	}
 
 	for _, tc := range cases {
@@ -331,7 +368,9 @@ func TestReadCommands_HTTPTestServer(t *testing.T) {
 			cli.client.SetBaseURL(server.URL + "/api/v0.2")
 			err := cli.dispatch(tc.args)
 			require.NoError(t, err, stderr.String())
-			assert.Contains(t, stdout.String(), tc.want)
+			for _, want := range tc.want {
+				assert.Contains(t, stdout.String(), want)
+			}
 		})
 	}
 }
@@ -349,6 +388,79 @@ func TestReadCommands_Errors(t *testing.T) {
 	assert.Error(t, cli.ScheduleMeetings("2026-01-01", "2026-01-31", 0))
 	assert.Error(t, cli.ScheduleAVAttendants("2026-01-01", "2026-01-31"))
 	assert.Error(t, cli.ScheduleNotifications("2026-01-01", "2026-01-31", "mm"))
+	assert.Error(t, cli.ScheduleNotifications("2026-01-01", "2026-01-31", ""))
+	assert.Error(t, cli.ScheduleWM("2026-01-01", "2026-01-31"))
+	assert.Error(t, cli.Privileges())
+	assert.Error(t, cli.CheckRules())
+}
+
+func TestReadCommands_DownstreamErrors(t *testing.T) {
+	assignee := 1
+	mode := "users-fail"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/fsreport/users"):
+			if mode == "users-fail" {
+				http.Error(w, "users down", http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(hourglass.UsersResponse{Users: []hourglass.User{{ID: 1, Descriptor: "Ada"}}})
+		case strings.Contains(r.URL.Path, "/scheduling/mm/meeting/"):
+			_ = json.NewEncoder(w).Encode([]hourglass.Meeting{{Date: "2026-01-01"}})
+		case strings.Contains(r.URL.Path, "/scheduling/av_attendant/"):
+			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{ID: 1, Type: "video", Date: "2026-01-01"}})
+		case strings.Contains(r.URL.Path, "/scheduling/wm/"):
+			_ = json.NewEncoder(w).Encode([]hourglass.WMAssignment{{ID: 1, Role: "reader", Assignee: &assignee}})
+		case strings.HasSuffix(r.URL.Path, "/privileges"):
+			_ = json.NewEncoder(w).Encode([]hourglass.PrivilegeAssignment{{ID: 1, Type: "reader", Assignee: &assignee}})
+		case strings.Contains(r.URL.Path, "/scheduling/notifications/"):
+			if mode == "mm-status-fail" && strings.HasSuffix(r.URL.Path, "/mm") {
+				http.Error(w, "mm status down", http.StatusInternalServerError)
+				return
+			}
+			notifType := "mm"
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/ava"):
+				notifType = "ava"
+			case strings.HasSuffix(r.URL.Path, "/fm"):
+				notifType = "fm"
+			case strings.HasSuffix(r.URL.Path, "/pubwit"):
+				notifType = "pubwit"
+			}
+			_ = json.NewEncoder(w).Encode([]hourglass.Notification{{
+				ID: 1, Type: notifType, Status: "declined", Date: "2026-01-01", Part: 1, Assignee: 1,
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cli := newCLI(io.Discard, io.Discard, os.Getenv)
+	cli.client.SetBaseURL(server.URL + "/api/v0.2")
+
+	mode = "users-fail"
+	assert.Error(t, cli.ScheduleAVAttendants("2026-01-01", "2026-01-31"))
+	assert.Error(t, cli.ScheduleWM("2026-01-01", "2026-01-31"))
+	assert.Error(t, cli.Privileges())
+	assert.Error(t, cli.ScheduleNotifications("2026-01-01", "2026-01-31", "ava"))
+	assert.Error(t, cli.ScheduleMeetings("2026-01-01", "2026-01-31", 0))
+
+	mode = "mm-status-fail"
+	assert.Error(t, cli.ScheduleMeetings("2026-01-01", "2026-01-31", 0))
+
+	// Non-mm type still exercises needsMMTitles false path with successful enrichment.
+	mode = "ok"
+	require.NoError(t, cli.ScheduleNotifications("2026-01-01", "2026-01-31", "ava"))
+}
+
+func TestNeedsMMTitles(t *testing.T) {
+	assert.True(t, needsMMTitles("", nil))
+	assert.True(t, needsMMTitles("mm", nil))
+	assert.False(t, needsMMTitles("ava", nil))
+	assert.False(t, needsMMTitles("ava", []hourglass.Notification{{Type: "ava"}}))
+	assert.True(t, needsMMTitles("custom", []hourglass.Notification{{Type: "mm"}}))
 }
 
 func TestPrintJSON_MarshalError(t *testing.T) {
@@ -372,6 +484,7 @@ func TestRun_ScheduleValidation(t *testing.T) {
 		{"av missing flags", []string{"schedule", "av"}, "missing required flags"},
 		{"notifications missing flags", []string{"schedule", "notifications", "--from", "2026-01-01"}, "missing required flags"},
 		{"notifications bad type", []string{"schedule", "notifications", "--from", "a", "--to", "b", "--type", "accepted"}, "failed to get notifications"},
+		{"wm missing flags", []string{"schedule", "wm", "--json"}, "missing required --from/--to for wm"},
 		{"no subcommand", []string{"schedule"}, "unknown schedule subcommand"},
 		{"missing from value", []string{"schedule", "mm", "--from"}, "missing value for --from"},
 		{"missing to value", []string{"schedule", "mm", "--to"}, "missing value for --to"},
