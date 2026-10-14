@@ -34,6 +34,40 @@ type AVAttendant struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// WMAssignment represents a Watchtower Meeting assignment.
+type WMAssignment struct {
+	ID        int       `json:"id"`
+	Role      string    `json:"role"`     // chairman, reader, speaker, prayers
+	Assignee  *int      `json:"assignee"` // Nullable - user ID or null if vacant
+	Status    string    `json:"status"`   // Aceito, Esperando, NaoEnviado, Recusado
+	Date      string    `json:"date"`     // Format: "2026-01-01"
+	Extra     bool      `json:"extra"`
+	Confirmed bool      `json:"confirmed"`
+	Published bool      `json:"published"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PrivilegeAssignment represents a privilege/assignment status.
+type PrivilegeAssignment struct {
+	ID        int    `json:"id"`
+	Type      string `json:"type"`     // e.g., "chairman", "reader", "speaker", "prayers"
+	Assignee  *int   `json:"assignee"` // Nullable - user ID or null if vacant
+	Status    string `json:"status"`   // Aceito, Esperando, NaoEnviado, Recusado
+	Date      string `json:"date"`     // Format: "2026-01-01"
+	Confirmed bool   `json:"confirmed"`
+	Published bool   `json:"published"`
+}
+
+// CheckRule represents a check rule status.
+type CheckRule struct {
+	ID         int    `json:"id"`
+	Rule       string `json:"rule"`       // rule name/description
+	Status     string `json:"status"`     // pending, complete, declined
+	Part       int    `json:"part"`       // meeting part ID
+	Assignment string `json:"assignment"` // assignment description
+}
+
 // Meeting represents a midweek meeting schedule.
 type Meeting struct {
 	Date   string        `json:"date"`
