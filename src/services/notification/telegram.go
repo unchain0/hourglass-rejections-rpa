@@ -26,7 +26,11 @@ type CheckNowCallback func(ctx context.Context, chatID int64) error
 // botNewFunc is a package-level variable to allow testing the constructor.
 var botNewFunc = bot.New
 
+// noopDefaultUpdateHandler is a no-op handler for updates that are not handled.
 func noopDefaultUpdateHandler(_ context.Context, _ *bot.Bot, _ *models.Update) {}
+
+// supportedLocales are the locales we register commands for.
+var supportedLocales = []string{"en", "pt-BR", "es", "fr"}
 
 // TelegramNotifier sends notifications via Telegram Bot.
 type rateLimiter struct {
@@ -277,25 +281,9 @@ func (t *TelegramNotifier) StartBot(ctx context.Context, prefManager *preference
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "cancel_config", bot.MatchTypeExact, t.handleCancel)
 	t.bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "lang_", bot.MatchTypePrefix, t.handleLanguageSelect)
 
-	commands := []models.BotCommand{
-		{Command: "start", Description: "Welcome message"},
-		{Command: "configure", Description: "Configure notification sections"},
-		{Command: "status", Description: "View current preferences"},
-		{Command: "stats", Description: "View bot statistics"},
-		{Command: "whoami", Description: "View your account details"},
-		{Command: "language", Description: "Change language"},
-		{Command: "help", Description: "Show available commands"},
-		{Command: "checknow", Description: "Immediate check"},
-		{Command: "allow", Description: "Authorize a user (admin only)"},
-		{Command: "deny", Description: "Revoke a user's access (admin only)"},
-		{Command: "users", Description: "List authorized users (admin only)"},
-	}
-
-	_, err := t.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{
-		Commands: commands,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to set bot commands: %w", err)
+	// Register commands per locale
+	if err := t.registerCommands(ctx); err != nil {
+		return fmt.Errorf("failed to register bot commands: %w", err)
 	}
 
 	botCtx, cancel := context.WithCancel(ctx)
@@ -316,6 +304,48 @@ func (t *TelegramNotifier) StopBot() error {
 	if t.cancelFunc != nil {
 		t.cancelFunc()
 		t.cancelFunc = nil
+	}
+
+	return nil
+}
+
+// registerCommands registers the bot commands per supported locale using language_code,
+// plus a default registration with no language_code so Telegram uses the user's language.
+func buildBotCommands(lang string) []models.BotCommand {
+	return []models.BotCommand{
+		{Command: "start", Description: i18n.Localize(lang, "cmd_start", nil)},
+		{Command: "configure", Description: i18n.Localize(lang, "cmd_configure", nil)},
+		{Command: "status", Description: i18n.Localize(lang, "cmd_status", nil)},
+		{Command: "stats", Description: i18n.Localize(lang, "cmd_stats", nil)},
+		{Command: "whoami", Description: i18n.Localize(lang, "cmd_whoami", nil)},
+		{Command: "language", Description: i18n.Localize(lang, "cmd_language", nil)},
+		{Command: "help", Description: i18n.Localize(lang, "cmd_help", nil)},
+		{Command: "checknow", Description: i18n.Localize(lang, "cmd_checknow", nil)},
+		{Command: "allow", Description: i18n.Localize(lang, "cmd_allow", nil)},
+		{Command: "deny", Description: i18n.Localize(lang, "cmd_deny", nil)},
+		{Command: "users", Description: i18n.Localize(lang, "cmd_users", nil)},
+	}
+}
+
+func (t *TelegramNotifier) registerCommands(ctx context.Context) error {
+	// Register with language_code for each supported locale
+	for _, lang := range supportedLocales {
+		_, err := t.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{
+			Commands:     buildBotCommands(lang),
+			LanguageCode: lang,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set bot commands for locale %s: %w", lang, err)
+		}
+	}
+
+	// Register default commands (no language_code) - Telegram uses user's language_code
+	// but we set this so the bot's own commands are available in the default language
+	_, err := t.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{
+		Commands: buildBotCommands("en"),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set default bot commands: %w", err)
 	}
 
 	return nil
@@ -1107,6 +1137,14 @@ func (t *TelegramNotifier) handleLanguageSelect(ctx context.Context, b *bot.Bot,
 			ParseMode: models.ParseModeHTML,
 		})
 	}
+
+	// Re-register commands with chat scope for the selected language
+	_, _ = b.SetMyCommands(ctx, &bot.SetMyCommandsParams{
+		Commands: buildBotCommands(selectedLang),
+		Scope: &models.BotCommandScopeChat{
+			ChatID: chatID,
+		},
+	})
 }
 
 const telegramMessageLimit = 4096
