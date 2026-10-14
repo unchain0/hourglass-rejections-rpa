@@ -121,6 +121,56 @@ func TestEnrichMeetingsWithAssignments(t *testing.T) {
 	assert.Equal(t, "Speaker/Chairman", got[1].Assignments[0].Title)
 }
 
+func TestEnrichMeetingsWithAssignments_ScopesRowsToMeetingParts(t *testing.T) {
+	users := IndexUsersByID([]User{
+		{ID: 1, Descriptor: "Ada Lovelace"},
+		{ID: 2, Descriptor: "Grace Hopper"},
+	})
+	// Two language groups on the same date with disjoint part IDs.
+	meetings := []Meeting{
+		{
+			Date: "2026-01-01", LGroup: 10,
+			TGW: []MeetingPart{{ID: 100, Title: "Bible Reading A"}},
+			FM:  []MeetingPart{{ID: 101, Title: "Initial Call A"}},
+		},
+		{
+			Date: "2026-01-01", LGroup: 20,
+			TGW: []MeetingPart{{ID: 200, Title: "Bible Reading B"}},
+			LAC: []MeetingPart{{ID: 201, Title: "Needs B"}},
+		},
+	}
+	notifications := []Notification{
+		{ID: 1, Type: "mm", Date: "2026-01-01", Part: 100, Status: "declined", Assignee: 1},
+		{ID: 2, Type: "mm", Date: "2026-01-01", Part: 101, Status: "pending", Assignee: 1},
+		{ID: 3, Type: "mm", Date: "2026-01-01", Part: 200, Status: "complete", Assignee: 2},
+		{ID: 4, Type: "mm", Date: "2026-01-01", Part: 201, Status: "declined", Assignee: 2},
+		// Part absent from both meetings stays as a leftover notification-only row.
+		{ID: 5, Type: "mm", Date: "2026-01-01", Part: 999, Flag: 20, Status: "pending", Assignee: 1},
+	}
+
+	got := EnrichMeetingsWithAssignments(meetings, notifications, users)
+	require.Len(t, got, 3)
+
+	assert.Equal(t, 10, got[0].LGroup)
+	require.Len(t, got[0].Assignments, 2)
+	assert.Equal(t, 100, got[0].Assignments[0].PartID)
+	assert.Equal(t, 101, got[0].Assignments[1].PartID)
+	assert.Equal(t, "Bible Reading A", got[0].Assignments[0].Title)
+
+	assert.Equal(t, 20, got[1].LGroup)
+	require.Len(t, got[1].Assignments, 2)
+	assert.Equal(t, 200, got[1].Assignments[0].PartID)
+	assert.Equal(t, 201, got[1].Assignments[1].PartID)
+	assert.Equal(t, "Needs B", got[1].Assignments[1].Title)
+
+	// Leftover part 999 must not be duplicated onto either meeting.
+	assert.Equal(t, "2026-01-01", got[2].Date)
+	assert.Zero(t, got[2].LGroup)
+	require.Len(t, got[2].Assignments, 1)
+	assert.Equal(t, 999, got[2].Assignments[0].PartID)
+	assert.Equal(t, "Speaker/Chairman", got[2].Assignments[0].Title)
+}
+
 func TestPartTitlesFromMeetings(t *testing.T) {
 	titles := PartTitlesFromMeetings([]Meeting{{
 		TGW: []MeetingPart{{ID: 1, Title: "A"}},

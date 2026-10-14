@@ -142,7 +142,46 @@ func EnrichAVAttendants(attendants []AVAttendant, users map[int]User) []AVAttend
 	return out
 }
 
+// meetingPartIDs collects TGW/FM/LAC part IDs that belong to one meeting.
+func meetingPartIDs(meeting Meeting) map[int]struct{} {
+	ids := make(map[int]struct{}, len(meeting.TGW)+len(meeting.FM)+len(meeting.LAC))
+	for _, part := range meeting.TGW {
+		ids[part.ID] = struct{}{}
+	}
+	for _, part := range meeting.FM {
+		ids[part.ID] = struct{}{}
+	}
+	for _, part := range meeting.LAC {
+		ids[part.ID] = struct{}{}
+	}
+	return ids
+}
+
+// assignmentsForMeeting keeps only rows whose part ID appears on the meeting.
+// soleOnDate lets a part-less meeting keep the full date feed when it is the only
+// meeting for that date; with siblings present, part-less meetings get nothing so
+// statuses are not duplicated across groups.
+func assignmentsForMeeting(rows []MMAssignmentView, parts map[int]struct{}, soleOnDate bool) []MMAssignmentView {
+	if len(parts) == 0 {
+		if !soleOnDate || len(rows) == 0 {
+			return nil
+		}
+		out := make([]MMAssignmentView, len(rows))
+		copy(out, rows)
+		return out
+	}
+	out := make([]MMAssignmentView, 0, len(rows))
+	for _, row := range rows {
+		if _, ok := parts[row.PartID]; ok {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // EnrichMeetingsWithAssignments attaches per-assignment status rows from mm notifications.
+// Rows are scoped to each meeting's part IDs so multiple meetings on one date do not
+// inherit each other's assignment statuses.
 func EnrichMeetingsWithAssignments(
 	meetings []Meeting,
 	notifications []Notification,
@@ -168,27 +207,69 @@ func EnrichMeetingsWithAssignments(
 		byDate[notif.Date] = append(byDate[notif.Date], view)
 	}
 
+	meetingsPerDate := make(map[string]int, len(meetings))
+	for _, meeting := range meetings {
+		meetingsPerDate[meeting.Date]++
+	}
+
 	out := make([]MeetingView, 0, len(meetings))
 	seen := make(map[string]bool, len(meetings))
+	claimedParts := make(map[string]map[int]struct{}, len(meetings))
+	tookAllForDate := make(map[string]bool, len(meetings))
 	for _, meeting := range meetings {
 		seen[meeting.Date] = true
+		parts := meetingPartIDs(meeting)
+		soleOnDate := meetingsPerDate[meeting.Date] == 1
+		assignments := assignmentsForMeeting(byDate[meeting.Date], parts, soleOnDate)
+		if len(parts) == 0 {
+			if soleOnDate && len(assignments) > 0 {
+				tookAllForDate[meeting.Date] = true
+			}
+		} else {
+			claimed := claimedParts[meeting.Date]
+			if claimed == nil {
+				claimed = make(map[int]struct{}, len(parts))
+				claimedParts[meeting.Date] = claimed
+			}
+			for partID := range parts {
+				claimed[partID] = struct{}{}
+			}
+		}
 		out = append(out, MeetingView{
 			Date:        meeting.Date,
 			LGroup:      meeting.LGroup,
 			TGW:         meeting.TGW,
 			FM:          meeting.FM,
 			LAC:         meeting.LAC,
-			Assignments: byDate[meeting.Date],
+			Assignments: assignments,
 		})
 	}
-	// Include notification-only dates so status rows are not dropped.
+	// Include notification-only dates, plus leftover rows whose parts matched no meeting.
 	for date, assignments := range byDate {
-		if seen[date] {
+		if !seen[date] {
+			out = append(out, MeetingView{
+				Date:        date,
+				Assignments: assignments,
+			})
+			continue
+		}
+		if tookAllForDate[date] {
+			continue
+		}
+		claimed := claimedParts[date]
+		var leftovers []MMAssignmentView
+		for _, row := range assignments {
+			if _, ok := claimed[row.PartID]; ok {
+				continue
+			}
+			leftovers = append(leftovers, row)
+		}
+		if len(leftovers) == 0 {
 			continue
 		}
 		out = append(out, MeetingView{
 			Date:        date,
-			Assignments: assignments,
+			Assignments: leftovers,
 		})
 	}
 	return out
