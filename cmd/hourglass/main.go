@@ -338,7 +338,7 @@ func (c *CLI) AssignSwap(opts assignSwapOpts) error {
 	if opts.dryRun {
 		return c.printJSON(preview)
 	}
-	return c.applyAssignSwap(opts, *row, target, users, preview)
+	return c.applyAssignSwap(opts, from, until, target, users, preview)
 }
 
 func validateAssignSwapOpts(opts assignSwapOpts, getenv func(string) string) error {
@@ -374,15 +374,21 @@ func resolveAssignSwapRange(opts assignSwapOpts) (from, until string) {
 
 func (c *CLI) applyAssignSwap(
 	opts assignSwapOpts,
-	row hourglass.AVAttendant,
+	from, until string,
 	target hourglass.User,
 	users map[int]hourglass.User,
 	preview hourglass.AssignSwapResult,
 ) error {
-	if subtle.ConstantTimeCompare([]byte(opts.confirm), []byte(preview.Confirm)) != 1 {
+	// Re-load immediately before write so a concurrent edit invalidates confirm.
+	fresh, err := c.client.FindAVAttendantByID(opts.slotID, from, until, opts.lgroup)
+	if err != nil {
+		return err
+	}
+	live := hourglass.BuildAssignSwapPreview(*fresh, target, opts.lgroup, users)
+	if subtle.ConstantTimeCompare([]byte(opts.confirm), []byte(live.Confirm)) != 1 {
 		return exitCode2("confirm token mismatch or stale preview; re-run --dry-run")
 	}
-	next := row
+	next := *fresh
 	tid := target.ID
 	next.Assignee = &tid
 	updated, err := c.client.SaveAVAttendantAssignee(next, opts.lgroup)
@@ -393,6 +399,7 @@ func (c *CLI) applyAssignSwap(
 	result.DryRun = false
 	result.Applied = true
 	result.Confirm = ""
+	result.Before = live.Before
 	result.After.AssigneeID = updated.Assignee
 	result.After.AssigneeName = hourglass.LookupOptionalUserName(users, updated.Assignee)
 	if !updated.UpdatedAt.IsZero() {

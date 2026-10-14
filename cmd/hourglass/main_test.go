@@ -964,3 +964,59 @@ func TestNewCLI_AllowAssignEnv(t *testing.T) {
 	assert.True(t, bl.allowAssign)
 	assert.False(t, bl.allowSend)
 }
+
+func TestAssignSwap_RefetchRejectsConcurrentEdit(t *testing.T) {
+	cur := 10
+	updatedAt := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	gets := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/fsreport/users"):
+			_ = json.NewEncoder(w).Encode(hourglass.UsersResponse{Users: []hourglass.User{
+				{ID: 10, Descriptor: "Ada"}, {ID: 20, Descriptor: "Bob"},
+			}})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/scheduling/av_attendant/"):
+			gets++
+			row := hourglass.AVAttendant{
+				ID: 42, Type: "mics", Slot: 1, Date: "2026-03-01",
+				Assignee: &cur, UpdatedAt: updatedAt,
+			}
+			if gets > 1 {
+				// Concurrent edit bumped version after the dry-run snapshot.
+				row.UpdatedAt = updatedAt.Add(time.Hour)
+			}
+			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{row})
+		case r.Method == http.MethodPut:
+			t.Fatal("PUT must not run when confirm is stale after re-fetch")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout bytes.Buffer
+	cli := newCLI(&stdout, io.Discard, func(k string) string {
+		if k == "HOURGLASS_ALLOW_ASSIGN" {
+			return "1"
+		}
+		return ""
+	})
+	cli.client.SetBaseURL(server.URL + "/api/v0.2")
+	bl, _ := cli.client.GetTransport().(*blocklistTransport)
+	bl.allowAssign = true
+
+	require.NoError(t, cli.AssignSwap(assignSwapOpts{
+		slotID: 42, toUser: "20", dryRun: true,
+		fromDate: "2026-03-01", untilDate: "2026-03-07",
+	}))
+	var preview hourglass.AssignSwapResult
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &preview))
+
+	err := cli.AssignSwap(assignSwapOpts{
+		slotID: 42, toUser: "20", dryRun: false, confirm: preview.Confirm,
+		fromDate: "2026-03-01", untilDate: "2026-03-07",
+	})
+	var code2 *exitCode2Error
+	require.ErrorAs(t, err, &code2)
+	assert.Contains(t, err.Error(), "stale preview")
+}
