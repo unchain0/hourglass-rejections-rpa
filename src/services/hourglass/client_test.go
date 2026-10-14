@@ -1179,3 +1179,151 @@ func newTokenManagerWithPersistedTokens(t *testing.T, tokens *webauthn.AuthToken
 
 	return tm
 }
+
+func TestClient_GetWM(t *testing.T) {
+	assignee := 42
+	expected := []WMAssignment{{
+		ID: 1, Role: "chairman", Assignee: &assignee, Status: "Aceito", Date: "2026-01-04",
+	}}
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/scheduling/wm/2026-01-01_2026-01-31", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(expected)
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetWM("2026-01-01", "2026-01-31")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "chairman", rows[0].Role)
+	assert.Equal(t, "Aceito", rows[0].Status)
+	assert.Equal(t, 42, *rows[0].Assignee)
+}
+
+func TestClient_GetWM_Error(t *testing.T) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetWM("2026-01-01", "2026-01-31")
+	assert.Error(t, err)
+	assert.Nil(t, rows)
+}
+
+func TestClient_GetPrivileges(t *testing.T) {
+	assignee := 7
+	expected := []PrivilegeAssignment{{
+		ID: 3, Type: "reader", Assignee: &assignee, Status: "Esperando", Date: "2026-01-04",
+	}}
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/privileges", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(expected)
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetPrivileges()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "reader", rows[0].Type)
+	assert.Equal(t, "Esperando", rows[0].Status)
+}
+
+func TestClient_GetPrivileges_Error(t *testing.T) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetPrivileges()
+	assert.Error(t, err)
+	assert.Nil(t, rows)
+}
+
+func TestClient_GetCheckRules(t *testing.T) {
+	expected := []CheckRule{{
+		ID: 9, Rule: "no-conflict", Status: "complete", Part: 10, Assignment: "Talk",
+	}}
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/check-rules", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(expected)
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetCheckRules()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "no-conflict", rows[0].Rule)
+}
+
+func TestClient_GetCheckRules_Error(t *testing.T) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetCheckRules()
+	assert.Error(t, err)
+	assert.Nil(t, rows)
+}
+
+func TestClient_GetNotifications_EmptyType(t *testing.T) {
+	client := NewClient()
+	rows, err := client.GetNotifications("2026-01-01", "2026-01-31", "")
+	assert.Nil(t, rows)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notification type is required")
+}
+
+func TestClient_GetNotificationsByTypes(t *testing.T) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/mm"):
+			json.NewEncoder(w).Encode([]Notification{{ID: 1, Type: "mm", Status: "declined"}})
+		case strings.HasSuffix(r.URL.Path, "/ava"):
+			json.NewEncoder(w).Encode([]Notification{{ID: 2, Type: "ava", Status: "pending"}})
+		default:
+			json.NewEncoder(w).Encode([]Notification{})
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetNotificationsByTypes("2026-01-01", "2026-01-31", []string{"mm", "ava"})
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "mm", rows[0].Type)
+	assert.Equal(t, "ava", rows[1].Type)
+}
+
+func TestClient_GetNotificationsByTypes_DefaultTypesAndError(t *testing.T) {
+	server := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/fm") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Notification{})
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.baseURL = server.URL
+	rows, err := client.GetNotificationsByTypes("2026-01-01", "2026-01-31", nil)
+	assert.Nil(t, rows)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notifications type fm")
+}

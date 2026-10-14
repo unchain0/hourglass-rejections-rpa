@@ -170,31 +170,85 @@ func (c *CLI) Users() error {
 	return c.printJSON(users)
 }
 
-// ScheduleMeetings prints GET /scheduling/mm/meeting/{start}_{end} as JSON.
+// ScheduleMeetings prints midweek meetings with per-assignment acceptance/decline status.
 func (c *CLI) ScheduleMeetings(start, end string, lgroup int) error {
 	meetings, err := c.client.GetMeetings(start, end, lgroup)
 	if err != nil {
 		return fmt.Errorf("failed to get meetings: %w", err)
 	}
-	return c.printJSON(meetings)
+	notifications, err := c.client.GetNotifications(start, end, "mm")
+	if err != nil {
+		return fmt.Errorf("failed to get mm assignment statuses: %w", err)
+	}
+	users, err := c.loadUserIndex()
+	if err != nil {
+		return err
+	}
+	return c.printJSON(hourglass.EnrichMeetingsWithAssignments(meetings, notifications, users))
 }
 
-// ScheduleAVAttendants prints GET /scheduling/av_attendant/{start}_{end} as JSON.
+// ScheduleAVAttendants prints AV rows with type, status, and resolved assignee names.
 func (c *CLI) ScheduleAVAttendants(start, end string) error {
 	attendants, err := c.client.GetAVAttendants(start, end)
 	if err != nil {
 		return fmt.Errorf("failed to get AV attendants: %w", err)
 	}
-	return c.printJSON(attendants)
+	users, err := c.loadUserIndex()
+	if err != nil {
+		return err
+	}
+	return c.printJSON(hourglass.EnrichAVAttendants(attendants, users))
 }
 
-// ScheduleNotifications prints GET /scheduling/notifications/{start}_{end}/{type} as JSON.
+// ScheduleNotifications prints declined assignments enriched with name, assignment, and substitute status.
+// When notifType is empty, every DefaultNotificationTypes section is fetched.
 func (c *CLI) ScheduleNotifications(start, end, notifType string) error {
-	notifications, err := c.client.GetNotifications(start, end, notifType)
+	var (
+		notifications []hourglass.Notification
+		err           error
+	)
+	if notifType == "" {
+		notifications, err = c.client.GetNotificationsByTypes(start, end, hourglass.DefaultNotificationTypes)
+	} else {
+		notifications, err = c.client.GetNotifications(start, end, notifType)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get notifications: %w", err)
 	}
-	return c.printJSON(notifications)
+
+	users, err := c.loadUserIndex()
+	if err != nil {
+		return err
+	}
+
+	partTitles := map[int]string{}
+	if needsMMTitles(notifType, notifications) {
+		if meetings, meetErr := c.client.GetMeetings(start, end, 0); meetErr == nil {
+			partTitles = hourglass.PartTitlesFromMeetings(meetings)
+		}
+	}
+
+	return c.printJSON(hourglass.EnrichDeclinedNotifications(notifications, users, partTitles))
+}
+
+func needsMMTitles(notifType string, notifications []hourglass.Notification) bool {
+	if notifType == "" || notifType == "mm" {
+		return true
+	}
+	for _, n := range notifications {
+		if n.Type == "mm" {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *CLI) loadUserIndex() (map[int]hourglass.User, error) {
+	users, err := c.client.GetUsers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get users: %w", err)
+	}
+	return hourglass.IndexUsersByID(users), nil
 }
 
 func (c *CLI) printJSON(v any) error {
@@ -206,14 +260,30 @@ func (c *CLI) printJSON(v any) error {
 	return nil
 }
 
-// ScheduleWM is not implemented yet.
-func (c *CLI) ScheduleWM() error {
-	return exitCode2("not implemented yet: endpoint not discovered")
+// ScheduleWM prints Watchtower Meeting assignments with status and resolved names.
+func (c *CLI) ScheduleWM(start, end string) error {
+	rows, err := c.client.GetWM(start, end)
+	if err != nil {
+		return fmt.Errorf("failed to get WM: %w", err)
+	}
+	users, err := c.loadUserIndex()
+	if err != nil {
+		return err
+	}
+	return c.printJSON(hourglass.EnrichWMAssignments(rows, users))
 }
 
-// Privileges is not implemented yet.
+// Privileges prints privilege rows with status and resolved assignee names.
 func (c *CLI) Privileges() error {
-	return exitCode2("not implemented yet: endpoint not discovered")
+	privileges, err := c.client.GetPrivileges()
+	if err != nil {
+		return fmt.Errorf("failed to get privileges: %w", err)
+	}
+	users, err := c.loadUserIndex()
+	if err != nil {
+		return err
+	}
+	return c.printJSON(hourglass.EnrichPrivileges(privileges, users))
 }
 
 // Assign is not implemented yet; dry-run unless --apply is supplied by the caller.
@@ -226,9 +296,13 @@ func (c *CLI) Unassign() error {
 	return exitCode2("not implemented yet: endpoint not discovered")
 }
 
-// CheckRules is not implemented yet.
+// CheckRules retrieves check rules status information as JSON.
 func (c *CLI) CheckRules() error {
-	return exitCode2("not implemented yet: endpoint not discovered")
+	rules, err := c.client.GetCheckRules()
+	if err != nil {
+		return fmt.Errorf("failed to get check rules: %w", err)
+	}
+	return c.printJSON(rules)
 }
 
 func (c *CLI) dispatch(args []string) error {
@@ -357,7 +431,11 @@ func (c *CLI) runSchedule(args []string) error {
 func (c *CLI) dispatchSchedule(parsed scheduleArgs) error {
 	switch parsed.subcommand {
 	case "wm":
-		return c.ScheduleWM()
+		if parsed.fromDate == "" || parsed.toDate == "" {
+			fmt.Fprintf(c.stderr, "Usage: hourglass schedule wm --from YYYY-MM-DD --to YYYY-MM-DD --json\n")
+			return errors.New("missing required --from/--to for wm")
+		}
+		return c.ScheduleWM(parsed.fromDate, parsed.toDate)
 	case "privileges":
 		return c.Privileges()
 	case "assign":
@@ -402,14 +480,9 @@ func (c *CLI) runScheduleAV(parsed scheduleArgs) error {
 }
 
 func (c *CLI) runScheduleNotifications(parsed scheduleArgs) error {
-	if parsed.fromDate == "" || parsed.toDate == "" || parsed.notifType == "" {
-		fmt.Fprintf(c.stderr, "Usage: hourglass schedule notifications --from YYYY-MM-DD --to YYYY-MM-DD --type mm|ava|fm|pubwit [--json]\n")
+	if parsed.fromDate == "" || parsed.toDate == "" {
+		fmt.Fprintf(c.stderr, "Usage: hourglass schedule notifications --from YYYY-MM-DD --to YYYY-MM-DD [--type mm|ava|fm|pubwit] --json\n")
 		return errors.New("missing required flags")
-	}
-	valid := map[string]bool{"mm": true, "ava": true, "fm": true, "pubwit": true}
-	if !valid[parsed.notifType] {
-		fmt.Fprintf(c.stderr, "Invalid type: %s. Use mm, ava, fm, pubwit\n", parsed.notifType)
-		return errors.New("invalid notification type")
 	}
 	return c.ScheduleNotifications(parsed.fromDate, parsed.toDate, parsed.notifType)
 }

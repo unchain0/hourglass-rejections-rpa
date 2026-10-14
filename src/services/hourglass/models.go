@@ -27,10 +27,45 @@ type AVAttendant struct {
 	Slot      int       `json:"slot"`
 	Date      string    `json:"date"` // Format: "2026-03-01"
 	Extra     bool      `json:"extra"`
+	Status    string    `json:"status"` // Aceito/Esperando/NaoEnviado/Recusado or pending/complete/declined
 	Confirmed bool      `json:"confirmed"`
 	Published bool      `json:"published"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// WMAssignment represents a Watchtower Meeting assignment.
+type WMAssignment struct {
+	ID        int       `json:"id"`
+	Role      string    `json:"role"`     // chairman, reader, speaker, prayers
+	Assignee  *int      `json:"assignee"` // Nullable - user ID or null if vacant
+	Status    string    `json:"status"`   // Aceito, Esperando, NaoEnviado, Recusado
+	Date      string    `json:"date"`     // Format: "2026-01-01"
+	Extra     bool      `json:"extra"`
+	Confirmed bool      `json:"confirmed"`
+	Published bool      `json:"published"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PrivilegeAssignment represents a privilege/assignment status.
+type PrivilegeAssignment struct {
+	ID        int    `json:"id"`
+	Type      string `json:"type"`     // e.g., "chairman", "reader", "speaker", "prayers"
+	Assignee  *int   `json:"assignee"` // Nullable - user ID or null if vacant
+	Status    string `json:"status"`   // Aceito, Esperando, NaoEnviado, Recusado
+	Date      string `json:"date"`     // Format: "2026-01-01"
+	Confirmed bool   `json:"confirmed"`
+	Published bool   `json:"published"`
+}
+
+// CheckRule represents a check rule status.
+type CheckRule struct {
+	ID         int    `json:"id"`
+	Rule       string `json:"rule"`       // rule name/description
+	Status     string `json:"status"`     // pending, complete, declined
+	Part       int    `json:"part"`       // meeting part ID
+	Assignment string `json:"assignment"` // assignment description
 }
 
 // Meeting represents a midweek meeting schedule.
@@ -64,6 +99,7 @@ type Participant struct {
 	Type      string `json:"type"` // e.g., "tgw", "fm", "lac"
 	Slot      int    `json:"slot"`
 	Optional  bool   `json:"optional"`
+	Status    string `json:"status"` // Aceito/Esperando/NaoEnviado/Recusado or pending/complete/declined
 	Confirmed bool   `json:"confirmed"`
 }
 
@@ -107,3 +143,85 @@ const (
 	// StatusDeclined represents a declined notification.
 	StatusDeclined NotificationStatus = "declined"
 )
+
+// DefaultNotificationTypes are the section codes used when notifications --type is omitted.
+var DefaultNotificationTypes = []string{"mm", "ava", "fm", "pubwit"}
+
+// DeclinedAssignment is a declined notification enriched for CLI consumers.
+type DeclinedAssignment struct {
+	ID                 int    `json:"id"`
+	Type               string `json:"type"`
+	Date               string `json:"date"`
+	Part               int    `json:"part"`
+	Classroom          int    `json:"classroom"`
+	Assignment         string `json:"assignment"`
+	AssigneeID         int    `json:"assignee_id"`
+	AssigneeName       string `json:"assignee_name"`
+	Status             string `json:"status"`
+	SubstituteAssigned bool   `json:"substitute_assigned"`
+}
+
+// AVAttendantView is an AV assignment with a resolved assignee name.
+type AVAttendantView struct {
+	ID           int       `json:"id"`
+	Type         string    `json:"type"`
+	AssigneeID   *int      `json:"assignee_id"`
+	AssigneeName string    `json:"assignee_name,omitempty"`
+	Slot         int       `json:"slot"`
+	Date         string    `json:"date"`
+	Extra        bool      `json:"extra"`
+	Status       string    `json:"status"`
+	Confirmed    bool      `json:"confirmed"`
+	Published    bool      `json:"published"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// MMAssignmentView is a midweek assignment with status and resolved name.
+type MMAssignmentView struct {
+	Date         string `json:"date"`
+	PartID       int    `json:"part_id"`
+	Title        string `json:"title"`
+	Flag         int    `json:"flag"`
+	AssigneeID   int    `json:"assignee_id"`
+	AssigneeName string `json:"assignee_name"`
+	Status       string `json:"status"`
+	Classroom    int    `json:"classroom"`
+}
+
+// MeetingView is a midweek meeting schedule plus per-assignment status rows.
+type MeetingView struct {
+	Date        string             `json:"date"`
+	LGroup      int                `json:"lgroup"`
+	TGW         []MeetingPart      `json:"tgw"`
+	FM          []MeetingPart      `json:"fm"`
+	LAC         []MeetingPart      `json:"lac"`
+	Assignments []MMAssignmentView `json:"assignments"`
+}
+
+// WMAssignmentView is a Watchtower Meeting assignment with a resolved name.
+type WMAssignmentView struct {
+	ID           int       `json:"id"`
+	Role         string    `json:"role"`
+	AssigneeID   *int      `json:"assignee_id"`
+	AssigneeName string    `json:"assignee_name,omitempty"`
+	Status       string    `json:"status"`
+	Date         string    `json:"date"`
+	Extra        bool      `json:"extra"`
+	Confirmed    bool      `json:"confirmed"`
+	Published    bool      `json:"published"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// PrivilegeAssignmentView is a privilege row with a resolved assignee name.
+type PrivilegeAssignmentView struct {
+	ID           int    `json:"id"`
+	Type         string `json:"type"`
+	AssigneeID   *int   `json:"assignee_id"`
+	AssigneeName string `json:"assignee_name,omitempty"`
+	Status       string `json:"status"`
+	Date         string `json:"date"`
+	Confirmed    bool   `json:"confirmed"`
+	Published    bool   `json:"published"`
+}

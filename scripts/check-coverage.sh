@@ -22,6 +22,10 @@ awk -v threshold="$threshold" '
 		}
 	}
 	END {
+		for (f in statements) {
+			totalStatements += statements[f]
+			totalCovered += covered[f] + 0
+		}
 		if (totalStatements == 0) {
 			print "ERROR: coverage profile contains no statements"
 			exit 1

@@ -329,13 +329,67 @@ func (c *Client) GetMeetings(start, end string, lgroup int) ([]Meeting, error) {
 
 // GetNotifications retrieves notifications for a date range and type.
 // Endpoint: GET /api/v0.2/scheduling/notifications/{start}_{end}/{type}
+// notificationType is required; callers that want every section should fan out
+// across DefaultNotificationTypes instead of passing an empty type.
 func (c *Client) GetNotifications(start, end, notificationType string) ([]Notification, error) {
+	if notificationType == "" {
+		return nil, fmt.Errorf("notification type is required")
+	}
 	url := fmt.Sprintf("%s/scheduling/notifications/%s_%s/%s", c.baseURL, start, end, notificationType)
 	var notifications []Notification
 	if err := c.getJSON(url, &notifications); err != nil {
 		return nil, err
 	}
 	return notifications, nil
+}
+
+// GetNotificationsByTypes fetches and concatenates notifications for each type.
+func (c *Client) GetNotificationsByTypes(start, end string, types []string) ([]Notification, error) {
+	if len(types) == 0 {
+		types = DefaultNotificationTypes
+	}
+	var all []Notification
+	for _, notificationType := range types {
+		rows, err := c.GetNotifications(start, end, notificationType)
+		if err != nil {
+			return nil, fmt.Errorf("notifications type %s: %w", notificationType, err)
+		}
+		all = append(all, rows...)
+	}
+	return all, nil
+}
+
+// GetWM retrieves Watchtower Meeting assignments for a date range.
+// Endpoint: GET /api/v0.2/scheduling/wm/{start}_{end}
+func (c *Client) GetWM(start, end string) ([]WMAssignment, error) {
+	url := fmt.Sprintf("%s/scheduling/wm/%s_%s", c.baseURL, start, end)
+	var wm []WMAssignment
+	if err := c.getJSON(url, &wm); err != nil {
+		return nil, err
+	}
+	return wm, nil
+}
+
+// GetPrivileges retrieves privileges/assignments status information.
+// Endpoint: GET /api/v0.2/privileges
+func (c *Client) GetPrivileges() ([]PrivilegeAssignment, error) {
+	url := fmt.Sprintf("%s/privileges", c.baseURL)
+	var privileges []PrivilegeAssignment
+	if err := c.getJSON(url, &privileges); err != nil {
+		return nil, err
+	}
+	return privileges, nil
+}
+
+// GetCheckRules retrieves check rules status information.
+// Endpoint: GET /api/v0.2/check-rules
+func (c *Client) GetCheckRules() ([]CheckRule, error) {
+	url := fmt.Sprintf("%s/check-rules", c.baseURL)
+	var rules []CheckRule
+	if err := c.getJSON(url, &rules); err != nil {
+		return nil, err
+	}
+	return rules, nil
 }
 
 // getJSON performs a GET request and decodes the JSON response into the target.
