@@ -456,7 +456,7 @@ type cleanupOpts struct {
 
 func (c *CLI) runCleanup(args []string) error {
 	if len(args) == 0 {
-		return errors.New("Usage: hourglass cleanup <history|plan> [flags]")
+		return errors.New("usage: hourglass cleanup <history|plan> [flags]")
 	}
 	opts, err := parseCleanupArgs(args[1:])
 	if err != nil {
@@ -465,7 +465,7 @@ func (c *CLI) runCleanup(args []string) error {
 	switch args[0] {
 	case "history":
 		if opts.fromDate == "" || opts.toDate == "" || len(opts.types) == 0 {
-			return errors.New("Usage: hourglass cleanup history --from YYYY-MM-DD --to YYYY-MM-DD --types type[,type] --json")
+			return errors.New("usage: hourglass cleanup history --from YYYY-MM-DD --to YYYY-MM-DD --types type[,type] --json")
 		}
 		return c.CleanupHistory(opts.fromDate, opts.toDate, opts.types)
 	case "plan":
@@ -556,7 +556,7 @@ func (c *CLI) CleanupHistory(from, to string, types []string) error {
 
 func (c *CLI) CleanupPlan(opts cleanupOpts) error {
 	if opts.month == "" || opts.rulesPath == "" || len(opts.types) == 0 {
-		return errors.New("Usage: hourglass cleanup plan --month YYYY-MM --rules FILE --types type[,type] [--history-months N] [--lgroup N] [--apply --confirm TOKEN] --json")
+		return errors.New("usage: hourglass cleanup plan --month YYYY-MM --rules FILE --types type[,type] [--history-months N] [--lgroup N] [--apply --confirm TOKEN] --json")
 	}
 	month, err := time.Parse("2006-01", opts.month)
 	if err != nil {
@@ -743,7 +743,7 @@ func setAssignSwapInt(args []string, i int, name string, apply func(int) error) 
 
 func (c *CLI) BootstrapFirefox(profile, tokensOut string) error {
 	if profile == "" || tokensOut == "" {
-		return errors.New("Usage: hourglass auth bootstrap-firefox --profile FIREFOX_PROFILE --tokens-out FILE")
+		return errors.New("usage: hourglass auth bootstrap-firefox --profile FIREFOX_PROFILE --tokens-out FILE")
 	}
 	cookiesPath := filepath.Join(filepath.Clean(profile), "cookies.sqlite")
 	db, err := sql.Open("sqlite", "file:"+cookiesPath+"?mode=ro&immutable=1")
@@ -783,7 +783,7 @@ func (c *CLI) BootstrapFirefox(profile, tokensOut string) error {
 		return fmt.Errorf("failed to read Firefox cookies: %w", err)
 	}
 	if !tokens.IsUsable() {
-		return errors.New("Firefox profile does not contain required Hourglass cookies")
+		return errors.New("firefox profile does not contain required Hourglass cookies")
 	}
 	if err := writeTokensAtomically(tokensOut, tokens); err != nil {
 		return err
