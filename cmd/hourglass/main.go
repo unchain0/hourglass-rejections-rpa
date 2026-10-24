@@ -751,16 +751,25 @@ func (c *CLI) BootstrapFirefox(profile, tokensOut string) error {
 		return fmt.Errorf("failed to open Firefox cookies database: %w", err)
 	}
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query(`SELECT name, value FROM moz_cookies WHERE host = ? AND name IN (?, ?)`, "app.hourglass-app.com", "hglogin", "X-Hourglass-XSRF-Token")
+	rows, err := db.Query(`SELECT name, value, expiry FROM moz_cookies WHERE host IN (?, ?) AND name IN (?, ?)`, ".app.hourglass-app.com", "app.hourglass-app.com", "hglogin", "X-Hourglass-XSRF-Token")
 	if err != nil {
 		return fmt.Errorf("failed to read Firefox cookies: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	tokens := webauthn.AuthTokens{ExpiresAt: time.Now().Add(time.Hour).UTC()}
+	tokens := webauthn.AuthTokens{}
+	var earliestExpiry time.Time
 	for rows.Next() {
 		var name, value string
-		if err := rows.Scan(&name, &value); err != nil {
+		var expiry int64
+		if err := rows.Scan(&name, &value, &expiry); err != nil {
 			return fmt.Errorf("failed to read Firefox cookie: %w", err)
+		}
+		expiresAt := time.Unix(expiry, 0).UTC()
+		if expiry <= 0 || !expiresAt.After(time.Now()) {
+			continue
+		}
+		if earliestExpiry.IsZero() || expiresAt.Before(earliestExpiry) {
+			earliestExpiry = expiresAt
 		}
 		switch name {
 		case "hglogin":
@@ -769,6 +778,7 @@ func (c *CLI) BootstrapFirefox(profile, tokensOut string) error {
 			tokens.XSRFToken = value
 		}
 	}
+	tokens.ExpiresAt = earliestExpiry
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("failed to read Firefox cookies: %w", err)
 	}

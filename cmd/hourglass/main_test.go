@@ -1090,9 +1090,9 @@ func TestAuthBootstrapFirefox_ExtractsCookiesAtomically(t *testing.T) {
 	dbPath := filepath.Join(profile, "cookies.sqlite")
 	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
-	_, err = db.Exec(`CREATE TABLE moz_cookies (host TEXT, name TEXT, value TEXT)`)
+	_, err = db.Exec(`CREATE TABLE moz_cookies (host TEXT, name TEXT, value TEXT, expiry INTEGER)`)
 	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO moz_cookies(host, name, value) VALUES (?, ?, ?), (?, ?, ?)`, "app.hourglass-app.com", "hglogin", "test-hg", "app.hourglass-app.com", "X-Hourglass-XSRF-Token", "test-xsrf")
+	_, err = db.Exec(`INSERT INTO moz_cookies(host, name, value, expiry) VALUES (?, ?, ?, ?), (?, ?, ?, ?)`, "app.hourglass-app.com", "hglogin", "test-hg", time.Now().Add(time.Hour).Unix(), "app.hourglass-app.com", "X-Hourglass-XSRF-Token", "test-xsrf", time.Now().Add(time.Hour).Unix())
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
