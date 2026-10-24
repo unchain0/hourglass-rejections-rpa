@@ -2,12 +2,14 @@ package main
 
 import (
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,6 +17,8 @@ import (
 
 	"hourglass-rejections-rpa/src/integrations/auth/webauthn"
 	"hourglass-rejections-rpa/src/services/hourglass"
+
+	_ "github.com/glebarez/go-sqlite"
 )
 
 var (
@@ -432,10 +436,204 @@ func (c *CLI) dispatch(args []string) error {
 		return c.runSchedule(args[1:])
 	case cmdAssign:
 		return c.runAssign(args[1:])
+	case "cleanup":
+		return c.runCleanup(args[1:])
 	default:
 		fmt.Fprintf(c.stderr, "Unknown command: %s\n", args[0])
 		return errors.New("unknown command")
 	}
+}
+
+type cleanupOpts struct {
+	fromDate, toDate string
+	month, rulesPath string
+	types            []string
+	historyMonths    int
+	lgroup           int
+	apply            bool
+	confirm          string
+}
+
+func (c *CLI) runCleanup(args []string) error {
+	if len(args) == 0 {
+		return errors.New("Usage: hourglass cleanup <history|plan> [flags]")
+	}
+	opts, err := parseCleanupArgs(args[1:])
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "history":
+		if opts.fromDate == "" || opts.toDate == "" || len(opts.types) == 0 {
+			return errors.New("Usage: hourglass cleanup history --from YYYY-MM-DD --to YYYY-MM-DD --types type[,type] --json")
+		}
+		return c.CleanupHistory(opts.fromDate, opts.toDate, opts.types)
+	case "plan":
+		return c.CleanupPlan(opts)
+	default:
+		return fmt.Errorf("unknown cleanup subcommand %s", args[0])
+	}
+}
+
+func parseCleanupArgs(args []string) (cleanupOpts, error) {
+	opts := cleanupOpts{historyMonths: 3}
+	for i := 0; i < len(args); {
+		var value string
+		var next int
+		var err error
+		switch args[i] {
+		case flagFrom:
+			value, next, err = takeFlagValue(args, i, flagFrom)
+			opts.fromDate = value
+		case flagTo:
+			value, next, err = takeFlagValue(args, i, flagTo)
+			opts.toDate = value
+		case "--month":
+			value, next, err = takeFlagValue(args, i, "--month")
+			opts.month = value
+		case "--rules":
+			value, next, err = takeFlagValue(args, i, "--rules")
+			opts.rulesPath = value
+		case "--types":
+			value, next, err = takeFlagValue(args, i, "--types")
+			opts.types = splitTypes(value)
+		case "--history-months":
+			value, next, err = takeFlagValue(args, i, "--history-months")
+			if err == nil {
+				opts.historyMonths, err = strconv.Atoi(value)
+			}
+		case flagLGroup:
+			value, next, err = takeFlagValue(args, i, flagLGroup)
+			if err == nil {
+				opts.lgroup, err = strconv.Atoi(value)
+			}
+		case "--apply":
+			opts.apply = true
+			next = i + 1
+		case flagConfirm:
+			value, next, err = takeFlagValue(args, i, flagConfirm)
+			opts.confirm = value
+		case flagJSON:
+			next = i + 1
+		default:
+			return opts, fmt.Errorf("unknown flag %s", args[i])
+		}
+		if err != nil {
+			return opts, err
+		}
+		i = next
+	}
+	return opts, nil
+}
+
+func splitTypes(raw string) []string {
+	var types []string
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			types = append(types, value)
+		}
+	}
+	return types
+}
+
+func (c *CLI) CleanupHistory(from, to string, types []string) error {
+	rows, err := c.client.GetAVAttendants(from, to)
+	if err != nil {
+		return fmt.Errorf("failed to get AV history: %w", err)
+	}
+	allowed := make(map[string]bool, len(types))
+	for _, typ := range types {
+		allowed[typ] = true
+	}
+	filtered := rows[:0]
+	for _, row := range rows {
+		if allowed[row.Type] {
+			filtered = append(filtered, row)
+		}
+	}
+	return c.printJSON(filtered)
+}
+
+func (c *CLI) CleanupPlan(opts cleanupOpts) error {
+	if opts.month == "" || opts.rulesPath == "" || len(opts.types) == 0 {
+		return errors.New("Usage: hourglass cleanup plan --month YYYY-MM --rules FILE --types type[,type] [--history-months N] [--lgroup N] [--apply --confirm TOKEN] --json")
+	}
+	month, err := time.Parse("2006-01", opts.month)
+	if err != nil {
+		return fmt.Errorf("invalid --month %q", opts.month)
+	}
+	if opts.historyMonths < 1 {
+		return errors.New("--history-months must be at least 1")
+	}
+	rules, err := loadCleanupRules(opts.rulesPath)
+	if err != nil {
+		return err
+	}
+	rules.Types = opts.types
+	plan, err := c.buildCleanupPlan(month, rules, opts.historyMonths, opts.lgroup)
+	if err != nil {
+		return err
+	}
+	if !opts.apply {
+		return c.printJSON(plan)
+	}
+	if c.getenv("HOURGLASS_ALLOW_SEND") == "1" {
+		return exitCode2("cleanup apply refused while HOURGLASS_ALLOW_SEND=1")
+	}
+	if c.getenv("HOURGLASS_ALLOW_ASSIGN") != "1" {
+		return exitCode2("cleanup apply disabled: set HOURGLASS_ALLOW_ASSIGN=1")
+	}
+	if opts.confirm == "" {
+		return exitCode2("missing --confirm token; run without --apply first")
+	}
+	live, err := c.buildCleanupPlan(month, rules, opts.historyMonths, opts.lgroup)
+	if err != nil {
+		return err
+	}
+	if subtle.ConstantTimeCompare([]byte(opts.confirm), []byte(live.Confirm)) != 1 {
+		return exitCode2("confirm token mismatch or stale preview; re-run without --apply")
+	}
+	for _, mutation := range live.Mutations {
+		row := hourglass.AVAttendant{ID: mutation.SlotID, Date: mutation.Date, Type: mutation.Type, Slot: mutation.Slot, Assignee: &mutation.AssigneeID}
+		if _, err := c.client.SaveAVAttendantAssignee(row, opts.lgroup); err != nil {
+			return fmt.Errorf("failed to apply cleanup assignment: %w", err)
+		}
+	}
+	live.DryRun = false
+	live.Confirm = ""
+	return c.printJSON(live)
+}
+
+func (c *CLI) buildCleanupPlan(month time.Time, rules hourglass.CleanupRules, historyMonths, lgroup int) (hourglass.CleanupPlan, error) {
+	historyFrom := month.AddDate(0, -historyMonths, 0).Format("2006-01-02")
+	historyTo := month.AddDate(0, 0, -1).Format("2006-01-02")
+	targetFrom := month.Format("2006-01-02")
+	targetTo := month.AddDate(0, 1, -1).Format("2006-01-02")
+	history, err := c.client.GetAVAttendants(historyFrom, historyTo)
+	if err != nil {
+		return hourglass.CleanupPlan{}, fmt.Errorf("failed to get cleanup history: %w", err)
+	}
+	target, err := c.client.GetAVAttendants(targetFrom, targetTo)
+	if err != nil {
+		return hourglass.CleanupPlan{}, fmt.Errorf("failed to get cleanup target: %w", err)
+	}
+	users, err := c.client.GetUsers()
+	if err != nil {
+		return hourglass.CleanupPlan{}, fmt.Errorf("failed to get users: %w", err)
+	}
+	return hourglass.BuildCleanupPlan(month, history, target, users, rules, historyMonths, lgroup)
+}
+
+func loadCleanupRules(path string) (hourglass.CleanupRules, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return hourglass.CleanupRules{}, fmt.Errorf("failed to read cleanup rules: %w", err)
+	}
+	var rules hourglass.CleanupRules
+	if err := json.Unmarshal(data, &rules); err != nil {
+		return hourglass.CleanupRules{}, fmt.Errorf("failed to parse cleanup rules: %w", err)
+	}
+	return rules, nil
 }
 
 type assignSwapOpts struct {
@@ -543,6 +741,106 @@ func setAssignSwapInt(args []string, i int, name string, apply func(int) error) 
 	return next, nil
 }
 
+func (c *CLI) BootstrapFirefox(profile, tokensOut string) error {
+	if profile == "" || tokensOut == "" {
+		return errors.New("Usage: hourglass auth bootstrap-firefox --profile FIREFOX_PROFILE --tokens-out FILE")
+	}
+	cookiesPath := filepath.Join(filepath.Clean(profile), "cookies.sqlite")
+	db, err := sql.Open("sqlite", "file:"+cookiesPath+"?mode=ro&immutable=1")
+	if err != nil {
+		return fmt.Errorf("failed to open Firefox cookies database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.Query(`SELECT name, value FROM moz_cookies WHERE host = ? AND name IN (?, ?)`, "app.hourglass-app.com", "hglogin", "X-Hourglass-XSRF-Token")
+	if err != nil {
+		return fmt.Errorf("failed to read Firefox cookies: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	tokens := webauthn.AuthTokens{ExpiresAt: time.Now().Add(time.Hour).UTC()}
+	for rows.Next() {
+		var name, value string
+		if err := rows.Scan(&name, &value); err != nil {
+			return fmt.Errorf("failed to read Firefox cookie: %w", err)
+		}
+		switch name {
+		case "hglogin":
+			tokens.HGLogin = value
+		case "X-Hourglass-XSRF-Token":
+			tokens.XSRFToken = value
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read Firefox cookies: %w", err)
+	}
+	if !tokens.IsUsable() {
+		return errors.New("Firefox profile does not contain required Hourglass cookies")
+	}
+	if err := writeTokensAtomically(tokensOut, tokens); err != nil {
+		return err
+	}
+	fmt.Fprintln(c.stdout, "Firefox cookies exported to token file")
+	return nil
+}
+
+func writeTokensAtomically(path string, tokens webauthn.AuthTokens) error {
+	dir := filepath.Dir(filepath.Clean(path))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("failed to create token directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("failed to secure token directory: %w", err)
+	}
+	data, err := json.Marshal(tokens)
+	if err != nil {
+		return fmt.Errorf("failed to encode tokens: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".tokens-*")
+	if err != nil {
+		return fmt.Errorf("failed to create token file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to secure token file: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to write token file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to sync token file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close token file: %w", err)
+	}
+	if err := os.Rename(tmpName, filepath.Clean(path)); err != nil {
+		return fmt.Errorf("failed to install token file: %w", err)
+	}
+	return nil
+}
+
+func parseFirefoxBootstrapArgs(args []string) (string, string, error) {
+	var profile, tokensOut string
+	for i := 0; i < len(args); {
+		value, next, err := takeFlagValue(args, i, args[i])
+		if err != nil {
+			return "", "", err
+		}
+		switch args[i] {
+		case "--profile":
+			profile = value
+		case "--tokens-out":
+			tokensOut = value
+		default:
+			return "", "", fmt.Errorf("unknown flag %s", args[i])
+		}
+		i = next
+	}
+	return profile, tokensOut, nil
+}
+
 func (c *CLI) runAuth(args []string) error {
 	if len(args) == 0 {
 		fmt.Fprintf(c.stderr, "Usage: hourglass auth <status|login>\n")
@@ -553,9 +851,15 @@ func (c *CLI) runAuth(args []string) error {
 		return c.AuthStatus()
 	case "login":
 		return c.AuthLogin()
+	case "bootstrap-firefox":
+		profile, tokensOut, err := parseFirefoxBootstrapArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		return c.BootstrapFirefox(profile, tokensOut)
 	default:
 		fmt.Fprintf(c.stderr, "Unknown auth subcommand: %s\n", args[0])
-		fmt.Fprintf(c.stderr, "Usage: hourglass auth <status|login>\n")
+		fmt.Fprintf(c.stderr, "Usage: hourglass auth <status|login|bootstrap-firefox>\n")
 		return errors.New("unknown auth subcommand")
 	}
 }
