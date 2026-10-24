@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1019,4 +1021,97 @@ func TestAssignSwap_RefetchRejectsConcurrentEdit(t *testing.T) {
 	var code2 *exitCode2Error
 	require.ErrorAs(t, err, &code2)
 	assert.Contains(t, err.Error(), "stale preview")
+}
+
+func TestCleanupHistory_FiltersTypesWithoutWrites(t *testing.T) {
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method+" "+r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{
+			{ID: 1, Date: "2026-03-01", Type: "mics"},
+			{ID: 2, Date: "2026-03-01", Type: "video"},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout bytes.Buffer
+	cli := newCLI(&stdout, io.Discard, func(string) string { return "" })
+	cli.client.SetBaseURL(server.URL + "/api/v0.2")
+	require.NoError(t, cli.dispatch([]string{"cleanup", "history", "--from", "2026-03-01", "--to", "2026-03-31", "--types", "mics", "--json"}))
+	assert.Contains(t, stdout.String(), `"id":1`)
+	assert.NotContains(t, stdout.String(), `"id":2`)
+	assert.Equal(t, []string{"GET /api/v0.2/scheduling/av_attendant/2026-03-01_2026-03-31"}, methods)
+}
+
+func TestCleanupPlan_DryRunAndApplyGuards(t *testing.T) {
+	updatedAt := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	var putCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if strings.Contains(r.URL.Path, "/fsreport/users") {
+				_ = json.NewEncoder(w).Encode(hourglass.UsersResponse{Users: []hourglass.User{{ID: 7, Descriptor: "Ada"}}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{ID: 42, Date: "2026-03-01", Type: "mics", UpdatedAt: updatedAt}})
+		case http.MethodPut:
+			putCount++
+			_ = json.NewEncoder(w).Encode(hourglass.AVAttendant{ID: 42, Date: "2026-03-01", Type: "mics", Assignee: intPtr(7), UpdatedAt: updatedAt})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	rules := filepath.Join(t.TempDir(), "rules.json")
+	require.NoError(t, os.WriteFile(rules, []byte(`{"eligible_user_ids":[7],"types":["mics"],"max_assignments_per_user_per_month":1}`), 0o600))
+
+	var stdout bytes.Buffer
+	cli := newCLI(&stdout, io.Discard, func(string) string { return "" })
+	cli.client.SetBaseURL(server.URL + "/api/v0.2")
+	require.NoError(t, cli.dispatch([]string{"cleanup", "plan", "--month", "2026-03", "--rules", rules, "--history-months", "1", "--types", "mics", "--json"}))
+	assert.Equal(t, 0, putCount)
+	var preview hourglass.CleanupPlan
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &preview))
+	require.Len(t, preview.Mutations, 1)
+	assert.True(t, preview.DryRun)
+
+	stdout.Reset()
+	err := cli.dispatch([]string{"cleanup", "plan", "--month", "2026-03", "--rules", rules, "--types", "mics", "--apply", "--confirm", preview.Confirm, "--json"})
+	var code2 *exitCode2Error
+	require.ErrorAs(t, err, &code2)
+	assert.Equal(t, 0, putCount)
+}
+
+func intPtr(v int) *int { return &v }
+
+func TestAuthBootstrapFirefox_ExtractsCookiesAtomically(t *testing.T) {
+	profile := t.TempDir()
+	dbPath := filepath.Join(profile, "cookies.sqlite")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE moz_cookies (host TEXT, name TEXT, value TEXT, expiry INTEGER)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO moz_cookies(host, name, value, expiry) VALUES (?, ?, ?, ?), (?, ?, ?, ?)`, "app.hourglass-app.com", "hglogin", "test-hg", time.Now().Add(time.Hour).Unix(), "app.hourglass-app.com", "X-Hourglass-XSRF-Token", "test-xsrf", time.Now().Add(time.Hour).Unix())
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	out := filepath.Join(t.TempDir(), "private", "tokens.json")
+	var stdout bytes.Buffer
+	cli := newCLI(&stdout, io.Discard, func(string) string { return "" })
+	require.NoError(t, cli.dispatch([]string{"auth", "bootstrap-firefox", "--profile", profile, "--tokens-out", out}))
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	var tokens webauthn.AuthTokens
+	require.NoError(t, json.Unmarshal(data, &tokens))
+	assert.Equal(t, "test-hg", tokens.HGLogin)
+	assert.Equal(t, "test-xsrf", tokens.XSRFToken)
+	assert.NotContains(t, stdout.String(), "test-hg")
+	assert.NotContains(t, stdout.String(), "test-xsrf")
+	info, err := os.Stat(out)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	parent, err := os.Stat(filepath.Dir(out))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), parent.Mode().Perm())
 }
