@@ -32,6 +32,16 @@ func noopDefaultUpdateHandler(_ context.Context, _ *bot.Bot, _ *models.Update) {
 // supportedLocales are the locales we register commands for.
 var supportedLocales = []string{"en", "pt-BR", "es", "fr"}
 
+// telegramLanguageCode maps an app locale to the ISO 639-1 code Telegram accepts
+// in language_code. Telegram rejects region tags such as "pt-BR" with
+// "Bad Request: invalid language code specified", which used to abort bot startup.
+func telegramLanguageCode(locale string) string {
+	if i := strings.IndexAny(locale, "-_"); i > 0 {
+		return locale[:i]
+	}
+	return locale
+}
+
 // TelegramNotifier sends notifications via Telegram Bot.
 type rateLimiter struct {
 	mu       sync.RWMutex
@@ -328,15 +338,13 @@ func buildBotCommands(lang string) []models.BotCommand {
 }
 
 func (t *TelegramNotifier) registerCommands(ctx context.Context) error {
-	// Register with language_code for each supported locale
+	// Register with language_code for each supported locale. A rejected locale must
+	// not abort startup: the default registration below still exposes the commands.
 	for _, lang := range supportedLocales {
-		_, err := t.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{
+		_, _ = t.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{
 			Commands:     buildBotCommands(lang),
-			LanguageCode: lang,
+			LanguageCode: telegramLanguageCode(lang),
 		})
-		if err != nil {
-			return fmt.Errorf("failed to set bot commands for locale %s: %w", lang, err)
-		}
 	}
 
 	// Register default commands (no language_code) - Telegram uses user's language_code

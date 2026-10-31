@@ -2297,3 +2297,72 @@ func TestHandleCheckNow_WithFailingCallback_RecordsStats(t *testing.T) {
 		return totalChecks == 1 && rejectionsToday == 0
 	}, 2*time.Second, 50*time.Millisecond)
 }
+
+func TestTelegramLanguageCode(t *testing.T) {
+	cases := map[string]string{
+		"pt-BR": "pt",
+		"pt_BR": "pt",
+		"pt":    "pt",
+		"en":    "en",
+		"es":    "es",
+		"fr":    "fr",
+		"":      "",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, telegramLanguageCode(in), "locale %q", in)
+	}
+}
+
+func TestRegisterCommandsUsesLanguageCodesTelegramAccepts(t *testing.T) {
+	var mu sync.Mutex
+	var codes []string
+	srv := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/getMe") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{
+				"id": 123, "is_bot": true, "first_name": "TestBot", "username": "test_bot",
+			}})
+			return
+		}
+		_ = r.ParseMultipartForm(1 << 20)
+		mu.Lock()
+		codes = append(codes, r.FormValue("language_code"))
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
+	}))
+	t.Cleanup(srv.Close)
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	require.NoError(t, tn.registerCommands(context.Background()))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.ElementsMatch(t, []string{"en", "pt", "es", "fr", ""}, codes)
+}
+
+func TestRegisterCommandsSurvivesRejectedLocale(t *testing.T) {
+	srv := newHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/getMe") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{
+				"id": 123, "is_bot": true, "first_name": "TestBot", "username": "test_bot",
+			}})
+			return
+		}
+		_ = r.ParseMultipartForm(1 << 20)
+		if r.FormValue("language_code") != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":          false,
+				"error_code":  400,
+				"description": "Bad Request: invalid language code specified",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
+	}))
+	t.Cleanup(srv.Close)
+
+	tn := newTestNotifierWithServer(t, srv, nil)
+	require.NoError(t, tn.registerCommands(context.Background()))
+}
