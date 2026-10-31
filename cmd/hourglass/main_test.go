@@ -313,10 +313,6 @@ func TestReadCommands_HTTPTestServer(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{
 				ID: 9, Type: "video", Date: "2026-01-01", Status: "Aceito", Assignee: &assignee,
 			}})
-		case strings.Contains(r.URL.Path, "/scheduling/wm/"):
-			_ = json.NewEncoder(w).Encode([]hourglass.WMAssignment{{
-				ID: 7, Role: "chairman", Date: "2026-01-04", Status: "Recusado", Assignee: &assignee,
-			}})
 		case strings.HasSuffix(r.URL.Path, "/privileges"):
 			_ = json.NewEncoder(w).Encode([]hourglass.PrivilegeAssignment{{
 				ID: 4, Type: "reader", Date: "2026-01-04", Status: "Esperando", Assignee: &assignee,
@@ -332,6 +328,10 @@ func TestReadCommands_HTTPTestServer(t *testing.T) {
 					ID: 11, Status: "declined", Type: "mm", Date: "2026-01-01", Part: 100, Assignee: 1,
 				}, {
 					ID: 12, Status: "pending", Type: "mm", Date: "2026-01-01", Part: 100, Assignee: 2,
+				}})
+			case strings.HasSuffix(r.URL.Path, "/fm"):
+				_ = json.NewEncoder(w).Encode([]hourglass.WeekendNotification{{
+					ID: 21, Status: "Recusado", Date: "2026-01-04", Part: 7867773, Assignee: &assignee,
 				}})
 			case strings.HasSuffix(r.URL.Path, "/pubwit"):
 				_ = json.NewEncoder(w).Encode([]hourglass.Notification{{
@@ -358,7 +358,7 @@ func TestReadCommands_HTTPTestServer(t *testing.T) {
 		{"schedule av", []string{"schedule", "av", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, []string{"video", "Aceito", "Ada Lovelace"}},
 		{"schedule notifications", []string{"schedule", "notifications", "--from", "2026-01-01", "--to", "2026-01-31", "--type", "pubwit", "--json"}, []string{"pubwit", "Ada Lovelace", "\"substitute_assigned\":true"}},
 		{"schedule notifications all types", []string{"schedule", "notifications", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, []string{"declined", "assignee_name"}},
-		{"schedule wm", []string{"schedule", "wm", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, []string{"chairman", "Recusado", "Ada Lovelace"}},
+		{"schedule wm", []string{"schedule", "wm", "--from", "2026-01-01", "--to", "2026-01-31", "--json"}, []string{"video", "weekend_part", "Recusado", "Ada Lovelace"}},
 		{"schedule privileges", []string{"schedule", "privileges", "--json"}, []string{"reader", "Esperando", "Ada Lovelace"}},
 		{"schedule check-rules", []string{"schedule", "check-rules", "--json"}, []string{"no-double-book", "pending"}},
 	}
@@ -412,8 +412,6 @@ func TestReadCommands_DownstreamErrors(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]hourglass.Meeting{{Date: "2026-01-01"}})
 		case strings.Contains(r.URL.Path, "/scheduling/av_attendant/"):
 			_ = json.NewEncoder(w).Encode([]hourglass.AVAttendant{{ID: 1, Type: "video", Date: "2026-01-01"}})
-		case strings.Contains(r.URL.Path, "/scheduling/wm/"):
-			_ = json.NewEncoder(w).Encode([]hourglass.WMAssignment{{ID: 1, Role: "reader", Assignee: &assignee}})
 		case strings.HasSuffix(r.URL.Path, "/privileges"):
 			_ = json.NewEncoder(w).Encode([]hourglass.PrivilegeAssignment{{ID: 1, Type: "reader", Assignee: &assignee}})
 		case strings.Contains(r.URL.Path, "/scheduling/notifications/"):
@@ -422,6 +420,10 @@ func TestReadCommands_DownstreamErrors(t *testing.T) {
 				return
 			}
 			notifType := "mm"
+			if strings.HasSuffix(r.URL.Path, "/fm") {
+				_ = json.NewEncoder(w).Encode([]hourglass.WeekendNotification{{ID: 2, Part: 10, Assignee: &assignee}})
+				return
+			}
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/ava"):
 				notifType = "ava"

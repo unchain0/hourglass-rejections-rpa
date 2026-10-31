@@ -35,6 +35,28 @@ type AVAttendant struct {
 }
 
 // WMAssignment represents a Watchtower Meeting assignment.
+// WeekendNotification is one assignee of a weekend meeting part.
+// The API returns the part id and the assignee, not a role label.
+type WeekendNotification struct {
+	ID       int    `json:"id"`
+	Date     string `json:"date"`
+	Part     int    `json:"part"`
+	Flag     int    `json:"flag"`
+	Status   string `json:"status"`
+	Assignee *int   `json:"assignee"`
+}
+
+// WMScheduleEntry is one read-only row of the weekend schedule.
+type WMScheduleEntry struct {
+	Role         string `json:"role"`
+	PartID       int    `json:"part_id,omitempty"`
+	Date         string `json:"date"`
+	AssigneeID   *int   `json:"assignee_id"`
+	AssigneeName string `json:"assignee_name"`
+	Status       string `json:"status"`
+	Source       string `json:"source"`
+}
+
 type WMAssignment struct {
 	ID        int       `json:"id"`
 	Role      string    `json:"role"`     // chairman, reader, speaker, prayers
