@@ -1,6 +1,9 @@
 package hourglass
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // IndexUsersByID builds a lookup map from user ID to User.
 func IndexUsersByID(users []User) map[int]User {
@@ -312,4 +315,43 @@ func EnrichPrivileges(rows []PrivilegeAssignment, users map[int]User) []Privileg
 		})
 	}
 	return out
+}
+
+// BuildWMSchedule combines the AV attendant slots and the weekend part
+// notifications into one read-only schedule. Weekend part rows carry the
+// part id the API exposes; it does not label speaker, chairman or reader.
+func BuildWMSchedule(
+	attendants []AVAttendant,
+	parts []WeekendNotification,
+	users map[int]User,
+) []WMScheduleEntry {
+	entries := make([]WMScheduleEntry, 0, len(attendants)+len(parts))
+	for _, row := range attendants {
+		entries = append(entries, WMScheduleEntry{
+			Role:         row.Type,
+			Date:         row.Date,
+			AssigneeID:   row.Assignee,
+			AssigneeName: LookupOptionalUserName(users, row.Assignee),
+			Status:       row.Status,
+			Source:       "av_attendant",
+		})
+	}
+	for _, row := range parts {
+		entries = append(entries, WMScheduleEntry{
+			Role:         "weekend_part",
+			PartID:       row.Part,
+			Date:         row.Date,
+			AssigneeID:   row.Assignee,
+			AssigneeName: LookupOptionalUserName(users, row.Assignee),
+			Status:       row.Status,
+			Source:       "notifications/fm",
+		})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Date != entries[j].Date {
+			return entries[i].Date < entries[j].Date
+		}
+		return entries[i].Role < entries[j].Role
+	})
+	return entries
 }

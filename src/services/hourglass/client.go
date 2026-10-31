@@ -371,6 +371,18 @@ func (c *Client) GetWM(start, end string) ([]WMAssignment, error) {
 	return wm, nil
 }
 
+// GetWeekendNotifications retrieves weekend meeting part assignments.
+// Endpoint: GET /api/v0.2/scheduling/notifications/{start}_{end}/fm
+// The scheduling/wm endpoint used by GetWM returns 404 on the current API.
+func (c *Client) GetWeekendNotifications(start, end string) ([]WeekendNotification, error) {
+	url := fmt.Sprintf("%s/scheduling/notifications/%s_%s/fm", c.baseURL, start, end)
+	var rows []WeekendNotification
+	if err := c.getJSON(url, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // GetPrivileges retrieves privileges/assignments status information.
 // Endpoint: GET /api/v0.2/privileges
 func (c *Client) GetPrivileges() ([]PrivilegeAssignment, error) {

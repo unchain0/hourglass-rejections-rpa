@@ -283,15 +283,21 @@ func (c *CLI) printJSON(v any) error {
 
 // ScheduleWM prints Watchtower Meeting assignments with status and resolved names.
 func (c *CLI) ScheduleWM(start, end string) error {
-	rows, err := c.client.GetWM(start, end)
+	// scheduling/wm returns 404 on the current API, so build the read-only
+	// schedule from the endpoints the web app still uses.
+	attendants, err := c.client.GetAVAttendants(start, end)
 	if err != nil {
-		return fmt.Errorf("failed to get WM: %w", err)
+		return fmt.Errorf("failed to get AV attendants: %w", err)
+	}
+	parts, err := c.client.GetWeekendNotifications(start, end)
+	if err != nil {
+		return fmt.Errorf("failed to get weekend part notifications: %w", err)
 	}
 	users, err := c.loadUserIndex()
 	if err != nil {
 		return err
 	}
-	return c.printJSON(hourglass.EnrichWMAssignments(rows, users))
+	return c.printJSON(hourglass.BuildWMSchedule(attendants, parts, users))
 }
 
 // Privileges prints privilege rows with status and resolved assignee names.
